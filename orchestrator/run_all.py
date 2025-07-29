@@ -1,112 +1,107 @@
-"""
-Master Orchestrator (run_all.py)
-
-This is the central "conductor" of the entire trading system. It runs continuously
-and executes all data jobs and screeners on a predefined, strategy-aligned schedule
-that mirrors a professional trading workflow.
-"""
-
 import schedule
 import time
-from datetime import datetime
-import pytz
+import subprocess
 import sys
+from datetime import datetime
 import os
 
-# --- System Path Setup ---
-PROJECT_ROOT = '/content/drive/MyDrive/trading-system'
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# Adjust the path to include the parent directory (trading-system)
+# This allows imports from utils, screeners, etc.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# --- Import All Runnable Modules ---
-from ticker_selectors.opportunity_ticker_finder import run_opportunity_finder
-from jobs.find_avwap_anchors import run_anchor_finder
-from jobs.update_all_data import run_all_data_updates
-from jobs.update_intraday_compact import run_compact_intraday_update
-from screeners.gapgo import run_gapgo_screener
-from screeners.orb import run_orb_screener
-from screeners.avwap import run_avwap_screener
-from screeners.breakout import run_breakout_screener
-from screeners.ema_pullback import run_ema_pullback_screener
-from screeners.exhaustion import run_exhaustion_screener
-from dashboard.master_dashboard import run_master_dashboard
+from utils.helpers import upload_initial_data_to_s3, read_df_from_s3
 
-# --- Timezone & Time Window Configuration ---
-NY_TIMEZONE = pytz.timezone('America/New_York')
-
-def is_time_in_window(start_str, end_str):
-    """Checks if the current NY time is within a given window."""
-    now_ny = datetime.now(NY_TIMEZONE).time()
-    start = datetime.strptime(start_str, "%H:%M").time()
-    end = datetime.strptime(end_str, "%H:%M").time()
-    return start <= now_ny < end
-
-def is_premarket_hours(): return is_time_in_window("04:00", "09:30")
-def is_market_hours(): return is_time_in_window("09:30", "16:00")
-def is_early_market_hours(): return is_time_in_window("09:30", "10:30")
-
-def run_job(job_func):
-    """A wrapper to run a job and catch any potential errors."""
+def run_script(script_path):
+    """Runs a Python script as a subprocess."""
     try:
-        print(f"\n--- [{datetime.now(NY_TIMEZONE).strftime('%H:%M:%S')}] Triggering job: {job_func.__name__} ---")
-        job_func()
+        print(f"--- Running {script_path} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
+        # We pass the python executable path to ensure it uses the same environment
+        result = subprocess.run([sys.executable, script_path], check=True, capture_output=True, text=True)
+        print(f"Output for {script_path}:\n{result.stdout}")
+        if result.stderr:
+            print(f"Errors for {script_path}:\n{result.stderr}")
+        print(f"--- Finished {script_path} ---")
+    except subprocess.CalledProcessError as e:
+        print(f"!!! Error running {script_path}: {e}")
+        print(f"!!! STDOUT: {e.stdout}")
+        print(f"!!! STDERR: {e.stderr}")
+    except FileNotFoundError:
+        print(f"!!! Script not found at {script_path}. Please check the path.")
     except Exception as e:
-        print(f"--- ERROR running job {job_func.__name__}: {e} ---")
+        print(f"!!! An unexpected error occurred while running {script_path}: {e}")
 
-# --- FIX: Create dedicated functions for each scheduled task for clarity and reliability ---
-def scheduled_gapgo_premarket():
-    if is_premarket_hours():
-        run_job(run_gapgo_screener)
+def check_if_first_run():
+    """
+    Checks if a marker file exists in the S3 bucket to determine if this is the first run.
+    """
+    # We check for a file that only the initial upload function creates.
+    # If sp500.csv exists, it means the initial upload has been done.
+    sp500_path = 'universe/sp500.csv'
+    df = read_df_from_s3(sp500_path)
+    if df.empty:
+        print("First run detected. Seeding database...")
+        return True
+    else:
+        print("Database already seeded. Skipping initial upload.")
+        return False
 
-def scheduled_gapgo_early_market():
-    if is_early_market_hours():
-        run_job(run_gapgo_screener)
+def main():
+    """
+    Main function to schedule and run all trading system jobs and screeners.
+    """
+    print("--- Starting Master Orchestrator ---")
 
-def scheduled_swing_screeners():
-    if is_market_hours():
-        run_job(run_avwap_screener)
-        run_job(run_breakout_screener)
-        run_job(run_ema_pullback_screener)
-        run_job(run_exhaustion_screener)
+    # --- Initial Setup on First Run ---
+    if check_if_first_run():
+        upload_initial_data_to_s3()
 
-def scheduled_dashboard_early():
-    if is_early_market_hours():
-        run_job(run_master_dashboard)
+    # --- Define Paths to Scripts ---
+    # Note: These paths are relative to the root of the repository.
+    opportunity_finder_script = 'ticker_selectors/opportunity_ticker_finder.py'
+    avwap_anchor_script = 'jobs/find_avwap_anchors.py'
+    update_daily_data_script = 'jobs/update_all_data.py'
+    update_intraday_script = 'jobs/update_intraday_compact.py'
+    
+    gapgo_screener = 'screeners/gapgo.py'
+    orb_screener = 'screeners/orb.py'
+    avwap_screener = 'screeners/avwap.py'
+    breakout_screener = 'screeners/breakout.py'
+    ema_pullback_screener = 'screeners/ema_pullback.py'
+    exhaustion_screener = 'screeners/exhaustion.py'
 
-def scheduled_dashboard_regular():
-    if is_market_hours() and not is_early_market_hours():
-        run_job(run_master_dashboard)
+    master_dashboard_script = 'dashboard/master_dashboard.py'
 
-# --- 1. Schedule All System Tasks ---
-print("--- Initializing Master Orchestrator ---")
-print("--- Scheduling all jobs and screeners based on the final blueprint... ---")
+    # --- Schedule Tasks ---
+    # Note: All times are in the server's timezone (likely UTC on DigitalOcean).
+    # You may need to adjust these for your target market time (e.g., ET).
+    
+    # Pre-Market
+    schedule.every().day.at("09:00").do(run_script, opportunity_finder_script) # ~5:00 AM ET
+    schedule.every().day.at("09:05").do(run_script, avwap_anchor_script)
+    schedule.every().day.at("09:10").do(run_script, update_daily_data_script)
 
-# --- Daily, One-Time Tasks (Pre-Market) ---
-schedule.every().day.at("06:30", "America/New_York").do(run_job, run_opportunity_finder)
-schedule.every().day.at("06:45", "America/New_York").do(run_job, run_anchor_finder)
-schedule.every().day.at("07:00", "America/New_York").do(run_job, run_all_data_updates)
+    # Market Hours - High Frequency
+    schedule.every(1).minutes.until("15:00").do(run_script, update_intraday_script) # Run every minute until ~11:00 AM ET
+    schedule.every(1).minutes.until("14:30").do(run_script, gapgo_screener) # Run every minute in first hour
 
-# --- Continuous Data Updates ---
-schedule.every(1).minutes.do(run_job, run_compact_intraday_update)
+    # Market Hours - Standard Frequency
+    schedule.every(15).minutes.until("21:00").do(run_script, avwap_screener) # Run every 15 mins until market close
+    schedule.every(15).minutes.until("21:00").do(run_script, breakout_screener)
+    schedule.every(15).minutes.until("21:00").do(run_script, ema_pullback_screener)
+    schedule.every(15).minutes.until("21:00").do(run_script, exhaustion_screener)
+    
+    schedule.every().day.at("13:40").do(run_script, orb_screener) # Run once at 9:40 AM ET
 
-# --- Time-Sensitive Intraday Screeners ---
-schedule.every(30).minutes.do(scheduled_gapgo_premarket)
-schedule.every(1).minutes.do(scheduled_gapgo_early_market)
-schedule.every().day.at("09:40", "America/New_York").do(run_job, run_orb_screener)
+    # Dashboard Updates
+    schedule.every(5).minutes.until("14:30").do(run_script, master_dashboard_script) # High frequency in first hour
+    schedule.every(15).minutes.until("21:00").do(run_script, master_dashboard_script) # Standard frequency after
 
-# --- Swing & Slower Intraday Screeners ---
-schedule.every(15).minutes.do(scheduled_swing_screeners)
-
-# --- Master Dashboard Schedule ---
-schedule.every(5).minutes.do(scheduled_dashboard_early)
-schedule.every(15).minutes.do(scheduled_dashboard_regular)
-
-print("--- Scheduling complete. Orchestrator is now live. ---")
-print(f"Current NY Time: {datetime.now(NY_TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')}")
-print("Waiting for scheduled tasks to run...")
-
-# --- 2. Main Execution Loop ---
-while True:
-    if datetime.now(NY_TIMEZONE).weekday() < 5:
+    print("--- All jobs scheduled. Waiting for scheduled tasks to run... ---")
+    print(f"Current server time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    while True:
         schedule.run_pending()
-    time.sleep(1)
+        time.sleep(1)
+
+if __name__ == "__main__":
+    main()
