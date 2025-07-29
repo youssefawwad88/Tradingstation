@@ -1,0 +1,6 @@
+pandas
+schedule
+alpha_vantage
+streamlit
+boto3
+s3fs
