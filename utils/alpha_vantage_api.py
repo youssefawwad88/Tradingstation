@@ -20,9 +20,8 @@ def get_daily_data(ticker):
     
     try:
         response = requests.get(url, timeout=30)
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+        response.raise_for_status()
         
-        # Use StringIO to read the CSV content directly into pandas
         csv_data = StringIO(response.text)
         df = pd.read_csv(csv_data)
         
@@ -34,9 +33,41 @@ def get_daily_data(ticker):
         return df
 
     except requests.exceptions.RequestException as e:
-        print(f"!!! Error fetching data for {ticker}: {e}")
+        print(f"!!! Error fetching daily data for {ticker}: {e}")
         return pd.DataFrame()
     except Exception as e:
-        print(f"!!! An unexpected error occurred while processing data for {ticker}: {e}")
+        print(f"!!! An unexpected error occurred while processing daily data for {ticker}: {e}")
         return pd.DataFrame()
 
+def get_intraday_data(ticker, interval='1min'):
+    """
+    Fetches intraday stock data from Alpha Vantage for a given ticker.
+    'interval' can be '1min', '5min', '15min', '30min', '60min'.
+    """
+    if API_KEY == 'YOUR_DEFAULT_KEY':
+        print("!!! Alpha Vantage API Key not found in environment variables.")
+        return pd.DataFrame()
+
+    print(f"Fetching {interval} intraday data for {ticker}...")
+    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={ticker}&interval={interval}&outputsize=full&apikey={API_KEY}&datatype=csv'
+    
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        csv_data = StringIO(response.text)
+        df = pd.read_csv(csv_data)
+        
+        if df.empty or 'timestamp' not in df.columns:
+            print(f"Warning: No intraday data returned for {ticker}. The response might be an error message from the API.")
+            return pd.DataFrame()
+            
+        print(f"Successfully fetched {len(df)} intraday data points for {ticker}.")
+        return df
+
+    except requests.exceptions.RequestException as e:
+        print(f"!!! Error fetching intraday data for {ticker}: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"!!! An unexpected error occurred while processing intraday data for {ticker}: {e}")
+        return pd.DataFrame()
