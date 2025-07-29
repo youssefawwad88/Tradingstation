@@ -1,69 +1,49 @@
-"""
-Data Fetching Job for the Trading System.
-
-This script is responsible for the INITIAL population of market data.
-It fetches the full history for each ticker and then trims it down to a
-reasonable size as defined in the config file.
-
-This should be run once to set up the data, or when you want to do a
-complete refresh. For frequent updates, use 'update_intraday_compact.py'.
-"""
-
 import sys
-from pathlib import Path
+import os
+import time
 
-project_root = Path(__file__).resolve().parent.parent
-sys.path.append(str(project_root))
+# Adjust the path to include the parent directory (trading-system)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils import config
-from utils import alpha_vantage_api
+from utils.helpers import read_tickerlist_from_s3, save_df_to_s3
+from utils.alpha_vantage_api import get_daily_data
 
-def run_all_data_updates():
+def main():
     """
-    Main function to update all data types for all tickers.
+    Downloads full historical daily data for all tickers in the master list
+    and saves it to cloud storage.
     """
-    print("--- Starting Full Market Data Update ---")
-    tickers = config.MASTER_TICKER_LIST
+    print("--- Starting Daily Data Update Job ---")
+
+    # 1. Read the master ticker list from cloud storage
+    tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
-        print("!!! ERROR: The ticker list is empty. Please add tickers to 'tickerlist.txt'.")
+        print("Ticker list is empty. Nothing to do. Exiting.")
         return
 
-    print(f"Processing {len(tickers)} tickers: {tickers}")
+    print(f"Found {len(tickers)} tickers to process.")
 
+    # 2. Loop through each ticker, fetch data, and save to cloud storage
     for ticker in tickers:
-        print(f"\n--- Updating data for {ticker} ---")
-        
-        # 1. Fetch and save Daily data, applying the max_rows rule
-        alpha_vantage_api.fetch_and_save_data(
-            ticker=ticker,
-            data_dir=config.DAILY_DIR,
-            fetch_function=alpha_vantage_api.fetch_daily_data,
-            outputsize='full',
-            max_rows=config.DAILY_DATA_MAX_ROWS
-        )
+        # Fetch the daily data using the API helper
+        daily_df = get_daily_data(ticker)
 
-        # 2. Fetch and save 30-Minute Intraday data, applying the max_rows rule
-        alpha_vantage_api.fetch_and_save_data(
-            ticker=ticker,
-            data_dir=config.INTRADAY_30MIN_DIR,
-            fetch_function=alpha_vantage_api.fetch_intraday_data,
-            interval='30min',
-            outputsize='full',
-            max_rows=config.INTRADAY_30MIN_MAX_ROWS
-        )
+        if not daily_df.empty:
+            # Define the path in cloud storage where the file will be saved
+            file_path = f"data/daily/{ticker}_daily.csv"
+            
+            # Save the DataFrame to our S3 Space
+            save_df_to_s3(daily_df, file_path)
+        else:
+            print(f"Skipping save for {ticker} due to empty DataFrame.")
 
-        # 3. Fetch and save 1-Minute Intraday data, applying the max_rows rule
-        alpha_vantage_api.fetch_and_save_data(
-            ticker=ticker,
-            data_dir=config.INTRADAY_1MIN_DIR,
-            fetch_function=alpha_vantage_api.fetch_intraday_data,
-            interval='1min',
-            outputsize='full',
-            max_rows=config.INTRADAY_1MIN_MAX_ROWS
-        )
+        # Alpha Vantage has a rate limit (e.g., 5 calls per minute).
+        # We must add a delay to avoid being blocked. 15 seconds is safe.
+        print("Waiting 15 seconds to respect API rate limit...")
+        time.sleep(15)
 
-    print("\n--- Full Market Data Update Complete ---")
+    print("--- Daily Data Update Job Finished ---")
 
 
 if __name__ == "__main__":
-    run_all_data_updates()
+    main()
