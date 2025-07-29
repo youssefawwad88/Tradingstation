@@ -1,140 +1,138 @@
 import os
 import pandas as pd
 import boto3
-from io import StringIO, BytesIO
+from io import StringIO
+from datetime import time
+import pytz
+import numpy as np
 
 # --- Cloud Storage (S3) Configuration ---
-# These variables are read from the DigitalOcean App Platform's environment variables
 SPACES_ACCESS_KEY_ID = os.getenv('SPACES_ACCESS_KEY_ID')
 SPACES_SECRET_ACCESS_KEY = os.getenv('SPACES_SECRET_ACCESS_KEY')
 SPACES_BUCKET_NAME = os.getenv('SPACES_BUCKET_NAME')
 SPACES_REGION = os.getenv('SPACES_REGION')
 
-# Initialize the S3 client
-s3_client = boto3.client(
-    's3',
-    region_name=SPACES_REGION,
-    endpoint_url=f'https://{SPACES_REGION}.digitaloceanspaces.com',
-    aws_access_key_id=SPACES_ACCESS_KEY_ID,
-    aws_secret_access_key=SPACES_SECRET_ACCESS_KEY
-)
+s3_client = None
+if all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME, SPACES_REGION]):
+    s3_client = boto3.client(
+        's3',
+        region_name=SPACES_REGION,
+        endpoint_url=f'https://{SPACES_REGION}.digitaloceanspaces.com',
+        aws_access_key_id=SPACES_ACCESS_KEY_ID,
+        aws_secret_access_key=SPACES_SECRET_ACCESS_KEY
+    )
+else:
+    print("WARNING: S3 client not initialized. Missing one or more environment variables.")
 
-def get_s3_path(file_path):
-    """
-    Constructs the full S3 path from a relative file path.
-    Removes the initial 'data/' if present, as it will be part of the object key.
-    """
-    if file_path.startswith('data/'):
-        return file_path[5:]
-    return file_path
+# --- S3 Helper Functions ---
+
+def list_files_in_s3_dir(prefix):
+    """Lists all files in a given 'directory' in the S3 bucket."""
+    if not s3_client: return []
+    try:
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=SPACES_BUCKET_NAME, Prefix=prefix)
+        file_list = []
+        for page in pages:
+            if "Contents" in page:
+                for obj in page['Contents']:
+                    if not obj['Key'].endswith('/'): # Exclude directories
+                        file_list.append(os.path.basename(obj['Key']))
+        print(f"Found {len(file_list)} files in s3://{SPACES_BUCKET_NAME}/{prefix}")
+        return file_list
+    except Exception as e:
+        print(f"Error listing files in {prefix}: {e}")
+        return []
 
 def save_df_to_s3(df, file_path):
-    """
-    Saves a pandas DataFrame to a CSV file in the DigitalOcean Space.
-    """
-    s3_path = get_s3_path(file_path)
+    """Saves a pandas DataFrame to a CSV file in the DigitalOcean Space."""
+    if not s3_client: return
     try:
         csv_buffer = StringIO()
         df.to_csv(csv_buffer, index=False)
-        s3_client.put_object(
-            Bucket=SPACES_BUCKET_NAME,
-            Key=s3_path,
-            Body=csv_buffer.getvalue(),
-            ACL='private'
-        )
-        print(f"Successfully saved DataFrame to s3://{SPACES_BUCKET_NAME}/{s3_path}")
+        s3_client.put_object(Bucket=SPACES_BUCKET_NAME, Key=file_path, Body=csv_buffer.getvalue())
+        print(f"Successfully saved DataFrame to s3://{SPACES_BUCKET_NAME}/{file_path}")
     except Exception as e:
-        print(f"Error saving DataFrame to {s3_path}: {e}")
+        print(f"Error saving DataFrame to {file_path}: {e}")
 
 def read_df_from_s3(file_path):
-    """
-    Reads a CSV file from the DigitalOcean Space into a pandas DataFrame.
-    Returns an empty DataFrame if the file does not exist.
-    """
-    s3_path = get_s3_path(file_path)
+    """Reads a CSV file from the DigitalOcean Space into a pandas DataFrame."""
+    if not s3_client: return pd.DataFrame()
     try:
-        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=s3_path)
+        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
         csv_content = response['Body'].read().decode('utf-8')
         df = pd.read_csv(StringIO(csv_content))
-        print(f"Successfully read DataFrame from s3://{SPACES_BUCKET_NAME}/{s3_path}")
+        print(f"Successfully read DataFrame from s3://{SPACES_BUCKET_NAME}/{file_path}")
         return df
     except s3_client.exceptions.NoSuchKey:
-        print(f"File not found at {s3_path}. Returning empty DataFrame.")
+        print(f"File not found at {file_path}. Returning empty DataFrame.")
         return pd.DataFrame()
     except Exception as e:
-        print(f"Error reading DataFrame from {s3_path}: {e}")
+        print(f"Error reading DataFrame from {file_path}: {e}")
         return pd.DataFrame()
-
-def save_list_to_s3(data_list, file_path):
-    """
-    Saves a Python list of strings to a text file in the DigitalOcean Space,
-    with each item on a new line.
-    """
-    s3_path = get_s3_path(file_path)
-    try:
-        # Join the list into a single string with newline characters
-        content = "\n".join(data_list)
-        s3_client.put_object(
-            Bucket=SPACES_BUCKET_NAME,
-            Key=s3_path,
-            Body=content,
-            ACL='private'
-        )
-        print(f"Successfully saved list to s3://{SPACES_BUCKET_NAME}/{s3_path}")
-    except Exception as e:
-        print(f"Error saving list to {s3_path}: {e}")
 
 def read_tickerlist_from_s3(file_path='tickerlist.txt'):
-    """
-    Reads a simple text file (like the tickerlist) from the Space.
-    """
-    s3_path = get_s3_path(file_path)
+    """Reads a simple text file (like the tickerlist) from the Space."""
+    if not s3_client: return []
     try:
-        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=s3_path)
+        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
         content = response['Body'].read().decode('utf-8')
         tickers = [line.strip() for line in content.split('\n') if line.strip()]
-        print(f"Successfully read tickerlist from s3://{SPACES_BUCKET_NAME}/{s3_path}")
+        print(f"Successfully read tickerlist from s3://{SPACES_BUCKET_NAME}/{file_path}")
         return tickers
     except s3_client.exceptions.NoSuchKey:
-        print(f"Tickerlist not found at {s3_path}. Returning empty list.")
+        print(f"Tickerlist not found at {file_path}. Returning empty list.")
         return []
     except Exception as e:
-        print(f"Error reading tickerlist from {s3_path}: {e}")
+        print(f"Error reading tickerlist from {file_path}: {e}")
         return []
 
-def upload_initial_data_to_s3():
-    """
-    One-time function to upload essential data files from the repo to the Space.
-    This should only be called if the data does not already exist in the Space.
-    """
-    print("Attempting to upload initial data to Space...")
-    
-    initial_files = {
-        'data/universe/sp500.csv': 'universe/sp500.csv',
-        'tickerlist.txt': 'tickerlist.txt' # A default empty tickerlist
-    }
+# --- General Calculation Helpers ---
 
-    for local_path, s3_key in initial_files.items():
-        try:
-            # Check if the file already exists in S3
-            s3_client.head_object(Bucket=SPACES_BUCKET_NAME, Key=s3_key)
-            print(f"File {s3_key} already exists in Space. Skipping upload.")
-        except s3_client.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == '404': # Not found, so we upload
-                print(f"File {s3_key} not found in Space. Uploading from repo...")
-                try:
-                    with open(local_path, "rb") as f:
-                        s3_client.put_object(
-                            Bucket=SPACES_BUCKET_NAME,
-                            Key=s3_key,
-                            Body=f,
-                            ACL='private'
-                        )
-                        print(f"Successfully uploaded {local_path} to {s3_key}")
-                except FileNotFoundError:
-                    print(f"Initial file not found in repo: {local_path}. Cannot seed.")
-                except Exception as upload_error:
-                    print(f"Error uploading {local_path}: {upload_error}")
-            else:
-                print(f"Error checking for {s3_key}: {e}")
+def format_to_two_decimal(value):
+    """Formats a number to two decimal places, handling non-numeric inputs."""
+    if isinstance(value, (int, float)) and not np.isnan(value):
+        return f"{value:.2f}"
+    return "N/A"
 
+def calculate_vwap(df):
+    """Calculates the Volume Weighted Average Price (VWAP)."""
+    q = df['volume'] * (df['high'] + df['low'] + df['close']) / 3
+    return q.cumsum() / df['volume'].cumsum()
+
+def detect_market_session():
+    """Detects the current market session based on New York time."""
+    ny_timezone = pytz.timezone('America/New_York')
+    ny_time = datetime.now(ny_timezone).time()
+    if time(4, 0) <= ny_time < time(9, 30):
+        return 'PRE-MARKET'
+    elif time(9, 30) <= ny_time < time(16, 0):
+        return 'REGULAR'
+    else:
+        return 'CLOSED'
+
+def get_previous_day_close(daily_df):
+    """Gets the previous day's close from a daily dataframe."""
+    if len(daily_df) > 1:
+        return daily_df['close'].iloc[-2]
+    return None
+
+def get_premarket_data(today_intraday_df):
+    """Extracts pre-market data from today's intraday dataframe."""
+    return today_intraday_df.between_time(time(4, 0), time(9, 29))
+
+def calculate_avg_early_volume(intraday_df, days=5):
+    """Calculates the average volume for the first 15 minutes of the regular session."""
+    early_volume_df = intraday_df.between_time(time(9, 30), time(9, 44))
+    if early_volume_df.empty:
+        return 0
+    daily_early_volume = early_volume_df.groupby(early_volume_df.index.date)['volume'].sum()
+    if len(daily_early_volume) < days:
+        return daily_early_volume.mean()
+    return daily_early_volume.tail(days).mean()
+
+def calculate_avg_daily_volume(daily_df, days=20):
+    """Calculates the average daily volume over a specified number of days."""
+    if len(daily_df) < days:
+        return None
+    return daily_df['volume'].iloc[-days-1:-1].mean()
