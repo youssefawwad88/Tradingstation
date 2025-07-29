@@ -23,7 +23,6 @@ def get_s3_path(file_path):
     """
     Constructs the full S3 path from a relative file path.
     Removes the initial 'data/' if present, as it will be part of the object key.
-    Example: 'data/signals/gapgo.csv' becomes 'signals/gapgo.csv'
     """
     if file_path.startswith('data/'):
         return file_path[5:]
@@ -41,7 +40,7 @@ def save_df_to_s3(df, file_path):
             Bucket=SPACES_BUCKET_NAME,
             Key=s3_path,
             Body=csv_buffer.getvalue(),
-            ACL='private' # Access Control List: 'private' or 'public-read'
+            ACL='private'
         )
         print(f"Successfully saved DataFrame to s3://{SPACES_BUCKET_NAME}/{s3_path}")
     except Exception as e:
@@ -66,6 +65,25 @@ def read_df_from_s3(file_path):
         print(f"Error reading DataFrame from {s3_path}: {e}")
         return pd.DataFrame()
 
+def save_list_to_s3(data_list, file_path):
+    """
+    Saves a Python list of strings to a text file in the DigitalOcean Space,
+    with each item on a new line.
+    """
+    s3_path = get_s3_path(file_path)
+    try:
+        # Join the list into a single string with newline characters
+        content = "\n".join(data_list)
+        s3_client.put_object(
+            Bucket=SPACES_BUCKET_NAME,
+            Key=s3_path,
+            Body=content,
+            ACL='private'
+        )
+        print(f"Successfully saved list to s3://{SPACES_BUCKET_NAME}/{s3_path}")
+    except Exception as e:
+        print(f"Error saving list to {s3_path}: {e}")
+
 def read_tickerlist_from_s3(file_path='tickerlist.txt'):
     """
     Reads a simple text file (like the tickerlist) from the Space.
@@ -86,40 +104,37 @@ def read_tickerlist_from_s3(file_path='tickerlist.txt'):
 
 def upload_initial_data_to_s3():
     """
-    One-time function to upload all local data files from the 'data/' directory
-    in the GitHub repo to the DigitalOcean Space. This seeds the system.
+    One-time function to upload essential data files from the repo to the Space.
+    This should only be called if the data does not already exist in the Space.
     """
-    print("Starting initial data upload to Space...")
-    # We need to find all files in the 'data' directory from our repo structure
-    # This is a simplified example. In a real scenario, you might list files from a local clone.
-    # For now, we assume the files are accessible relative to this script's execution context
-    # during the build process on DigitalOcean.
+    print("Attempting to upload initial data to Space...")
     
-    # This function is more conceptual for now. The primary way to get data into the space
-    # will be for the `update_all_data.py` job to run and save its output directly to S3.
-    # However, we need to upload the initial universe, like sp500.csv.
+    initial_files = {
+        'data/universe/sp500.csv': 'universe/sp500.csv',
+        'tickerlist.txt': 'tickerlist.txt' # A default empty tickerlist
+    }
 
-    # Let's manually specify the essential files from the repo to upload.
-    initial_files = [
-        'data/universe/sp500.csv',
-        'tickerlist.txt'
-        # Add other essential bootstrap files here if necessary
-    ]
-
-    for local_path in initial_files:
-        s3_path = get_s3_path(local_path)
+    for local_path, s3_key in initial_files.items():
         try:
-            with open(local_path, "rb") as f:
-                s3_client.put_object(
-                    Bucket=SPACES_BUCKET_NAME,
-                    Key=s3_path,
-                    Body=f,
-                    ACL='private'
-                )
-                print(f"Successfully uploaded {local_path} to {s3_path}")
-        except FileNotFoundError:
-            print(f"Initial file not found: {local_path}. Skipping.")
-        except Exception as e:
-            print(f"Error uploading {local_path}: {e}")
+            # Check if the file already exists in S3
+            s3_client.head_object(Bucket=SPACES_BUCKET_NAME, Key=s3_key)
+            print(f"File {s3_key} already exists in Space. Skipping upload.")
+        except s3_client.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404': # Not found, so we upload
+                print(f"File {s3_key} not found in Space. Uploading from repo...")
+                try:
+                    with open(local_path, "rb") as f:
+                        s3_client.put_object(
+                            Bucket=SPACES_BUCKET_NAME,
+                            Key=s3_key,
+                            Body=f,
+                            ACL='private'
+                        )
+                        print(f"Successfully uploaded {local_path} to {s3_key}")
+                except FileNotFoundError:
+                    print(f"Initial file not found in repo: {local_path}. Cannot seed.")
+                except Exception as upload_error:
+                    print(f"Error uploading {local_path}: {upload_error}")
+            else:
+                print(f"Error checking for {s3_key}: {e}")
 
-# --- You can keep other helper functions below this line if you have them ---
