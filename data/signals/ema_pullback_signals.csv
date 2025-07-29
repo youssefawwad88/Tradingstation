@@ -1,0 +1,9 @@
+Date,Ticker,Direction,Trend vs EMA50,EMA50,EMA21,EMA8,Close Price,Wick Confirmed?,EMA Reclaim/Reject,Signal Candle?,Volume,Avg 20D Volume,Volume vs Avg %,Volume Spike?,Signal Direction,Reason / Notes,Setup Valid?,Body % of Candle,Inside Candle?,EMA Distance %,AVWAP Confluence?
+2025-07-28,AAPL,None,Above,208.14,210.42,213.04,214.05,Yes,N/A,No,"37,858,017","51,477,827",73.54,No,None,"No EMA Reclaim/Reject, Not a Signal Candle, Low volume, Incorrect Trend",FALSE,1.12,No,N/A,N/A
+2025-07-28,AMD,None,Above,136.89,151.63,161.98,173.66,No,N/A,No,"68,267,835","48,910,185",139.58,Yes,None,"Wick not confirmed, No EMA Reclaim/Reject, Not a Signal Candle, Incorrect Trend",FALSE,75.95,No,N/A,N/A
+2025-07-28,AMZN,None,Above,217.01,224.83,229.43,232.79,Yes,N/A,Yes,"26,300,138","41,837,718",62.86,No,None,"No EMA Reclaim/Reject, Low volume, Incorrect Trend",FALSE,27.45,No,N/A,N/A
+2025-07-28,GOOGL,None,Above,177.36,184.01,189.71,192.58,Yes,N/A,Yes,"38,139,504","43,416,517",87.85,No,None,"No EMA Reclaim/Reject, Low volume, Incorrect Trend",FALSE,33.33,No,N/A,Yes
+2025-07-28,MSFT,None,Above,481.96,502.25,509.51,512.50,Yes,N/A,Yes,"14,308,027","17,551,100",81.52,No,None,"No EMA Reclaim/Reject, Low volume, Incorrect Trend",FALSE,32.38,No,N/A,N/A
+2025-07-28,NFLX,None,Below,1208.68,1226.64,1199.08,1174.60,Yes,N/A,Yes,"3,446,958","4,059,469",84.91,No,None,"No EMA Reclaim/Reject, Low volume, Incorrect Trend",FALSE,22.56,No,N/A,N/A
+2025-07-28,NVDA,None,Above,152.88,165.54,172.12,176.75,No,N/A,No,"140,023,521","168,226,033",83.24,No,None,"Wick not confirmed, No EMA Reclaim/Reject, Not a Signal Candle, Low volume, Incorrect Trend",FALSE,90.10,No,N/A,N/A
+2025-07-28,TSLA,Long,Above,316.51,319.40,320.94,325.59,No,Reclaim EMA8,Yes,"112,673,755","97,696,770",115.33,Yes,None,Wick not confirmed,FALSE,48.24,No,1.45,N/A

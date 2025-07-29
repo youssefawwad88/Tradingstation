@@ -1,0 +1,9 @@
+Date,US Time,Ticker,Direction,Status,Last Price,Gap %,Gap Label,Pre-Mkt High,Pre-Mkt Low,Open Price (9:30 AM),Prev Close,Pre-Mkt Volume,Avg Early Volume (15min),Avg Early Vol Complete?,Today Early Volume (9:30–9:44),Pre Volume Spike?,Live Volume Spike?,VWAP Reclaimed?,Breakout Above Pre High?,Breakdown Below Pre Low?,Setup Valid?,Avg Daily Vol (10-Day),Setup Score %,Opening Range %,Breakout Candle Body %,Breakout Volume Spike %
+2025-07-29,10:29:56,NVDA,Flat,Flat,178.15,0.68,Flat,179.65,173.40,177.96,176.75,"6,953,652","15,407,030",Yes,"12,695,754",No,No,No,FALSE,FALSE,FALSE,"155,840,400",0,N/A,N/A,N/A
+2025-07-29,10:29:56,AAPL,Flat,Flat,213.03,0.05,Flat,214.61,213.75,214.16,214.05,"1,760,856","3,587,196",Yes,"2,466,002",No,No,No,FALSE,TRUE,FALSE,"45,574,983",0,N/A,N/A,N/A
+2025-07-29,10:29:56,TSLA,Flat,Flat,319.18,0.02,Flat,329.62,317.70,325.65,325.59,"1,982,571","10,788,583",Yes,"6,204,926",No,No,No,FALSE,FALSE,FALSE,"100,657,872",0,N/A,N/A,N/A
+2025-07-29,10:29:56,AMD,Flat,Flat,180.46,0.91,Flat,176.56,168.88,175.24,173.66,"2,913,307","5,972,772",Yes,"8,197,060",No,Yes,Yes,TRUE,FALSE,FALSE,"55,202,804",0,N/A,N/A,N/A
+2025-07-29,10:29:56,GOOGL,Flat,Flat,193.05,-0.08,Flat,193.73,191.56,192.43,192.58,"1,098,760","5,939,696",Yes,"2,403,063",No,No,Yes,FALSE,FALSE,FALSE,"43,451,186",0,N/A,N/A,N/A
+2025-07-29,10:29:56,MSFT,Flat,Flat,514.27,0.62,Flat,517.03,511.22,515.69,512.50,"794,710","1,243,777",Yes,"1,104,888",No,No,No,FALSE,FALSE,FALSE,"16,266,713",0,N/A,N/A,N/A
+2025-07-29,10:29:56,AMZN,Flat,Flat,231.48,0.58,Flat,234.72,232.79,234.15,232.79,"1,134,998","4,549,546",Yes,"2,430,498",No,No,No,FALSE,TRUE,FALSE,"34,812,347",0,N/A,N/A,N/A
+2025-07-29,10:29:56,NFLX,Flat,Flat,1163.79,0.20,Flat,1181.78,1168.79,1177.00,1174.60,"78,199","328,964",Yes,"192,652",No,No,No,FALSE,TRUE,FALSE,"4,830,855",0,N/A,N/A,N/A
