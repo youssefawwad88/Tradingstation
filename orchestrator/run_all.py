@@ -14,7 +14,7 @@ def run_script(script_path):
     """Runs a Python script as a subprocess."""
     try:
         full_path = os.path.join('/workspace', script_path)
-        print(f"--- Running {full_path} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---")
+        print(f"--- Running {full_path} at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC ---")
         result = subprocess.run([sys.executable, full_path], check=True, capture_output=True, text=True)
         print(f"Output for {script_path}:\n{result.stdout}")
         if result.stderr:
@@ -25,23 +25,14 @@ def run_script(script_path):
     except Exception as e:
         print(f"!!! An unexpected error occurred while running {script_path}: {e}")
 
-def check_if_first_run():
-    """Checks if a marker file exists in the S3 bucket to determine if this is the first run."""
-    sp500_path = 'data/universe/sp500.csv'
-    df = read_df_from_s3(sp500_path)
-    if df.empty:
-        print("First run detected. Seeding database...")
-        return True
-    else:
-        print("Database already seeded. Skipping initial upload.")
-        return False
-
 def main():
     """Main function to schedule and run all trading system jobs and screeners."""
     print("--- Starting Master Orchestrator ---")
 
-    if check_if_first_run():
-        upload_initial_data_to_s3()
+    # This function is conceptual for a first-time setup. 
+    # In a long-running app, you'd manage this differently.
+    # For now, we run it once on startup.
+    upload_initial_data_to_s3()
 
     # --- Define Paths to Scripts ---
     opportunity_finder_script = 'ticker_selectors/opportunity_ticker_finder.py'
@@ -58,10 +49,10 @@ def main():
     master_dashboard_script = 'dashboard/master_dashboard.py'
 
     # --- Schedule Tasks (Times are UTC on the server) ---
-    # To convert from ET to UTC, add 4 hours (EDT) or 5 hours (EST)
-    # Example: 6:30 AM ET is 10:30 UTC
+    # To convert from ET to UTC, add 4 hours (EDT)
+    # Example: 9:30 AM ET is 13:30 UTC
     
-    # Pre-Market (ET: ~6:30 AM - 7:00 AM)
+    # Pre-Market (ET: ~6:30 AM)
     schedule.every().day.at("10:30").do(run_script, opportunity_finder_script)
     schedule.every().day.at("10:35").do(run_script, avwap_anchor_script)
     schedule.every().day.at("10:40").do(run_script, update_daily_data_script)
@@ -76,12 +67,17 @@ def main():
     schedule.every(15).minutes.do(run_script, exhaustion_screener)
     schedule.every(5).minutes.do(run_script, master_dashboard_script)
 
-    print("--- All jobs scheduled. Waiting for scheduled tasks to run... ---")
-    print(f"Current server time (UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("--- All jobs scheduled. ---")
     
+    # --- Main Loop ---
+    heartbeat_counter = 0
     while True:
         schedule.run_pending()
         time.sleep(1)
+        heartbeat_counter += 1
+        # Print a heartbeat message every 60 seconds to show the app is alive
+        if heartbeat_counter % 60 == 0:
+            print(f"Heartbeat: Orchestrator is alive. Waiting for next job. Current UTC time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
     main()
