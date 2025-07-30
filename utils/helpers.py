@@ -128,11 +128,16 @@ def calculate_vwap(df):
     return q.cumsum() / df['volume'].cumsum()
 
 def detect_market_session():
+    """Detects the current market session based on New York time."""
     ny_timezone = pytz.timezone('America/New_York')
     ny_time = datetime.now(ny_timezone).time()
-    if time(4, 0) <= ny_time < time(9, 30): return 'PRE-MARKET'
-    elif time(9, 30) <= ny_time < time(16, 0): return 'REGULAR'
-    else: return 'CLOSED'
+    # CORRECTED: Market close is 16:00 ET
+    if time(4, 0) <= ny_time < time(9, 30):
+        return 'PRE-MARKET'
+    elif time(9, 30) <= ny_time < time(16, 0):
+        return 'REGULAR'
+    else:
+        return 'CLOSED'
 
 def get_previous_day_close(daily_df):
     if len(daily_df) > 1: return daily_df['close'].iloc[-2]
