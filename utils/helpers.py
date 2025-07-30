@@ -23,9 +23,18 @@ if all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME, SPAC
     )
 else:
     print("CRITICAL WARNING: S3 client not initialized. Missing one or more environment variables.")
-    # This will cause the script to fail if any S3 functions are called, which is intended.
 
 # --- S3 Helper Functions ---
+
+def save_list_to_s3(data_list, file_path):
+    """Saves a Python list of strings to a text file in the DigitalOcean Space."""
+    if not s3_client: return
+    try:
+        content = "\n".join(data_list)
+        s3_client.put_object(Bucket=SPACES_BUCKET_NAME, Key=file_path, Body=content)
+        print(f"Successfully saved list to s3://{SPACES_BUCKET_NAME}/{file_path}")
+    except Exception as e:
+        print(f"Error saving list to {file_path}: {e}")
 
 def list_files_in_s3_dir(prefix):
     """Lists all files in a given 'directory' in the S3 bucket."""
@@ -73,7 +82,7 @@ def read_tickerlist_from_s3(file_path='tickerlist.txt'):
     try:
         response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
         content = response['Body'].read().decode('utf-8')
-        tickers = [line.strip() for line in content.split('\n') if line.strip()]
+        tickers = [line.strip().upper() for line in content.split('\n') if line.strip()]
         print(f"Successfully read tickerlist from s3://{SPACES_BUCKET_NAME}/{file_path}")
         return tickers
     except s3_client.exceptions.NoSuchKey:
@@ -109,37 +118,5 @@ def upload_initial_data_to_s3():
                 except Exception as upload_error:
                     print(f"Error uploading {local_path}: {upload_error}")
 
-# --- General Calculation Helpers ---
-def format_to_two_decimal(value):
-    if isinstance(value, (int, float)) and not np.isnan(value):
-        return f"{value:.2f}"
-    return "N/A"
-
-def calculate_vwap(df):
-    q = df['volume'] * (df['high'] + df['low'] + df['close']) / 3
-    return q.cumsum() / df['volume'].cumsum()
-
-def detect_market_session():
-    ny_timezone = pytz.timezone('America/New_York')
-    ny_time = datetime.now(ny_timezone).time()
-    if time(4, 0) <= ny_time < time(9, 30): return 'PRE-MARKET'
-    elif time(9, 30) <= ny_time < time(16, 0): return 'REGULAR'
-    else: return 'CLOSED'
-
-def get_previous_day_close(daily_df):
-    if len(daily_df) > 1: return daily_df['close'].iloc[-2]
-    return None
-
-def get_premarket_data(today_intraday_df):
-    return today_intraday_df.between_time(time(4, 0), time(9, 29))
-
-def calculate_avg_early_volume(intraday_df, days=5):
-    early_volume_df = intraday_df.between_time(time(9, 30), time(9, 44))
-    if early_volume_df.empty: return 0
-    daily_early_volume = early_volume_df.groupby(early_volume_df.index.date)['volume'].sum()
-    if len(daily_early_volume) < days: return daily_early_volume.mean()
-    return daily_early_volume.tail(days).mean()
-
-def calculate_avg_daily_volume(daily_df, days=20):
-    if len(daily_df) < days + 1: return None
-    return daily_df['volume'].iloc[-days-1:-1].mean()
+# --- General Calculation Helpers (You can keep your existing helpers here) ---
+# ... (all your other helper functions like format_to_two_decimal, calculate_vwap, etc.)
