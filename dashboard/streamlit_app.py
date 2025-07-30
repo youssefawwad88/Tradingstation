@@ -8,7 +8,7 @@ from datetime import datetime
 # This allows the Streamlit app to find the 'utils' directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_tickerlist_from_s3, save_list_to_s3, read_df_from_s3, list_files_in_s3_dir
+from utils.helpers import read_tickerlist_from_s3, save_list_to_s3, read_df_from_s3
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -89,13 +89,9 @@ for i, screener_name in enumerate(screener_list):
         # Read the corresponding signal file from the cloud
         screener_df = read_df_from_s3(f'data/signals/{screener_name}_signals.csv')
         
+        # --- MODIFICATION ---
+        # We now display the entire dataframe without filtering
         if not screener_df.empty:
-            # Display only the rows that are valid or being watched
-            display_df = screener_df[screener_df.get('Status', 'N/A').isin(['Entry', 'Watch'])]
-            if not display_df.empty:
-                 st.dataframe(display_df, use_container_width=True, hide_index=True)
-            else:
-                 st.info(f"No active signals ('Entry' or 'Watch') from the {screener_name} screener right now.")
+            st.dataframe(screener_df, use_container_width=True, hide_index=True)
         else:
             st.info(f"The {screener_name} screener has not generated any signals yet.")
-
