@@ -98,9 +98,7 @@ def upload_initial_data_to_s3():
         print("Cannot upload initial data: S3 client is not configured.")
         return
     print("Attempting to upload initial data to Space...")
-    initial_files = {
-        'data/universe/sp500.csv': 'data/universe/sp500.csv',
-    }
+    initial_files = {'data/universe/sp500.csv': 'data/universe/sp500.csv'}
     for local_path, s3_key in initial_files.items():
         try:
             s3_client.head_object(Bucket=SPACES_BUCKET_NAME, Key=s3_key)
@@ -118,5 +116,38 @@ def upload_initial_data_to_s3():
                 except Exception as upload_error:
                     print(f"Error uploading {local_path}: {upload_error}")
 
-# --- General Calculation Helpers (You can keep your existing helpers here) ---
-# ... (all your other helper functions like format_to_two_decimal, calculate_vwap, etc.)
+# --- General Calculation Helpers ---
+
+def format_to_two_decimal(value):
+    if isinstance(value, (int, float)) and not np.isnan(value):
+        return f"{value:.2f}"
+    return "N/A"
+
+def calculate_vwap(df):
+    q = df['volume'] * (df['high'] + df['low'] + df['close']) / 3
+    return q.cumsum() / df['volume'].cumsum()
+
+def detect_market_session():
+    ny_timezone = pytz.timezone('America/New_York')
+    ny_time = datetime.now(ny_timezone).time()
+    if time(4, 0) <= ny_time < time(9, 30): return 'PRE-MARKET'
+    elif time(9, 30) <= ny_time < time(16, 0): return 'REGULAR'
+    else: return 'CLOSED'
+
+def get_previous_day_close(daily_df):
+    if len(daily_df) > 1: return daily_df['close'].iloc[-2]
+    return None
+
+def get_premarket_data(today_intraday_df):
+    return today_intraday_df.between_time(time(4, 0), time(9, 29))
+
+def calculate_avg_early_volume(intraday_df, days=5):
+    early_volume_df = intraday_df.between_time(time(9, 30), time(9, 44))
+    if early_volume_df.empty: return 0
+    daily_early_volume = early_volume_df.groupby(early_volume_df.index.date)['volume'].sum()
+    if len(daily_early_volume) < days: return daily_early_volume.mean()
+    return daily_early_volume.tail(days).mean()
+
+def calculate_avg_daily_volume(daily_df, days=20):
+    if len(daily_df) < days + 1: return None
+    return daily_df['volume'].iloc[-days-1:-1].mean()
