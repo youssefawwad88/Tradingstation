@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import boto3
 from io import StringIO
-from datetime import time
+from datetime import time, datetime
 import pytz
 import numpy as np
 
@@ -22,7 +22,8 @@ if all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME, SPAC
         aws_secret_access_key=SPACES_SECRET_ACCESS_KEY
     )
 else:
-    print("WARNING: S3 client not initialized. Missing one or more environment variables.")
+    print("CRITICAL WARNING: S3 client not initialized. Missing one or more environment variables.")
+    # This will cause the script to fail if any S3 functions are called, which is intended.
 
 # --- S3 Helper Functions ---
 
@@ -32,12 +33,7 @@ def list_files_in_s3_dir(prefix):
     try:
         paginator = s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=SPACES_BUCKET_NAME, Prefix=prefix)
-        file_list = []
-        for page in pages:
-            if "Contents" in page:
-                for obj in page['Contents']:
-                    if not obj['Key'].endswith('/'): # Exclude directories
-                        file_list.append(os.path.basename(obj['Key']))
+        file_list = [os.path.basename(obj['Key']) for page in pages if "Contents" in page for obj in page['Contents'] if not obj['Key'].endswith('/')]
         print(f"Found {len(file_list)} files in s3://{SPACES_BUCKET_NAME}/{prefix}")
         return file_list
     except Exception as e:
@@ -87,52 +83,63 @@ def read_tickerlist_from_s3(file_path='tickerlist.txt'):
         print(f"Error reading tickerlist from {file_path}: {e}")
         return []
 
-# --- General Calculation Helpers ---
+def upload_initial_data_to_s3():
+    """One-time function to upload essential data files from the repo to the Space."""
+    if not s3_client:
+        print("Cannot upload initial data: S3 client is not configured.")
+        return
+    print("Attempting to upload initial data to Space...")
+    initial_files = {
+        'data/universe/sp500.csv': 'data/universe/sp500.csv',
+    }
+    for local_path, s3_key in initial_files.items():
+        try:
+            s3_client.head_object(Bucket=SPACES_BUCKET_NAME, Key=s3_key)
+            print(f"File {s3_key} already exists in Space. Skipping upload.")
+        except s3_client.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                print(f"File {s3_key} not found in Space. Uploading from repo...")
+                try:
+                    full_local_path = os.path.join('/workspace', local_path)
+                    with open(full_local_path, "rb") as f:
+                        s3_client.put_object(Bucket=SPACES_BUCKET_NAME, Key=s3_key, Body=f)
+                        print(f"Successfully uploaded {local_path} to {s3_key}")
+                except FileNotFoundError:
+                    print(f"CRITICAL: Initial file not found in repo: {full_local_path}. Cannot seed.")
+                except Exception as upload_error:
+                    print(f"Error uploading {local_path}: {upload_error}")
 
+# --- General Calculation Helpers ---
 def format_to_two_decimal(value):
-    """Formats a number to two decimal places, handling non-numeric inputs."""
     if isinstance(value, (int, float)) and not np.isnan(value):
         return f"{value:.2f}"
     return "N/A"
 
 def calculate_vwap(df):
-    """Calculates the Volume Weighted Average Price (VWAP)."""
     q = df['volume'] * (df['high'] + df['low'] + df['close']) / 3
     return q.cumsum() / df['volume'].cumsum()
 
 def detect_market_session():
-    """Detects the current market session based on New York time."""
     ny_timezone = pytz.timezone('America/New_York')
     ny_time = datetime.now(ny_timezone).time()
-    if time(4, 0) <= ny_time < time(9, 30):
-        return 'PRE-MARKET'
-    elif time(9, 30) <= ny_time < time(16, 0):
-        return 'REGULAR'
-    else:
-        return 'CLOSED'
+    if time(4, 0) <= ny_time < time(9, 30): return 'PRE-MARKET'
+    elif time(9, 30) <= ny_time < time(16, 0): return 'REGULAR'
+    else: return 'CLOSED'
 
 def get_previous_day_close(daily_df):
-    """Gets the previous day's close from a daily dataframe."""
-    if len(daily_df) > 1:
-        return daily_df['close'].iloc[-2]
+    if len(daily_df) > 1: return daily_df['close'].iloc[-2]
     return None
 
 def get_premarket_data(today_intraday_df):
-    """Extracts pre-market data from today's intraday dataframe."""
     return today_intraday_df.between_time(time(4, 0), time(9, 29))
 
 def calculate_avg_early_volume(intraday_df, days=5):
-    """Calculates the average volume for the first 15 minutes of the regular session."""
     early_volume_df = intraday_df.between_time(time(9, 30), time(9, 44))
-    if early_volume_df.empty:
-        return 0
+    if early_volume_df.empty: return 0
     daily_early_volume = early_volume_df.groupby(early_volume_df.index.date)['volume'].sum()
-    if len(daily_early_volume) < days:
-        return daily_early_volume.mean()
+    if len(daily_early_volume) < days: return daily_early_volume.mean()
     return daily_early_volume.tail(days).mean()
 
 def calculate_avg_daily_volume(daily_df, days=20):
-    """Calculates the average daily volume over a specified number of days."""
-    if len(daily_df) < days:
-        return None
+    if len(daily_df) < days + 1: return None
     return daily_df['volume'].iloc[-days-1:-1].mean()
