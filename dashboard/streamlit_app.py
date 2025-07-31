@@ -1,72 +1,75 @@
 import streamlit as st
-import sys
-import os
 import pandas as pd
 from datetime import datetime
+import os
+import sys
 
 # --- System Path Setup ---
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# This ensures the app can find the 'utils' module
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from utils.helpers import read_tickerlist_from_s3, save_list_to_s3, read_df_from_s3
-
-# --- Page Configuration ---
-st.set_page_config(page_title="Trading System Dashboard", layout="wide")
-st.html("<meta http-equiv='refresh' content='60'>")
-st.title("Trading System Control Panel & Dashboard")
-st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# --- Ticker List Management (in Sidebar) ---
-with st.sidebar:
-    st.header("Master Ticker List")
+try:
+    # We will use the same helper function you defined in your script
+    from utils.helpers import load_from_spaces
+except ImportError:
+    # A fallback for graceful error handling if the helper isn't found
+    st.error("Could not import `load_from_spaces` from `utils.helpers`. Please ensure the file and function exist.")
+    # Define a dummy function to prevent the app from crashing completely
+    def load_from_spaces(path):
+        return None
     
-    try:
-        current_tickers = read_tickerlist_from_s3('tickerlist.txt')
-        current_tickers_str = "\n".join(current_tickers)
-    except Exception as e:
-        st.error(f"Could not load ticker list: {e}")
-        current_tickers_str = ""
+# --- Page Configuration ---
+st.set_page_config(page_title="Scheduler Monitor", layout="wide")
 
-    st.write("Enter tickers for the day (one per line). This will overwrite the current list.")
-    new_tickers_input = st.text_area("Tickers:", value=current_tickers_str, height=300, label_visibility="collapsed")
+# --- Load Custom CSS from the main app ---
+# This is a small trick to apply the main CSS to sub-pages
+try:
+    from streamlit_app import load_css
+    load_css()
+except ImportError:
+    st.warning("Could not load custom CSS styles.")
 
-    if st.button("Update Master Ticker List", use_container_width=True):
-        if new_tickers_input:
-            new_tickers_list = [ticker.strip().upper() for ticker in new_tickers_input.split('\n') if ticker.strip()]
-            
-            # --- MODIFICATION ---
-            # Now we check if the save was successful and show a detailed message
-            save_successful = save_list_to_s3(new_tickers_list, 'tickerlist.txt')
-            
-            if save_successful:
-                st.success(f"Successfully updated the ticker list with {len(new_tickers_list)} tickers!")
-                # Use a little spinner to give time for the rerun to feel natural
-                with st.spinner('Refreshing dashboard...'):
-                    time.sleep(2)
-                st.rerun()
-            else:
-                st.error("CRITICAL ERROR: Failed to save the new ticker list to cloud storage. Check the application logs for details.")
-        else:
-            st.warning("The ticker list cannot be empty.")
 
-# --- Main Display Area ---
-st.header("✅ Actionable Trade Plans")
-trade_signals_df = read_df_from_s3('data/trade_signals.csv')
+def style_status(s):
+    """
+    Applies color styling to the 'status' column based on its value.
+    - Green for 'Success'
+    - Orange for 'Running' or 'Pending'
+    - Red for 'Fail'
+    """
+    if s.lower() == 'success':
+        return 'background-color: #2E7D32; color: white;'
+    elif s.lower() == 'fail':
+        return 'background-color: #C62828; color: white;'
+    elif s.lower() in ['running', 'pending']:
+        return 'background-color: #F9A825; color: black;'
+    return ''
 
-if not trade_signals_df.empty:
-    st.dataframe(trade_signals_df, use_container_width=True, hide_index=True)
+# --- Main Page Content ---
+st.title("⏱️ Scheduler Monitor")
+st.write("Live status of all backend data jobs and screeners. The table below automatically checks for the latest status log from the cloud.")
+
+if st.button("🔄 Refresh Now"):
+    st.rerun()
+
+st.markdown("---")
+
+# --- Status Table ---
+LOG_FILE_PATH = "data/logs/scheduler_status.csv"
+status_df = load_from_spaces(LOG_FILE_PATH)
+
+if status_df is not None and not status_df.empty:
+    st.write("### Job Status Overview")
+    
+    # Sort by timestamp to show the most recent jobs first
+    status_df['last_run_timestamp'] = pd.to_datetime(status_df['last_run_timestamp'])
+    status_df = status_df.sort_values(by='last_run_timestamp', ascending=False)
+    
+    # Apply styling
+    styled_df = status_df.style.applymap(style_status, subset=['status'])
+    
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 else:
-    st.info("No valid trade plans found yet.")
+    st.warning(f"Could not find the scheduler log file at `{LOG_FILE_PATH}`.")
+    st.info("This is normal if the backend engine has not completed its first run yet. Once it runs, a status file will be generated and will appear here.")
 
-st.divider()
-
-st.header("🔍 Raw Screener Outputs")
-screener_list = ['gapgo', 'orb', 'avwap', 'breakout', 'ema_pullback', 'exhaustion']
-screener_tabs = st.tabs([s.capitalize() for s in screener_list])
-
-for i, screener_name in enumerate(screener_list):
-    with screener_tabs[i]:
-        screener_df = read_df_from_s3(f'data/signals/{screener_name}_signals.csv')
-        if not screener_df.empty:
-            st.dataframe(screener_df, use_container_width=True, hide_index=True)
-        else:
-            st.info(f"The {screener_name} screener has not generated any signals yet.")
