@@ -4,7 +4,7 @@ import threading
 import subprocess
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 
 # --- System Path Setup ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -47,14 +47,22 @@ def run_job_in_thread(job_func, *args):
     job_thread.start()
 
 def run_high_frequency_sequence():
-    print(f"--- STARTING High-Frequency Sequence at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC ---", flush=True)
+    print(f"--- STARTING High-Frequency Sequence at {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC ---", flush=True)
     run_job('jobs/update_intraday_compact.py')
     run_job('screeners/gapgo.py')
     print(f"--- FINISHED High-Frequency Sequence ---", flush=True)
 
+def simple_test_job():
+    """A simple diagnostic job that just prints a message."""
+    print(f"--- Simple test job running! --- Time: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
+
 def main():
     print("--- Starting Master Orchestrator ---", flush=True)
     
+    # --- Add a simple diagnostic job to test the scheduler ---
+    schedule.every(15).seconds.do(simple_test_job)
+    
+    # --- Original Job Schedule ---
     schedule.every(1).minutes.do(run_job_in_thread, run_high_frequency_sequence)
     schedule.every().day.at("10:30").do(run_job_in_thread, run_job, 'ticker_selectors/opportunity_ticker_finder.py')
     schedule.every().day.at("10:35").do(run_job_in_thread, run_job, 'jobs/find_avwap_anchors.py')
@@ -76,7 +84,8 @@ def main():
         # Heartbeat log every 10 seconds to show the loop is alive
         current_time = time.time()
         if current_time - last_heartbeat_time >= 10:
-            print(f"Heartbeat: Main loop is running. Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
+            # Use timezone-aware datetime object
+            print(f"Heartbeat: Main loop is running. Time: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
             last_heartbeat_time = current_time
             
         time.sleep(1)
