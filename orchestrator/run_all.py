@@ -90,18 +90,22 @@ def main():
             schedule.run_pending()
 
             # --- Market-Aware Job Execution ---
+            # CORRECTED LOGIC: Iterate through jobs and run them based on tags.
             if session == 'PRE-MARKET':
-                # Run the 1-minute data job
-                schedule.run_all(tag='intraday_data')
-                # Run the 15-minute Gap & Go
-                schedule.run_all(tag='gapgo_premarket')
+                for job in schedule.get_jobs('intraday_data'):
+                    schedule.run_job(job)
+                for job in schedule.get_jobs('gapgo_premarket'):
+                    schedule.run_job(job)
 
             elif session == 'REGULAR':
-                schedule.run_all(tag='intraday_data')
-                schedule.run_all(tag='intraday_screeners')
-                # Run Gap & Go every minute only for the first hour
-                if ny_time.hour == 9 and ny_time.minute >= 30 or ny_time.hour == 10 and ny_time.minute < 30:
-                    schedule.run_all(tag='gapgo_early')
+                for job in schedule.get_jobs('intraday_data'):
+                    schedule.run_job(job)
+                for job in schedule.get_jobs('intraday_screeners'):
+                    schedule.run_job(job)
+                
+                if (ny_time.hour == 9 and ny_time.minute >= 30) or (ny_time.hour == 10 and ny_time.minute < 30):
+                    for job in schedule.get_jobs('gapgo_early'):
+                        schedule.run_job(job)
 
             # Sleep for a short duration to prevent high CPU usage
             time.sleep(5)
