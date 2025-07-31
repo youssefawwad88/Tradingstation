@@ -106,18 +106,61 @@ def detect_market_session():
     else:
         return 'CLOSED'
 
-# --- MISSING TRADING LOGIC FUNCTION ---
+# --- TRADING LOGIC FUNCTION (IMPLEMENTED) ---
 def get_premarket_data(ticker, intraday_df):
     """
-    Placeholder for the function needed by the Gap & Go screener.
-    This function should take a ticker symbol and its 1-minute intraday DataFrame,
-    and return the pre-market high, low, and total volume.
+    Extracts pre-market candles and calculates key stats.
     
-    PLEASE PROVIDE THE LOGIC FOR THIS FUNCTION.
+    Args:
+        ticker (str): The stock ticker symbol.
+        intraday_df (pd.DataFrame): The 1-minute intraday data.
+
+    Returns:
+        dict: A dictionary containing pre-market high, low, vwap, volume, and range.
+              Returns a dictionary of None/0 values if no pre-market data is found.
     """
-    print(f"WARNING: 'get_premarket_data' is not implemented for {ticker}. Returning empty values.")
-    # Returning empty/default values to prevent crashes until implemented.
-    return None, None, 0 # premarket_high, premarket_low, premarket_volume
+    if intraday_df.empty or 'timestamp' not in intraday_df.columns:
+        return {
+            "pre_high": None, "pre_low": None, "pre_vwap": None,
+            "pre_volume": 0, "pre_range": None
+        }
+
+    # Ensure timestamp is a datetime object and set it as the index
+    df = intraday_df.copy()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.set_index('timestamp')
+
+    # Localize to UTC then convert to US/Eastern
+    df.index = df.index.tz_localize('UTC').tz_convert('America/New_York')
+
+    # Filter for pre-market hours
+    pre_market_df = df.between_time('04:00', '09:29:59')
+
+    if pre_market_df.empty:
+        return {
+            "pre_high": None, "pre_low": None, "pre_vwap": None,
+            "pre_volume": 0, "pre_range": None
+        }
+
+    # Calculate stats
+    pre_high = pre_market_df['high'].max()
+    pre_low = pre_market_df['low'].min()
+    pre_volume = pre_market_df['volume'].sum()
+    
+    # Calculate VWAP
+    typical_price = (pre_market_df['high'] + pre_market_df['low'] + pre_market_df['close']) / 3
+    tpv = typical_price * pre_market_df['volume']
+    pre_vwap = tpv.sum() / pre_volume if pre_volume > 0 else None
+    
+    pre_range = pre_high - pre_low
+
+    return {
+        "pre_high": pre_high,
+        "pre_low": pre_low,
+        "pre_vwap": pre_vwap,
+        "pre_volume": int(pre_volume),
+        "pre_range": pre_range
+    }
 
 # --- Other Calculation Helpers ---
 def get_previous_day_close(daily_df):
