@@ -18,56 +18,77 @@ except ImportError:
 
 # --- Job Execution Logic ---
 def run_job(script_path):
+    """
+    Runs a script as a subprocess with enhanced, robust logging to capture all outcomes.
+    """
     job_name = os.path.basename(script_path).replace('.py', '')
     full_path = os.path.join('/workspace', script_path)
     
-    print(f"--- Thread started for job: {job_name} at {datetime.now()} ---", flush=True)
+    print(f"--- Thread started for job: {job_name} at {datetime.now(UTC)} ---", flush=True)
     update_scheduler_status(job_name, "Running")
     
+    process = None
     try:
         process = subprocess.run(
             [sys.executable, full_path],
             capture_output=True, text=True, check=True,
             timeout=600, env=os.environ
         )
+        # This block runs only if the script completes with exit code 0
         print(f"SUCCESS: {job_name} completed.", flush=True)
-        update_scheduler_status(job_name, "Success", "Completed without errors.")
+        details = f"Completed successfully. Output:\n{process.stdout}"
+        update_scheduler_status(job_name, "Success", details)
+
     except subprocess.CalledProcessError as e:
-        error_message = f"Exit Code: {e.returncode}\nError:\n{e.stderr}"
-        print(f"ERROR: {job_name} failed. Details:\n{error_message}", flush=True)
-        update_scheduler_status(job_name, "Fail", error_message)
-    except Exception as e:
-        error_message = f"An unexpected error occurred: {str(e)}"
-        print(f"!!! FATAL ERROR running {job_name}. Details:\n{error_message}", flush=True)
+        # This block runs if the script runs but exits with a non-zero code (an error)
+        error_message = f"Script exited with error code {e.returncode}.\n"
+        error_message += f"--- STDOUT ---\n{e.stdout}\n"
+        error_message += f"--- STDERR ---\n{e.stderr}\n"
+        print(f"ERROR: {job_name} failed.\n{error_message}", flush=True)
         update_scheduler_status(job_name, "Fail", error_message)
 
+    except subprocess.TimeoutExpired as e:
+        # This block runs if the script takes too long
+        error_message = f"Job timed out after 10 minutes.\n"
+        error_message += f"--- STDOUT ---\n{e.stdout}\n"
+        error_message += f"--- STDERR ---\n{e.stderr}\n"
+        print(f"TIMEOUT: {job_name} failed.\n{error_message}", flush=True)
+        update_scheduler_status(job_name, "Fail", error_message)
+
+    except Exception as e:
+        # This block catches other exceptions, like if the file doesn't exist
+        error_message = f"An unexpected exception occurred: {str(e)}"
+        print(f"!!! FATAL ORCHESTRATOR ERROR running {job_name}. Details:\n{error_message}", flush=True)
+        update_scheduler_status(job_name, "Fail", error_message)
+    
+    finally:
+        print(f"--- Thread finished for job: {job_name} at {datetime.now(UTC)} ---", flush=True)
+
+
 def run_job_in_thread(job_func, *args):
-    print(f"Scheduler creating new thread for: {job_func.__name__}", flush=True)
-    job_thread = threading.Thread(target=job_func, args=args)
+    """Wrapper to run any function in its own thread."""
+    # Use a more descriptive name for the thread for better logging if needed
+    thread_name = job_func.__name__ if 'args' not in job_func.__name__ else args[0]
+    print(f"Scheduler creating new thread for: {thread_name}", flush=True)
+    job_thread = threading.Thread(target=job_func, args=args, name=thread_name)
     job_thread.start()
 
 def run_high_frequency_sequence():
+    """The critical, time-sensitive sequence for intraday trading."""
     print(f"--- STARTING High-Frequency Sequence at {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC ---", flush=True)
     run_job('jobs/update_intraday_compact.py')
     run_job('screeners/gapgo.py')
     print(f"--- FINISHED High-Frequency Sequence ---", flush=True)
 
-def simple_test_job():
-    """A simple diagnostic job that just prints a message."""
-    print(f"--- Simple test job running! --- Time: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
-
 def main():
     print("--- Starting Master Orchestrator ---", flush=True)
     
-    # --- Add a simple diagnostic job to test the scheduler ---
-    schedule.every(15).seconds.do(simple_test_job)
-    
-    # --- Original Job Schedule ---
+    # --- Job Schedule ---
     schedule.every(1).minutes.do(run_job_in_thread, run_high_frequency_sequence)
-    schedule.every().day.at("10:30").do(run_job_in_thread, run_job, 'ticker_selectors/opportunity_ticker_finder.py')
-    schedule.every().day.at("10:35").do(run_job_in_thread, run_job, 'jobs/find_avwap_anchors.py')
-    schedule.every().day.at("10:40").do(run_job_in_thread, run_job, 'jobs/update_all_data.py')
-    schedule.every().day.at("13:40").do(run_job_in_thread, run_job, 'screeners/orb.py')
+    schedule.every().day.at("10:30", "America/New_York").do(run_job_in_thread, run_job, 'ticker_selectors/opportunity_ticker_finder.py')
+    schedule.every().day.at("10:35", "America/New_York").do(run_job_in_thread, run_job, 'jobs/find_avwap_anchors.py')
+    schedule.every().day.at("10:40", "America/New_York").do(run_job_in_thread, run_job, 'jobs/update_all_data.py')
+    schedule.every().day.at("13:40", "America/New_York").do(run_job_in_thread, run_job, 'screeners/orb.py')
     schedule.every(15).minutes.do(run_job_in_thread, run_job, 'screeners/avwap.py')
     schedule.every(15).minutes.do(run_job_in_thread, run_job, 'screeners/breakout.py')
     schedule.every(15).minutes.do(run_job_in_thread, run_job, 'screeners/ema_pullback.py')
@@ -77,17 +98,8 @@ def main():
     update_scheduler_status("orchestrator", "Success", "System online and scheduler running.")
     
     # --- Main Loop with Heartbeat for Debugging ---
-    last_heartbeat_time = time.time()
     while True:
         schedule.run_pending()
-        
-        # Heartbeat log every 10 seconds to show the loop is alive
-        current_time = time.time()
-        if current_time - last_heartbeat_time >= 10:
-            # Use timezone-aware datetime object
-            print(f"Heartbeat: Main loop is running. Time: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
-            last_heartbeat_time = current_time
-            
         time.sleep(1)
 
 if __name__ == "__main__":
