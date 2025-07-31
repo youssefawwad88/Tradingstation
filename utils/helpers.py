@@ -6,6 +6,7 @@ from io import StringIO, BytesIO
 from datetime import datetime, time
 import pytz
 import numpy as np
+import json
 
 # --- Environment Variable Loading ---
 # Centralized place to get credentials. Ensures consistency.
@@ -115,14 +116,11 @@ def update_scheduler_status(job_name, status, details=""):
     log_file_key = 'data/logs/scheduler_status.csv'
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # First, try to read the existing log file
     status_df = read_df_from_s3(log_file_key)
 
-    # If the DataFrame is empty and a file didn't exist, create the structure
     if status_df.empty:
         status_df = pd.DataFrame(columns=['job_name', 'last_run_timestamp', 'status', 'details'])
 
-    # Check if the job is already in the log and update or add it
     if job_name in status_df['job_name'].values:
         job_index = status_df[status_df['job_name'] == job_name].index[0]
         status_df.loc[job_index, 'last_run_timestamp'] = timestamp
@@ -132,9 +130,44 @@ def update_scheduler_status(job_name, status, details=""):
         new_row = pd.DataFrame([{'job_name': job_name, 'last_run_timestamp': timestamp, 'status': status, 'details': details}])
         status_df = pd.concat([status_df, new_row], ignore_index=True)
 
-    # Save the updated DataFrame back to S3
     return save_df_to_s3(status_df, log_file_key)
 
+# --- NEW: Configuration File Helpers ---
+
+def save_config_to_s3(config_dict, file_path):
+    """Saves a Python dictionary to a JSON file in the DigitalOcean Space."""
+    s3_client = get_boto_client()
+    if not s3_client: return False
+
+    try:
+        content = json.dumps(config_dict, indent=4)
+        s3_client.put_object(Bucket=SPACES_BUCKET_NAME, Key=file_path, Body=content)
+        print(f"Successfully saved config to s3://{SPACES_BUCKET_NAME}/{file_path}")
+        return True
+    except (NoCredentialsError, ClientError, Exception) as e:
+        print(f"Error saving config to {file_path}: {e}")
+        return False
+
+def read_config_from_s3(file_path):
+    """Reads a JSON config file from the Space into a Python dictionary."""
+    s3_client = get_boto_client()
+    if not s3_client: return {}
+
+    try:
+        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
+        content = response['Body'].read().decode('utf-8')
+        config = json.loads(content)
+        print(f"Successfully read config from s3://{SPACES_BUCKET_NAME}/{file_path}")
+        return config
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            print(f"Config file not found at {file_path}. Returning empty dict.")
+        else:
+            print(f"ClientError reading config from {file_path}: {e}")
+        return {}
+    except Exception as e:
+        print(f"An unexpected error occurred reading config from {file_path}: {e}")
+        return {}
 
 # --- General Calculation Helpers ---
 
@@ -165,4 +198,3 @@ def get_previous_day_close(daily_df):
     if daily_df is not None and len(daily_df) > 1:
         return daily_df['close'].iloc[-2]
     return None
-
