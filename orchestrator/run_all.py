@@ -17,7 +17,7 @@ def run_script_blocking(script_path):
     """
     try:
         full_path = os.path.join('/workspace', script_path)
-        print(f"--- EXECUTING {full_path} (blocking) ---")
+        print(f"--- EXECUTING {full_path} (blocking) ---", flush=True)
         # CRITICAL FIX: Pass the current environment to the subprocess
         result = subprocess.run(
             [sys.executable, full_path], 
@@ -27,13 +27,13 @@ def run_script_blocking(script_path):
             timeout=600, # 10-minute timeout
             env=os.environ 
         )
-        print(f"--- Output for {script_path} ---\n{result.stdout}\n--- End Output ---")
+        print(f"--- Output for {script_path} ---\n{result.stdout}\n--- End Output ---", flush=True)
         if result.stderr:
-            print(f"--- Errors for {script_path} ---\n{result.stderr}\n--- End Errors ---")
+            print(f"--- Errors for {script_path} ---\n{result.stderr}\n--- End Errors ---", flush=True)
     except subprocess.TimeoutExpired:
-        print(f"!!! TIMEOUT ERROR: {script_path} ran for more than 10 minutes.")
+        print(f"!!! TIMEOUT ERROR: {script_path} ran for more than 10 minutes.", flush=True)
     except Exception as e:
-        print(f"!!! An unexpected error occurred while EXECUTING {script_path}: {e}")
+        print(f"!!! An unexpected error occurred while EXECUTING {script_path}: {e}", flush=True)
 
 def run_script_non_blocking(script_path):
     """
@@ -41,33 +41,32 @@ def run_script_non_blocking(script_path):
     """
     try:
         full_path = os.path.join('/workspace', script_path)
-        print(f"--- LAUNCHING {full_path} (non-blocking) ---")
+        print(f"--- LAUNCHING {full_path} (non-blocking) ---", flush=True)
         # CRITICAL FIX: Pass the current environment to the subprocess
         subprocess.Popen([sys.executable, full_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=os.environ)
     except Exception as e:
-        print(f"!!! An unexpected error occurred while LAUNCHING {script_path}: {e}")
+        print(f"!!! An unexpected error occurred while LAUNCHING {script_path}: {e}", flush=True)
 
 def run_high_frequency_sequence():
     """
     The critical, time-sensitive sequence for intraday trading.
     """
-    print(f"--- STARTING High-Frequency Sequence at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC ---")
+    print(f"--- STARTING High-Frequency Sequence at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC ---", flush=True)
     run_script_blocking('jobs/update_intraday_compact.py')
     run_script_blocking('screeners/gapgo.py')
-    print(f"--- FINISHED High-Frequency Sequence ---")
+    print(f"--- FINISHED High-Frequency Sequence ---", flush=True)
 
 def run_job_in_thread(job_func, *args):
     """
     Wrapper to run a scheduled job in its own thread.
     """
-    # --- NEW: Added logging to show when a job is being triggered ---
-    print(f"Scheduler is creating a new thread for job: {job_func.__name__}")
+    print(f"Scheduler is creating a new thread for job: {job_func.__name__}", flush=True)
     job_thread = threading.Thread(target=job_func, args=args)
     job_thread.start()
 
 def main():
     """Main function to schedule and run all trading system jobs and screeners."""
-    print("--- Starting Master Orchestrator (Final Version with Heartbeat) ---")
+    print("--- Starting Master Orchestrator (Final Version with Heartbeat) ---", flush=True)
     upload_initial_data_to_s3()
 
     # Define script paths
@@ -93,17 +92,16 @@ def main():
     schedule.every(15).minutes.do(run_job_in_thread, run_script_non_blocking, exhaustion_screener)
     schedule.every(5).minutes.do(run_job_in_thread, run_script_non_blocking, master_dashboard_script)
 
-    print("--- All jobs scheduled. Orchestrator is now in its main loop. ---")
+    print("--- All jobs scheduled. Orchestrator is now in its main loop. ---", flush=True)
     
     # --- Main Loop with Heartbeat ---
-    heartbeat_counter = 0
     while True:
         schedule.run_pending()
         time.sleep(1)
-        heartbeat_counter += 1
-        # --- NEW: Re-added the heartbeat for visibility ---
-        if heartbeat_counter % 60 == 0:
-            print(f"Heartbeat: Orchestrator is alive. Current UTC time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+        # Print a heartbeat message every 60 seconds to show the app is alive
+        if int(time.time()) % 60 == 0:
+            print(f"Heartbeat: Orchestrator is alive. Current UTC time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+            time.sleep(1) # Prevent printing multiple times in the same second
 
 if __name__ == "__main__":
     main()
