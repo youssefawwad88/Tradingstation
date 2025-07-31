@@ -38,6 +38,22 @@ def get_boto_client():
 
 # --- S3 Data I/O Functions ---
 
+def list_files_in_s3_dir(prefix):
+    """Lists all file names in a given 'directory' in the S3 bucket."""
+    s3_client = get_boto_client()
+    if not s3_client: return []
+    
+    try:
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=SPACES_BUCKET_NAME, Prefix=prefix)
+        # Filter for actual files, not "folders"
+        file_list = [os.path.basename(obj['Key']) for page in pages if "Contents" in page for obj in page['Contents'] if not obj['Key'].endswith('/')]
+        print(f"Found {len(file_list)} files in s3://{SPACES_BUCKET_NAME}/{prefix}")
+        return file_list
+    except (NoCredentialsError, ClientError, Exception) as e:
+        print(f"Error listing files in {prefix}: {e}")
+        return []
+
 def save_df_to_s3(df, file_path):
     """Saves a pandas DataFrame to a CSV file in the DigitalOcean Space."""
     s3_client = get_boto_client()
@@ -65,7 +81,8 @@ def read_df_from_s3(file_path):
         return df
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
-            print(f"File not found at {file_path}. Returning empty DataFrame.")
+            # This is an expected case, so we don't print an error.
+            print(f"Info: File not found at {file_path}.")
         else:
             print(f"ClientError reading DataFrame from {file_path}: {e}")
         return pd.DataFrame()
@@ -131,8 +148,6 @@ def update_scheduler_status(job_name, status, details=""):
         status_df = pd.concat([status_df, new_row], ignore_index=True)
 
     return save_df_to_s3(status_df, log_file_key)
-
-# --- NEW: Configuration File Helpers ---
 
 def save_config_to_s3(config_dict, file_path):
     """Saves a Python dictionary to a JSON file in the DigitalOcean Space."""
