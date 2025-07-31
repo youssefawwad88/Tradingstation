@@ -34,13 +34,11 @@ def run_job(script_path):
             capture_output=True, text=True, check=True,
             timeout=600, env=os.environ
         )
-        # This block runs only if the script completes with exit code 0
         print(f"SUCCESS: {job_name} completed.", flush=True)
         details = f"Completed successfully. Output:\n{process.stdout}"
         update_scheduler_status(job_name, "Success", details)
 
     except subprocess.CalledProcessError as e:
-        # This block runs if the script runs but exits with a non-zero code (an error)
         error_message = f"Script exited with error code {e.returncode}.\n"
         error_message += f"--- STDOUT ---\n{e.stdout}\n"
         error_message += f"--- STDERR ---\n{e.stderr}\n"
@@ -48,7 +46,6 @@ def run_job(script_path):
         update_scheduler_status(job_name, "Fail", error_message)
 
     except subprocess.TimeoutExpired as e:
-        # This block runs if the script takes too long
         error_message = f"Job timed out after 10 minutes.\n"
         error_message += f"--- STDOUT ---\n{e.stdout}\n"
         error_message += f"--- STDERR ---\n{e.stderr}\n"
@@ -56,7 +53,6 @@ def run_job(script_path):
         update_scheduler_status(job_name, "Fail", error_message)
 
     except Exception as e:
-        # This block catches other exceptions, like if the file doesn't exist
         error_message = f"An unexpected exception occurred: {str(e)}"
         print(f"!!! FATAL ORCHESTRATOR ERROR running {job_name}. Details:\n{error_message}", flush=True)
         update_scheduler_status(job_name, "Fail", error_message)
@@ -67,7 +63,6 @@ def run_job(script_path):
 
 def run_job_in_thread(job_func, *args):
     """Wrapper to run any function in its own thread."""
-    # Use a more descriptive name for the thread for better logging if needed
     thread_name = job_func.__name__ if 'args' not in job_func.__name__ else args[0]
     print(f"Scheduler creating new thread for: {thread_name}", flush=True)
     job_thread = threading.Thread(target=job_func, args=args, name=thread_name)
@@ -76,6 +71,7 @@ def run_job_in_thread(job_func, *args):
 def run_high_frequency_sequence():
     """The critical, time-sensitive sequence for intraday trading."""
     print(f"--- STARTING High-Frequency Sequence at {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC ---", flush=True)
+    # These jobs are blocking and will run one after the other.
     run_job('jobs/update_intraday_compact.py')
     run_job('screeners/gapgo.py')
     print(f"--- FINISHED High-Frequency Sequence ---", flush=True)
@@ -83,8 +79,11 @@ def run_high_frequency_sequence():
 def main():
     print("--- Starting Master Orchestrator ---", flush=True)
     
-    # --- Job Schedule ---
-    schedule.every(1).minutes.do(run_job_in_thread, run_high_frequency_sequence)
+    # --- Job Schedule (Simplified for Debugging) ---
+    # We are calling the main job directly to see if it runs without the thread wrapper.
+    schedule.every(1).minutes.do(run_high_frequency_sequence)
+    
+    # Other jobs remain threaded
     schedule.every().day.at("10:30", "America/New_York").do(run_job_in_thread, run_job, 'ticker_selectors/opportunity_ticker_finder.py')
     schedule.every().day.at("10:35", "America/New_York").do(run_job_in_thread, run_job, 'jobs/find_avwap_anchors.py')
     schedule.every().day.at("10:40", "America/New_York").do(run_job_in_thread, run_job, 'jobs/update_all_data.py')
@@ -97,7 +96,7 @@ def main():
     print("--- All jobs scheduled. Orchestrator is now in its main loop. ---", flush=True)
     update_scheduler_status("orchestrator", "Success", "System online and scheduler running.")
     
-    # --- Main Loop with Heartbeat for Debugging ---
+    # --- Main Loop ---
     while True:
         schedule.run_pending()
         time.sleep(1)
