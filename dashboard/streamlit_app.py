@@ -1,75 +1,97 @@
 import streamlit as st
-import pandas as pd
 from datetime import datetime
-import os
-import sys
 
-# --- System Path Setup ---
-# This ensures the app can find the 'utils' module
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+def load_css():
+    """Injects custom CSS to style the app according to the design guidelines."""
+    css = """
+    <style>
+        /* Main app background */
+        .stApp {
+            background-color: #1E1E1E; /* Charcoal/dark background */
+        }
 
-try:
-    # We will use the same helper function you defined in your script
-    from utils.helpers import load_from_spaces
-except ImportError:
-    # A fallback for graceful error handling if the helper isn't found
-    st.error("Could not import `load_from_spaces` from `utils.helpers`. Please ensure the file and function exist.")
-    # Define a dummy function to prevent the app from crashing completely
-    def load_from_spaces(path):
-        return None
-    
-# --- Page Configuration ---
-st.set_page_config(page_title="Scheduler Monitor", layout="wide")
+        /* Sidebar styling */
+        .st-emotion-cache-16txtl3 {
+            background-color: #252526;
+        }
 
-# --- Load Custom CSS from the main app ---
-# This is a small trick to apply the main CSS to sub-pages
-try:
-    from streamlit_app import load_css
+        /* Font styling */
+        body, .st-emotion-cache-10trblm, .st-emotion-cache-16txtl3, .st-emotion-cache-1v0mbdj, .st-emotion-cache-1kyxreq {
+            font-family: 'Inter', 'Roboto Mono', sans-serif;
+            color: #FAFAFA; /* Off-white text */
+        }
+
+        /* Button styling */
+        .stButton>button {
+            border-radius: 8px;
+            border: 1px solid #4A4A4A;
+            color: #FAFAFA;
+            background-color: #252526;
+            transition: all 0.2s ease-in-out;
+        }
+        .stButton>button:hover {
+            border-color: #007ACC; /* Blue accent on hover */
+            color: #007ACC;
+        }
+        .stButton>button:focus {
+            box-shadow: 0 0 0 2px #007ACC;
+            outline: none;
+        }
+
+        /* Expander styling */
+        .st-emotion-cache-p5msec {
+            border-radius: 8px;
+            border: 1px solid #4A4A4A;
+            background-color: #252526;
+        }
+
+        /* Accent colors for text */
+        .text-green { color: #2E7D32; }
+        .text-red { color: #C62828; }
+        .text-yellow { color: #F9A825; }
+        .text-blue { color: #007ACC; }
+
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
+
+def main():
+    """
+    Main function to run the Streamlit landing page.
+    """
+    # --- Page Configuration ---
+    # This must be the first Streamlit command in your script.
+    st.set_page_config(
+        page_title="Trading Station Home",
+        page_icon="🏠",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # --- Load Custom CSS ---
     load_css()
-except ImportError:
-    st.warning("Could not load custom CSS styles.")
+
+    # --- Page Content ---
+    st.title("🏠 Welcome to Your Trading Station")
+    st.markdown("---")
+
+    st.subheader("Your automated, 24/7 trading analysis engine.")
+    st.write(
+        "This dashboard is your central command for monitoring the system, analyzing signals, "
+        "and tracking performance. Use the navigation panel on the left to explore the different modules."
+    )
+
+    st.info(
+        "**Quick Start:**\n\n"
+        "1.  **`Scheduler Monitor`**: Check the real-time status of your backend data jobs.\n"
+        "2.  **`System Settings`**: Manage your master ticker list and other configurations.\n"
+        "3.  **`Master Screener Hub`**: View consolidated trading signals once the market is active."
+    , icon="💡")
+
+    st.sidebar.success("Select a dashboard page above.")
+    st.sidebar.markdown("---")
+    st.sidebar.write(f"**Last Refresh:** {datetime.now().strftime('%H:%M:%S')}")
 
 
-def style_status(s):
-    """
-    Applies color styling to the 'status' column based on its value.
-    - Green for 'Success'
-    - Orange for 'Running' or 'Pending'
-    - Red for 'Fail'
-    """
-    if s.lower() == 'success':
-        return 'background-color: #2E7D32; color: white;'
-    elif s.lower() == 'fail':
-        return 'background-color: #C62828; color: white;'
-    elif s.lower() in ['running', 'pending']:
-        return 'background-color: #F9A825; color: black;'
-    return ''
-
-# --- Main Page Content ---
-st.title("⏱️ Scheduler Monitor")
-st.write("Live status of all backend data jobs and screeners. The table below automatically checks for the latest status log from the cloud.")
-
-if st.button("🔄 Refresh Now"):
-    st.rerun()
-
-st.markdown("---")
-
-# --- Status Table ---
-LOG_FILE_PATH = "data/logs/scheduler_status.csv"
-status_df = load_from_spaces(LOG_FILE_PATH)
-
-if status_df is not None and not status_df.empty:
-    st.write("### Job Status Overview")
-    
-    # Sort by timestamp to show the most recent jobs first
-    status_df['last_run_timestamp'] = pd.to_datetime(status_df['last_run_timestamp'])
-    status_df = status_df.sort_values(by='last_run_timestamp', ascending=False)
-    
-    # Apply styling
-    styled_df = status_df.style.applymap(style_status, subset=['status'])
-    
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
-else:
-    st.warning(f"Could not find the scheduler log file at `{LOG_FILE_PATH}`.")
-    st.info("This is normal if the backend engine has not completed its first run yet. Once it runs, a status file will be generated and will appear here.")
-
+if __name__ == "__main__":
+    main()
