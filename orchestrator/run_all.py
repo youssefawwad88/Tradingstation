@@ -60,12 +60,14 @@ def run_job_in_thread(job_func, *args):
     """
     Wrapper to run a scheduled job in its own thread.
     """
+    # --- NEW: Added logging to show when a job is being triggered ---
+    print(f"Scheduler is creating a new thread for job: {job_func.__name__}")
     job_thread = threading.Thread(target=job_func, args=args)
     job_thread.start()
 
 def main():
     """Main function to schedule and run all trading system jobs and screeners."""
-    print("--- Starting Master Orchestrator (Final Version) ---")
+    print("--- Starting Master Orchestrator (Final Version with Heartbeat) ---")
     upload_initial_data_to_s3()
 
     # Define script paths
@@ -93,9 +95,15 @@ def main():
 
     print("--- All jobs scheduled. Orchestrator is now in its main loop. ---")
     
+    # --- Main Loop with Heartbeat ---
+    heartbeat_counter = 0
     while True:
         schedule.run_pending()
         time.sleep(1)
+        heartbeat_counter += 1
+        # --- NEW: Re-added the heartbeat for visibility ---
+        if heartbeat_counter % 60 == 0:
+            print(f"Heartbeat: Orchestrator is alive. Current UTC time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
     main()
