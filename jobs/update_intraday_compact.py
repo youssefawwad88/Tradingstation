@@ -1,7 +1,7 @@
 import pandas as pd
 import sys
 import os
-from datetime import datetime
+import time
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -30,7 +30,8 @@ def run_compact_append():
             print(f"\n--- Processing {ticker} for {interval} interval ---")
             try:
                 # 1. Fetch the latest compact data from API
-                latest_df = get_intraday_data(ticker, interval=interval, output_size='compact')
+                # CORRECTED: Changed 'output_size' to 'outputsize'
+                latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
                 if latest_df.empty:
                     print(f"No new {interval} data returned for {ticker}. Skipping.")
                     continue
@@ -46,7 +47,6 @@ def run_compact_append():
 
                 # 3. Combine, deduplicate, and sort
                 if not existing_df.empty:
-                    # Ensure timestamp columns are in the same format before merging
                     existing_df['timestamp'] = pd.to_datetime(existing_df['timestamp'])
                     latest_df['timestamp'] = pd.to_datetime(latest_df['timestamp'])
                     
@@ -63,6 +63,9 @@ def run_compact_append():
 
             except Exception as e:
                 print(f"ERROR processing {ticker} for {interval}: {e}")
+        
+        # Respect API rate limits
+        time.sleep(1)
 
     print("\n--- Compact Intraday Data Append Job Finished ---")
 
