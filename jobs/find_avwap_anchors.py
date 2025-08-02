@@ -1,89 +1,82 @@
 import pandas as pd
 import sys
 import os
-import numpy as np
 
-# --- System Path Setup ---
+# Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import (
-    read_tickerlist_from_s3,
-    read_df_from_s3,
-    save_df_to_s3,
-    format_to_two_decimal
-)
+from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status
 
-# --- Anchor Finding Configuration ---
-LOOKBACK_DAYS = 60
-MAX_ANCHORS = 2
-ANCHOR_GAP_UP_THRESHOLD = 1.5
-ANCHOR_GAP_DOWN_THRESHOLD = -2.0
-ANCHOR_BODY_THRESHOLD = 50
-ANCHOR_VOLUME_RATIO = 1.5  # 150%
-
-def main():
-    """Finds and saves detailed AVWAP anchor data to cloud storage."""
-    print("\n--- Running AVWAP Anchor Finder Job ---")
+def find_and_save_avwap_anchors():
+    """
+    Identifies significant candles to be used as AVWAP anchor points.
+    - Reads daily data for each ticker.
+    - Identifies candles with high volume and large range ("power candles").
+    - Saves these anchor points to a single CSV file.
+    """
+    print("--- Starting Find AVWAP Anchors Job ---")
     
-    tickers = read_tickerlist_from_s3('tickerlist.txt')
+    tickers = read_tickerlist_from_s3()
     if not tickers:
-        print("Ticker list is empty. Exiting anchor finder.")
+        print("No tickers found in tickerlist.txt. Exiting job.")
         return
-        
-    all_anchor_rows = []
+
+    all_anchors = []
 
     for ticker in tickers:
         try:
-            daily_df = read_df_from_s3(f"data/daily/{ticker}_daily.csv")
-            
-            if len(daily_df) < LOOKBACK_DAYS:
+            daily_df_path = f'data/daily/{ticker}_daily.csv'
+            daily_df = read_df_from_s3(daily_df_path)
+
+            if daily_df.empty:
+                print(f"No daily data for {ticker}, skipping anchor search.")
                 continue
 
-            df = daily_df.tail(LOOKBACK_DAYS).copy()
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.set_index('timestamp')
+            # Ensure data is sorted by date, oldest to newest
+            daily_df['timestamp'] = pd.to_datetime(daily_df['timestamp'])
+            daily_df.sort_values('timestamp', inplace=True)
 
-            df['prev_close'] = df['close'].shift(1)
-            df['gap_%'] = ((df['open'] - df['prev_close']) / df['prev_close']) * 100
-            
-            candle_range = df['high'] - df['low']
-            candle_body = abs(df['close'] - df['open'])
-            df['body_%_of_range'] = np.where(candle_range > 0, (candle_body / candle_range) * 100, 0)
-            
-            df['avg_vol_20d'] = df['volume'].shift(1).rolling(window=20).mean()
-            df['volume_vs_avg_%'] = (df['volume'] / df['avg_vol_20d']) * 100
+            # Calculate average volume and candle range
+            avg_volume = daily_df['volume'].rolling(window=20).mean()
+            candle_range = daily_df['high'] - daily_df['low']
+            avg_range = candle_range.rolling(window=20).mean()
 
-            is_gap_valid = (df['gap_%'] >= ANCHOR_GAP_UP_THRESHOLD) | (df['gap_%'] <= ANCHOR_GAP_DOWN_THRESHOLD)
-            is_body_valid = df['body_%_of_range'] >= ANCHOR_BODY_THRESHOLD
-            is_volume_valid = df['volume_vs_avg_%'] >= (ANCHOR_VOLUME_RATIO * 100)
-            
-            confirmed_anchors = df[is_gap_valid & is_body_valid & is_volume_valid].sort_index(ascending=False)
-            
-            output_row = {"Ticker": ticker}
-            for i in range(1, MAX_ANCHORS + 1):
-                anchor_prefix = f"Anchor {i}"
-                if i - 1 < len(confirmed_anchors):
-                    anchor_data = confirmed_anchors.iloc[i-1]
-                    output_row[f"{anchor_prefix} Date"] = anchor_data.name.strftime('%Y-%m-%d')
-                    output_row[f"{anchor_prefix} Gap %"] = format_to_two_decimal(anchor_data['gap_%'])
-                    output_row[f"{anchor_prefix} Confirmed?"] = "Yes"
-                else:
-                    output_row[f"{anchor_prefix} Date"] = "N/A"
-                    output_row[f"{anchor_prefix} Gap %"] = "N/A"
-                    output_row[f"{anchor_prefix} Confirmed?"] = "No"
-            
-            all_anchor_rows.append(output_row)
+            # Identify "power candles" (e.g., volume > 1.5x avg AND range > 1.5x avg)
+            power_candles = daily_df[
+                (daily_df['volume'] > avg_volume * 1.5) &
+                (candle_range > avg_range * 1.5)
+            ]
+
+            if not power_candles.empty:
+                for _, row in power_candles.iterrows():
+                    all_anchors.append({
+                        'ticker': ticker,
+                        'anchor_date': row['timestamp'].strftime('%Y-%m-%d'),
+                        'anchor_price': row['close'],
+                        'reason': f"Power candle (Vol: {row['volume']:.0f}, Range: {candle_range.loc[row.name]:.2f})"
+                    })
+                print(f"Found {len(power_candles)} AVWAP anchor(s) for {ticker}.")
 
         except Exception as e:
-            print(f"   - ERROR processing anchors for {ticker}: {e}")
+            print(f"ERROR finding anchors for {ticker}: {e}")
 
-    if not all_anchor_rows:
-        print("--- No anchors found for any tickers. ---")
-        return
-        
-    final_df = pd.DataFrame(all_anchor_rows)
-    save_df_to_s3(final_df, 'data/avwap_anchors.csv')
-    print(f"Successfully saved {len(final_df)} anchor sets to cloud storage.")
+    if all_anchors:
+        anchors_df = pd.DataFrame(all_anchors)
+        save_path = 'data/avwap_anchors.csv'
+        save_df_to_s3(anchors_df, save_path)
+        print(f"\nSuccessfully saved a total of {len(anchors_df)} anchors to {save_path}.")
+    else:
+        print("\nNo new AVWAP anchors found across all tickers.")
+
+    print("--- Find AVWAP Anchors Job Finished ---")
 
 if __name__ == "__main__":
-    main()
+    job_name = "find_avwap_anchors"
+    update_scheduler_status(job_name, "Running")
+    try:
+        find_and_save_avwap_anchors()
+        update_scheduler_status(job_name, "Success")
+    except Exception as e:
+        error_message = f"An unexpected error occurred: {e}"
+        print(error_message)
+        update_scheduler_status(job_name, "Fail", error_message)
