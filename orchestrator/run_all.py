@@ -61,8 +61,15 @@ def main():
     Main orchestrator entry point. Uses a simple, robust, time-based loop
     to run jobs according to the market session.
     """
-    print("--- Starting Master Orchestrator (Stable Version 2.0) ---", flush=True)
-    update_scheduler_status("orchestrator", "Success", "System online.")
+    print("--- [1/4] Orchestrator main() function started. ---", flush=True)
+    
+    try:
+        update_scheduler_status("orchestrator", "Success", "System online.")
+        print("--- [2/4] Initial status logged successfully. ---", flush=True)
+    except Exception as e:
+        print(f"--- FATAL ERROR during initial status update: {e} ---", flush=True)
+        # Exit if we can't even log status, as something is fundamentally wrong.
+        return 
 
     # Dictionary to track the last run time of job groups to prevent re-running too frequently
     last_run = {
@@ -73,8 +80,11 @@ def main():
         "intraday_screeners": None
     }
     
+    print("--- [3/4] Last run dictionary initialized. Entering main loop... ---", flush=True)
+    
     while True:
         try:
+            print("--- [4/4] Top of main loop. Checking time and session... ---", flush=True)
             # Get current time in the market's timezone (New York)
             ny_timezone = pytz.timezone('America/New_York')
             ny_time = datetime.now(ny_timezone)
