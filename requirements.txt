@@ -1,6 +1,9 @@
 pandas
-schedule
-alpha_vantage
-streamlit
+requests
+pytz
 boto3
+schedule
+tqdm
+streamlit
 s3fs
+alpha_vantage
