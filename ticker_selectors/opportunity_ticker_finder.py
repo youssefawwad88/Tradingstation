@@ -2,6 +2,7 @@ import sys
 import os
 import pandas as pd
 import time
+from tqdm import tqdm
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -18,7 +19,6 @@ def run_opportunity_finder():
     
     # 1. Load the initial universe of stocks (S&P 500)
     print("Loading S&P 500 list from cloud storage...")
-    # Assuming the S&P 500 list is stored as a text file at this path
     initial_universe = read_tickerlist_from_s3('data/universe/sp500.csv')
     if not initial_universe:
         print("Could not load S&P 500 universe. Exiting.")
@@ -28,15 +28,15 @@ def run_opportunity_finder():
     
     qualified_tickers = []
     
-    # 2. Iterate and apply filters to each stock
-    for i, ticker in enumerate(initial_universe):
-        print(f"\n[{i+1}/{len(initial_universe)}] Filtering {ticker}...")
+    # 2. Iterate and apply filters to each stock with a progress bar
+    # Wrap the loop with tqdm for a visual progress bar
+    for i, ticker in tqdm(enumerate(initial_universe), total=len(initial_universe), desc="Filtering Universe"):
         
         try:
             # --- Filter 1: Fundamental Data (Market Cap, Float, Exchange) ---
             overview = get_company_overview(ticker)
             if not overview:
-                print(f"Skipping {ticker}: Could not fetch company overview.")
+                tqdm.write(f"Skipping {ticker}: Could not fetch company overview.")
                 time.sleep(15) # Sleep longer if overview fails, it's a heavier API call
                 continue
 
@@ -45,42 +45,39 @@ def run_opportunity_finder():
             exchange = overview.get("Exchange", "")
 
             if not (500_000_000 <= market_cap < 100_000_000_000):
-                print(f"Skipping {ticker}: Fails Market Cap rule (${market_cap / 1_000_000_000:.2f}B).")
+                tqdm.write(f"Skipping {ticker}: Fails Market Cap rule (${market_cap / 1_000_000_000:.2f}B).")
                 continue
             
             if not (10_000_000 <= shares_float <= 150_000_000):
-                print(f"Skipping {ticker}: Fails Float rule ({shares_float / 1_000_000:.2f}M shares).")
+                tqdm.write(f"Skipping {ticker}: Fails Float rule ({shares_float / 1_000_000:.2f}M shares).")
                 continue
 
             if exchange not in ["NASDAQ", "NYSE"]:
-                print(f"Skipping {ticker}: Fails Exchange rule ({exchange}).")
+                tqdm.write(f"Skipping {ticker}: Fails Exchange rule ({exchange}).")
                 continue
             
-            print(f"  ✅ {ticker} passes fundamental checks.")
-
             # --- Filter 2: Price and Volume Data ---
             daily_data = get_daily_data(ticker, outputsize='compact')
             if daily_data is None or daily_data.empty or len(daily_data) < 30:
-                print(f"Skipping {ticker}: Not enough daily data to analyze.")
+                tqdm.write(f"Skipping {ticker}: Not enough daily data to analyze.")
                 continue
 
             latest_price = daily_data['close'].iloc[0]
             avg_volume_30d = daily_data['volume'].head(30).mean()
 
             if not (2.00 <= latest_price <= 200.00):
-                print(f"Skipping {ticker}: Fails Price rule (${latest_price:.2f}).")
+                tqdm.write(f"Skipping {ticker}: Fails Price rule (${latest_price:.2f}).")
                 continue
             
             if avg_volume_30d < 1_000_000:
-                print(f"Skipping {ticker}: Fails Avg Volume rule ({avg_volume_30d:,.0f} shares/day).")
+                tqdm.write(f"Skipping {ticker}: Fails Avg Volume rule ({avg_volume_30d:,.0f} shares/day).")
                 continue
             
-            print(f"  ✅ {ticker} passes price/volume checks.")
-            print(f"  >>> {ticker} is a qualified candidate! <<<")
+            tqdm.write(f">>> {ticker} is a qualified candidate! <<<")
             qualified_tickers.append(ticker)
 
         except Exception as e:
-            print(f"An unexpected error occurred while processing {ticker}: {e}")
+            tqdm.write(f"An unexpected error occurred while processing {ticker}: {e}")
         
         # Respect API rate limits (premium keys can handle faster calls)
         time.sleep(1)
