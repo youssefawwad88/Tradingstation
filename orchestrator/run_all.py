@@ -61,14 +61,13 @@ def main():
     Main orchestrator entry point. Uses a simple, robust, time-based loop
     to run jobs according to the market session.
     """
-    print("--- [1/4] Orchestrator main() function started. ---", flush=True)
+    print("--- Orchestrator main() function started. ---", flush=True)
     
     try:
         update_scheduler_status("orchestrator", "Success", "System online.")
-        print("--- [2/4] Initial status logged successfully. ---", flush=True)
+        print("--- Initial status logged successfully. ---", flush=True)
     except Exception as e:
         print(f"--- FATAL ERROR during initial status update: {e} ---", flush=True)
-        # Exit if we can't even log status, as something is fundamentally wrong.
         return 
 
     # Dictionary to track the last run time of job groups to prevent re-running too frequently
@@ -80,21 +79,22 @@ def main():
         "intraday_screeners": None
     }
     
-    print("--- [3/4] Last run dictionary initialized. Entering main loop... ---", flush=True)
+    print("--- Last run dictionary initialized. Entering main loop... ---", flush=True)
     
     while True:
         try:
-            print("--- [4/4] Top of main loop. Checking time and session... ---", flush=True)
             # Get current time in the market's timezone (New York)
             ny_timezone = pytz.timezone('America/New_York')
             ny_time = datetime.now(ny_timezone)
             session = detect_market_session()
             
+            # Informative heartbeat log
+            print(f"Heartbeat: Loop running. NY Time: {ny_time.strftime('%H:%M:%S')}. Market Session: {session}", flush=True)
+            
             # --- Daily Setup (runs once per day after 8 AM ET) ---
             if ny_time.hour >= 8 and (last_run["daily_setup"] is None or last_run["daily_setup"].date() < ny_time.date()):
-                print("--- Running Daily Setup Jobs (Data + Daily Screeners) ---", flush=True)
+                print("--- Triggering Daily Setup Jobs (Data + Daily Screeners) ---", flush=True)
                 run_job_in_thread('jobs/update_all_data.py')
-                # Stagger daily screeners slightly after data job starts
                 time.sleep(10) 
                 run_job_in_thread('screeners/breakout.py')
                 run_job_in_thread('screeners/ema_pullback.py')
@@ -103,36 +103,35 @@ def main():
 
             # --- Intraday Logic ---
             if session == 'PRE-MARKET':
-                # Fetch 1-min data every 60 seconds
                 if last_run["intraday_data"] is None or (ny_time - last_run["intraday_data"]).total_seconds() >= 60:
+                    print("--- Triggering 1-min data fetch (Pre-Market) ---", flush=True)
                     run_job_in_thread('jobs/update_intraday_compact.py')
                     last_run["intraday_data"] = ny_time
                 
-                # Run Gap & Go every 15 minutes
                 if last_run["gapgo_premarket"] is None or (ny_time - last_run["gapgo_premarket"]).total_seconds() >= 900:
+                    print("--- Triggering Gap & Go (Pre-Market) ---", flush=True)
                     run_job_in_thread('screeners/gapgo.py')
                     last_run["gapgo_premarket"] = ny_time
 
             elif session == 'REGULAR':
-                # Fetch 1-min data every 60 seconds
                 if last_run["intraday_data"] is None or (ny_time - last_run["intraday_data"]).total_seconds() >= 60:
+                    print("--- Triggering 1-min data fetch (Regular) ---", flush=True)
                     run_job_in_thread('jobs/update_intraday_compact.py')
                     last_run["intraday_data"] = ny_time
 
-                # Run regular screeners every 15 minutes
                 if last_run["intraday_screeners"] is None or (ny_time - last_run["intraday_screeners"]).total_seconds() >= 900:
+                    print("--- Triggering Intraday Screeners (ORB, AVWAP) ---", flush=True)
                     run_job_in_thread('screeners/orb.py')
                     run_job_in_thread('screeners/avwap.py')
                     last_run["intraday_screeners"] = ny_time
 
-                # Run Gap & Go every 1 minute for the first hour (9:30 - 10:29 ET)
                 if (ny_time.hour == 9 and ny_time.minute >= 30) or (ny_time.hour == 10 and ny_time.minute < 30):
                     if last_run["gapgo_early"] is None or (ny_time - last_run["gapgo_early"]).total_seconds() >= 60:
+                        print("--- Triggering Gap & Go (Early Session) ---", flush=True)
                         run_job_in_thread('screeners/gapgo.py')
                         last_run["gapgo_early"] = ny_time
             
-            # Main loop sleep to prevent high CPU usage
-            time.sleep(10)
+            time.sleep(20) # Main loop sleep reduced slightly for responsiveness
 
         except Exception as e:
             print(f"--- CRITICAL ERROR IN MAIN ORCHESTRATOR LOOP! ---\n{e}", flush=True)
