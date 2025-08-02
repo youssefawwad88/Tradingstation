@@ -168,3 +168,12 @@ def get_premarket_data(intraday_df):
         "pre_high": pre_high, "pre_low": pre_low, "pre_vwap": pre_vwap,
         "pre_volume": pre_volume, "pre_range": pre_range
     }
+
+def get_previous_day_close(daily_df):
+    """Safely gets the previous day's close from a daily DataFrame."""
+    if daily_df is not None and len(daily_df) > 1:
+        # Sort by timestamp to ensure the second to last row is the previous day
+        daily_df['timestamp'] = pd.to_datetime(daily_df['timestamp'])
+        daily_df = daily_df.sort_values(by='timestamp', ascending=False)
+        return daily_df['close'].iloc[1]
+    return None
