@@ -1,145 +1,147 @@
+import sys
+import os
 import time
+from datetime import datetime, timedelta
+import pytz
 import threading
 import subprocess
-import os
-import sys
-from datetime import datetime
-import pytz
 
-# --- System Path Setup ---
+# Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-try:
-    from utils.helpers import update_scheduler_status, detect_market_session
-except ImportError:
-    print("FATAL ERROR: Could not import helper functions from utils.helpers.", flush=True)
-    # Define dummy functions to prevent immediate crash if helpers.py is missing/broken
-    def update_scheduler_status(job_name, status, details=""): pass
-    def detect_market_session(): return "CLOSED"
+from utils.helpers import update_scheduler_status, detect_market_session
 
-# --- Job Execution Logic ---
-def run_job_in_thread(script_path):
+# --- CONFIGURATION ---
+# Set to True to run all jobs once sequentially for a full system test, then exit.
+# Set to False for normal, 24/7 live operation.
+TEST_MODE = True 
+
+def run_job_in_thread(script_path, job_name):
     """
-    Runs a given script in a background thread with robust logging.
-    This prevents any single job from crashing the main orchestrator.
+    Runs a Python script in a separate thread and logs its status.
+    This is for jobs that can run in parallel without interfering with each other.
     """
-    job_name = os.path.basename(script_path).replace('.py', '')
-    full_path = os.path.join('/workspace', script_path)
-    
-    def job_logic():
-        print(f"--- Thread starting for job: {job_name} ---", flush=True)
+    def job_runner():
+        print(f"--- Thread starting for job: {job_name} ---")
         update_scheduler_status(job_name, "Running")
         try:
-            # Execute the script as a subprocess
-            process = subprocess.run(
+            # Use subprocess to run the script in an isolated process
+            full_path = os.path.join('/workspace', script_path)
+            result = subprocess.run(
                 [sys.executable, full_path],
-                capture_output=True, text=True, check=True,
-                timeout=900, env=os.environ # 15 minute timeout
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=900  # 15-minute timeout for any single job
             )
-            # Log success if the script completes with exit code 0
-            details = f"Completed successfully."
-            update_scheduler_status(job_name, "Success", details)
-            print(f"--- SUCCESS: {job_name} finished. ---", flush=True)
+            print(f"--- SUCCESS: {job_name} finished. ---")
+            if result.stdout:
+                print(f"--- STDOUT for {job_name} ---\n{result.stdout}\n--- End STDOUT ---")
+            update_scheduler_status(job_name, "Success")
+        except subprocess.TimeoutExpired:
+            print(f"--- TIMEOUT: {job_name} failed. ---")
+            update_scheduler_status(job_name, "Fail", "Job timed out after 15 minutes.")
         except subprocess.CalledProcessError as e:
-            # Log a failure if the script runs but exits with an error
-            error_message = f"Script exited with error code {e.returncode}.\n--- STDERR ---\n{e.stderr}"
-            print(f"--- ERROR: {job_name} failed. ---\n{error_message}", flush=True)
-            update_scheduler_status(job_name, "Fail", error_message)
+            print(f"--- ERROR: {job_name} failed. ---")
+            print(f"Script exited with error code {e.returncode}.")
+            error_details = f"--- STDERR ---\n{e.stderr}"
+            print(error_details)
+            update_scheduler_status(job_name, "Fail", f"Exited with code {e.returncode}. See logs for details.")
         except Exception as e:
-            # Log any other unexpected error during execution
-            error_message = f"An unexpected exception occurred: {str(e)}"
-            print(f"--- FATAL ERROR running {job_name}. ---\n{error_message}", flush=True)
-            update_scheduler_status(job_name, "Fail", error_message)
+            print(f"--- UNEXPECTED ERROR in {job_name} thread: {e} ---")
+            update_scheduler_status(job_name, "Fail", f"An unexpected error occurred: {e}")
 
-    # Create and start the thread for the job
-    thread = threading.Thread(target=job_logic, name=job_name)
+    thread = threading.Thread(target=job_runner)
     thread.start()
+    return thread
 
-# --- Main Orchestrator ---
 def main():
     """
-    Main orchestrator entry point. Uses a simple, robust, time-based loop
-    to run jobs according to the market session.
+    The main entry point for the trading station orchestrator.
     """
-    print("--- Starting Master Orchestrator (Final Production Version) ---", flush=True)
+    print(f"--- Starting Master Orchestrator (Final Production Version) ---")
     
-    try:
-        update_scheduler_status("orchestrator", "Success", "System online and running.")
-        print("--- Initial status logged successfully. ---", flush=True)
-    except Exception as e:
-        print(f"--- FATAL ERROR during initial status update: {e} ---", flush=True)
-        return 
+    if TEST_MODE:
+        print("\n--- !!! RUNNING IN TEST MODE (SEQUENTIAL) !!! ---")
+        print("--- This will run all jobs once in order and then exit. ---\n")
+        
+        # In test mode, we run everything sequentially to get clean logs.
+        jobs_to_run = {
+            "opportunity_ticker_finder": "ticker_selectors/opportunity_ticker_finder.py",
+            "update_all_data": "jobs/update_all_data.py",
+            "find_avwap_anchors": "jobs/find_avwap_anchors.py",
+            "update_intraday_compact": "jobs/update_intraday_compact.py",
+            "breakout": "screeners/breakout.py",
+            "ema_pullback": "screeners/ema_pullback.py",
+            "exhaustion": "screeners/exhaustion.py",
+            "gapgo": "screeners/gapgo.py",
+            "orb": "screeners/orb.py",
+            "avwap": "screeners/avwap.py",
+            "master_dashboard": "dashboard/master_dashboard.py"
+        }
 
-    # Dictionary to track the last run time of job groups to prevent re-running too frequently
-    last_run = {
-        "daily_rebuild": None,
-        "compact_append": None,
-        "gapgo_premarket": None,
-        "gapgo_early": None,
-        "intraday_screeners": None,
-        "daily_screeners": None
-    }
-    
-    print("--- Last run dictionary initialized. Entering main operational loop... ---", flush=True)
-    
+        for job_name, script_path in jobs_to_run.items():
+            run_job_in_thread(script_path, job_name).join() # .join() waits for the thread to complete
+
+        print("\n--- Diagnostic test run finished. Exiting. ---")
+        return
+
+    # --- LIVE OPERATION LOOP ---
+    print("--- Entering main operational loop for live 24/7 trading. ---")
+    last_run = {job: None for job in ["daily_rebuild", "daily_screeners", "intraday_1min", "intraday_15min"]}
+
     while True:
         try:
-            # Get current time in the market's timezone (New York)
-            ny_timezone = pytz.timezone('America/New_York')
-            ny_time = datetime.now(ny_timezone)
-            session = detect_market_session()
+            now = datetime.now(pytz.utc)
+            ny_time = now.astimezone(pytz.timezone("America/New_York"))
+            market_session = detect_market_session()
+
+            print(f"Heartbeat: Loop running. NY Time: {ny_time.strftime('%H:%M:%S')}. Market Session: {market_session}")
+
+            # --- Daily Full Rebuild (Once a day, e.g., at 6 AM ET) ---
+            if ny_time.hour == 6 and (last_run["daily_rebuild"] is None or last_run["daily_rebuild"].date() != now.date()):
+                print("\n--- Triggering Daily Full Rebuild Job ---")
+                run_job_in_thread("jobs/update_all_data.py", "update_all_data")
+                run_job_in_thread("jobs/find_avwap_anchors.py", "find_avwap_anchors")
+                last_run["daily_rebuild"] = now
+
+            # --- Daily Screeners & Ticker Finder (Once a day, after rebuild) ---
+            if ny_time.hour == 6 and ny_time.minute >= 5 and (last_run["daily_screeners"] is None or last_run["daily_screeners"].date() != now.date()):
+                print("\n--- Triggering Daily Screeners & Ticker Finder ---")
+                run_job_in_thread("ticker_selectors/opportunity_ticker_finder.py", "opportunity_ticker_finder")
+                run_job_in_thread("screeners/breakout.py", "breakout")
+                run_job_in_thread("screeners/ema_pullback.py", "ema_pullback")
+                run_job_in_thread("screeners/exhaustion.py", "exhaustion")
+                last_run["daily_screeners"] = now
+
+            # --- 1-Minute Jobs (During market hours) ---
+            if market_session in ["PRE-MARKET", "REGULAR"]:
+                if last_run["intraday_1min"] is None or (now - last_run["intraday_1min"]) >= timedelta(minutes=1):
+                    print("\n--- Triggering 1-Minute Intraday Jobs ---")
+                    run_job_in_thread("jobs/update_intraday_compact.py", "update_intraday_compact")
+                    run_job_in_thread("screeners/gapgo.py", "gapgo")
+                    last_run["intraday_1min"] = now
             
-            print(f"Heartbeat: Loop running. NY Time: {ny_time.strftime('%H:%M:%S')}. Market Session: {session}", flush=True)
-            
-            # --- Full Rebuild (runs once per day after 6 AM ET) ---
-            if ny_time.hour >= 6 and (last_run["daily_rebuild"] is None or last_run["daily_rebuild"].date() < ny_time.date()):
-                print("--- Triggering Daily Full Rebuild Job ---", flush=True)
-                run_job_in_thread('jobs/update_all_data.py')
-                last_run["daily_rebuild"] = ny_time
-                # After rebuild, trigger daily screeners
-                last_run["daily_screeners"] = None 
+            # --- 15-Minute Jobs (During regular session) ---
+            if market_session == "REGULAR":
+                if last_run["intraday_15min"] is None or (now - last_run["intraday_15min"]) >= timedelta(minutes=15):
+                    print("\n--- Triggering 15-Minute Intraday Jobs ---")
+                    run_job_in_thread("screeners/orb.py", "orb")
+                    run_job_in_thread("screeners/avwap.py", "avwap")
+                    run_job_in_thread("dashboard/master_dashboard.py", "master_dashboard")
+                    last_run["intraday_15min"] = now
 
-            # --- Daily Screeners (run once after daily rebuild) ---
-            if last_run["daily_rebuild"] is not None and last_run["daily_screeners"] is None and last_run["daily_rebuild"].date() == ny_time.date():
-                 print("--- Triggering Daily Screeners ---", flush=True)
-                 run_job_in_thread('screeners/breakout.py')
-                 run_job_in_thread('screeners/ema_pullback.py')
-                 run_job_in_thread('screeners/exhaustion.py')
-                 last_run["daily_screeners"] = ny_time
-
-            # --- Intraday Logic ---
-            if session == 'PRE-MARKET' or session == 'REGULAR':
-                # Run compact appender every 1 minute
-                if last_run["compact_append"] is None or (ny_time - last_run["compact_append"]).total_seconds() >= 60:
-                    run_job_in_thread('jobs/update_intraday_compact.py')
-                    last_run["compact_append"] = ny_time
-
-            if session == 'PRE-MARKET':
-                # Run Gap & Go every 15 minutes
-                if last_run["gapgo_premarket"] is None or (ny_time - last_run["gapgo_premarket"]).total_seconds() >= 900:
-                    run_job_in_thread('screeners/gapgo.py')
-                    last_run["gapgo_premarket"] = ny_time
-
-            elif session == 'REGULAR':
-                # Run regular screeners every 15 minutes
-                if last_run["intraday_screeners"] is None or (ny_time - last_run["intraday_screeners"]).total_seconds() >= 900:
-                    run_job_in_thread('screeners/orb.py')
-                    run_job_in_thread('screeners/avwap.py')
-                    last_run["intraday_screeners"] = ny_time
-
-                # Run Gap & Go every 1 minute for the first hour (9:30 - 10:29 ET)
-                if (ny_time.hour == 9 and ny_time.minute >= 30) or (ny_time.hour == 10 and ny_time.minute < 30):
-                    if last_run["gapgo_early"] is None or (ny_time - last_run["gapgo_early"]).total_seconds() >= 60:
-                        run_job_in_thread('screeners/gapgo.py')
-                        last_run["gapgo_early"] = ny_time
-            
-            # Main loop sleep to prevent high CPU usage
-            time.sleep(15)
+            time.sleep(15)  # Main loop sleeps for 15 seconds
 
         except Exception as e:
-            print(f"--- CRITICAL ERROR IN MAIN ORCHESTRATOR LOOP! ---\n{e}", flush=True)
-            print("Restarting loop in 30 seconds to ensure stability...", flush=True)
+            print(f"--- CRITICAL ERROR IN MAIN ORCHESTRATOR LOOP: {e} ---")
+            print("--- Restarting loop in 30 seconds... ---")
             time.sleep(30)
 
 if __name__ == "__main__":
-    main()
+    # A simple wrapper to ensure the orchestrator restarts if it ever exits unexpectedly
+    try:
+        main()
+    except Exception as e:
+        print(f"Orchestrator 'main' function crashed with unhandled exception: {e}")
+        # In a real production system, this could trigger an external alert.
