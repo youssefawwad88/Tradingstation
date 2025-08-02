@@ -67,15 +67,11 @@ def read_tickerlist_from_s3(file_path='tickerlist.txt'):
         response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
         content = response['Body'].read().decode('utf-8')
         return [line.strip().upper() for line in content.split('\n') if line.strip()]
-    except ClientError as e:
-        if e.response['Error']['Code'] != 'NoSuchKey':
-            print(f"ClientError reading tickerlist from {file_path}: {e}")
-        return []
     except Exception as e:
-        print(f"Unexpected error reading tickerlist from {file_path}: {e}")
+        print(f"Error reading tickerlist from {file_path}: {e}")
         return []
 
-# --- System & Status Helpers ---
+# --- System Status & Session Helpers ---
 def update_scheduler_status(job_name, status, details=""):
     """Updates or creates a scheduler status log in S3."""
     log_file_key = 'data/logs/scheduler_status.csv'
@@ -106,65 +102,69 @@ def detect_market_session():
     else:
         return 'CLOSED'
 
-# --- TRADING LOGIC FUNCTION (IMPLEMENTED) ---
-def get_premarket_data(ticker, intraday_df):
-    """
-    Extracts pre-market candles and calculates key stats.
-    
-    Args:
-        ticker (str): The stock ticker symbol.
-        intraday_df (pd.DataFrame): The 1-minute intraday data.
+# --- SHARED CALCULATION HELPERS (As per your logic) ---
 
-    Returns:
-        dict: A dictionary containing pre-market high, low, vwap, volume, and range.
-              Returns a dictionary of None/0 values if no pre-market data is found.
-    """
+def format_to_two_decimal(value):
+    """Round numeric values to 2 decimal places, handling errors safely."""
+    try:
+        return round(float(value), 2)
+    except (ValueError, TypeError):
+        return None
+
+def calculate_vwap(df):
+    """Calculate Volume Weighted Average Price (VWAP)."""
+    if df.empty or 'high' not in df.columns or 'volume' not in df.columns:
+        return None
+    try:
+        typical_price = (df['high'] + df['low'] + df['close']) / 3
+        return round((typical_price * df['volume']).sum() / df['volume'].sum(), 2)
+    except (TypeError, ZeroDivisionError):
+        return None
+
+def calculate_ema(series, span):
+    """Calculate Exponential Moving Average."""
+    return series.ewm(span=span, adjust=False).mean()
+
+def calculate_sma(series, window):
+    """Calculate Simple Moving Average."""
+    return series.rolling(window=window).mean()
+
+def calculate_atr(df, window=14):
+    """Calculate Average True Range."""
+    if df.empty: return None
+    high_low = df['high'] - df['low']
+    high_close = abs(df['high'] - df['close'].shift())
+    low_close = abs(df['low'] - df['close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    return tr.rolling(window=window).mean()
+
+def is_volume_spike(current_volume, avg_volume, threshold=1.15):
+    """Check if current volume is a spike compared to average volume."""
+    try:
+        return current_volume >= avg_volume * threshold
+    except (ValueError, TypeError):
+        return False
+
+def get_premarket_data(intraday_df):
+    """Extracts pre-market candles and calculates key stats."""
     if intraday_df.empty or 'timestamp' not in intraday_df.columns:
-        return {
-            "pre_high": None, "pre_low": None, "pre_vwap": None,
-            "pre_volume": 0, "pre_range": None
-        }
+        return {"pre_high": None, "pre_low": None, "pre_vwap": None, "pre_volume": 0, "pre_range": None}
 
-    # Ensure timestamp is a datetime object and set it as the index
     df = intraday_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df = df.set_index('timestamp')
-
-    # Localize to UTC then convert to US/Eastern
-    df.index = df.index.tz_localize('UTC').tz_convert('America/New_York')
-
-    # Filter for pre-market hours
+    df = df.set_index('timestamp').tz_localize('UTC').tz_convert('America/New_York')
     pre_market_df = df.between_time('04:00', '09:29:59')
 
     if pre_market_df.empty:
-        return {
-            "pre_high": None, "pre_low": None, "pre_vwap": None,
-            "pre_volume": 0, "pre_range": None
-        }
+        return {"pre_high": None, "pre_low": None, "pre_vwap": None, "pre_volume": 0, "pre_range": None}
 
-    # Calculate stats
     pre_high = pre_market_df['high'].max()
     pre_low = pre_market_df['low'].min()
-    pre_volume = pre_market_df['volume'].sum()
-    
-    # Calculate VWAP
-    typical_price = (pre_market_df['high'] + pre_market_df['low'] + pre_market_df['close']) / 3
-    tpv = typical_price * pre_market_df['volume']
-    pre_vwap = tpv.sum() / pre_volume if pre_volume > 0 else None
-    
-    pre_range = pre_high - pre_low
+    pre_volume = int(pre_market_df['volume'].sum())
+    pre_vwap = calculate_vwap(pre_market_df)
+    pre_range = pre_high - pre_low if pre_high is not None and pre_low is not None else None
 
     return {
-        "pre_high": pre_high,
-        "pre_low": pre_low,
-        "pre_vwap": pre_vwap,
-        "pre_volume": int(pre_volume),
-        "pre_range": pre_range
+        "pre_high": pre_high, "pre_low": pre_low, "pre_vwap": pre_vwap,
+        "pre_volume": pre_volume, "pre_range": pre_range
     }
-
-# --- Other Calculation Helpers ---
-def get_previous_day_close(daily_df):
-    """Safely gets the previous day's close from a daily DataFrame."""
-    if daily_df is not None and len(daily_df) > 1:
-        return daily_df['close'].iloc[-2]
-    return None
