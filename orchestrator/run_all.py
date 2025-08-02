@@ -18,41 +18,41 @@ except ImportError:
     def detect_market_session(): return "CLOSED"
 
 # --- Job Execution Logic ---
-def run_job_in_thread(script_path):
+def run_job(script_path):
     """
-    Runs a given script in a background thread with robust logging.
-    This prevents any single job from crashing the main orchestrator.
+    Runs a given script as a subprocess with robust logging.
+    This is the core execution function.
     """
     job_name = os.path.basename(script_path).replace('.py', '')
     full_path = os.path.join('/workspace', script_path)
     
-    def job_logic():
-        print(f"--- Thread starting for job: {job_name} ---", flush=True)
-        update_scheduler_status(job_name, "Running")
-        try:
-            # Execute the script as a subprocess
-            process = subprocess.run(
-                [sys.executable, full_path],
-                capture_output=True, text=True, check=True,
-                timeout=900, env=os.environ # 15 minute timeout
-            )
-            # Log success if the script completes with exit code 0
-            details = f"Completed successfully."
-            update_scheduler_status(job_name, "Success", details)
-            print(f"--- SUCCESS: {job_name} finished. ---", flush=True)
-        except subprocess.CalledProcessError as e:
-            # Log a failure if the script runs but exits with an error
-            error_message = f"Script exited with error code {e.returncode}.\n--- STDERR ---\n{e.stderr}"
-            print(f"--- ERROR: {job_name} failed. ---\n{error_message}", flush=True)
-            update_scheduler_status(job_name, "Fail", error_message)
-        except Exception as e:
-            # Log any other unexpected error during execution
-            error_message = f"An unexpected exception occurred: {str(e)}"
-            print(f"--- FATAL ERROR running {job_name}. ---\n{error_message}", flush=True)
-            update_scheduler_status(job_name, "Fail", error_message)
+    print(f"--- Starting job: {job_name} ---", flush=True)
+    update_scheduler_status(job_name, "Running")
+    try:
+        # Execute the script as a subprocess
+        process = subprocess.run(
+            [sys.executable, full_path],
+            capture_output=True, text=True, check=True,
+            timeout=900, env=os.environ # 15 minute timeout
+        )
+        # Log success if the script completes with exit code 0
+        details = f"Completed successfully."
+        update_scheduler_status(job_name, "Success", details)
+        print(f"--- SUCCESS: {job_name} finished. ---", flush=True)
+    except subprocess.CalledProcessError as e:
+        # Log a failure if the script runs but exits with an error
+        error_message = f"Script exited with error code {e.returncode}.\n--- STDERR ---\n{e.stderr}"
+        print(f"--- ERROR: {job_name} failed. ---\n{error_message}", flush=True)
+        update_scheduler_status(job_name, "Fail", error_message)
+    except Exception as e:
+        # Log any other unexpected error during execution
+        error_message = f"An unexpected exception occurred: {str(e)}"
+        print(f"--- FATAL ERROR running {job_name}. ---\n{error_message}", flush=True)
+        update_scheduler_status(job_name, "Fail", error_message)
 
-    # Create and start the thread for the job
-    thread = threading.Thread(target=job_logic, name=job_name)
+def run_job_in_thread(script_path):
+    """Wrapper to run the job logic in a background thread for normal operation."""
+    thread = threading.Thread(target=run_job, args=(script_path,), name=os.path.basename(script_path))
     thread.start()
 
 # --- Main Orchestrator ---
@@ -62,35 +62,26 @@ def main():
     to run jobs according to the market session.
     """
     # --- TEST MODE FLAG ---
-    # Set to True to run all jobs once for testing, then exit.
+    # Set to True to run all jobs once sequentially for testing, then exit.
     # Set to False for normal, live operation.
     TEST_MODE = True
 
     print("--- Orchestrator main() function started. ---", flush=True)
     
     if TEST_MODE:
-        print("--- !!! RUNNING IN TEST MODE !!! ---", flush=True)
-        print("--- This will run all jobs once and then exit. ---", flush=True)
+        print("--- !!! RUNNING IN DIAGNOSTIC TEST MODE (SEQUENTIAL) !!! ---", flush=True)
         
-        # Run all jobs for a complete end-to-end test
-        print("\n--- Triggering Daily Setup Jobs... ---", flush=True)
-        run_job_in_thread('jobs/update_all_data.py')
-        time.sleep(10) # Stagger to allow data job to start
-        run_job_in_thread('screeners/breakout.py')
-        run_job_in_thread('screeners/ema_pullback.py')
-        run_job_in_thread('screeners/exhaustion.py')
+        # Run all jobs sequentially to isolate the failing script
+        run_job('jobs/update_all_data.py')
+        run_job('screeners/breakout.py')
+        run_job('screeners/ema_pullback.py')
+        run_job('screeners/exhaustion.py')
+        run_job('jobs/update_intraday_compact.py')
+        run_job('screeners/gapgo.py')
+        run_job('screeners/orb.py')
+        run_job('screeners/avwap.py')
         
-        print("\n--- Triggering Intraday Jobs... ---", flush=True)
-        run_job_in_thread('jobs/update_intraday_compact.py')
-        time.sleep(10) # Stagger to allow data job to start
-        run_job_in_thread('screeners/gapgo.py')
-        run_job_in_thread('screeners/orb.py')
-        run_job_in_thread('screeners/avwap.py')
-        
-        print("\n--- Test sequence initiated. Waiting for jobs to complete... ---", flush=True)
-        # Wait for a reasonable time for threads to finish before exiting
-        time.sleep(120) 
-        print("--- Test run finished. Exiting. ---", flush=True)
+        print("\n--- Diagnostic test run finished. Exiting. ---", flush=True)
         return # Exit after the test run
 
     # --- NORMAL OPERATION LOOP (runs if TEST_MODE is False) ---
