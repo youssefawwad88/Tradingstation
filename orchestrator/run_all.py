@@ -29,11 +29,11 @@ def run_job(script_path):
     print(f"--- Starting job: {job_name} ---", flush=True)
     update_scheduler_status(job_name, "Running")
     try:
-        # Execute the script as a subprocess
+        # Execute the script as a subprocess with a shorter timeout for testing
         process = subprocess.run(
             [sys.executable, full_path],
             capture_output=True, text=True, check=True,
-            timeout=900, env=os.environ # 15 minute timeout
+            timeout=120, env=os.environ # Reduced timeout to 2 minutes
         )
         # Log success if the script completes with exit code 0
         details = f"Completed successfully."
@@ -43,6 +43,13 @@ def run_job(script_path):
         # Log a failure if the script runs but exits with an error
         error_message = f"Script exited with error code {e.returncode}.\n--- STDERR ---\n{e.stderr}"
         print(f"--- ERROR: {job_name} failed. ---\n{error_message}", flush=True)
+        update_scheduler_status(job_name, "Fail", error_message)
+    except subprocess.TimeoutExpired as e:
+        # Log a failure if the script takes too long
+        error_message = f"Job timed out after 2 minutes. The script may be stuck in a loop or waiting for a slow API response."
+        error_message += f"\n--- STDOUT ---\n{e.stdout}\n"
+        error_message += f"--- STDERR ---\n{e.stderr}\n"
+        print(f"--- TIMEOUT: {job_name} failed. ---\n{error_message}", flush=True)
         update_scheduler_status(job_name, "Fail", error_message)
     except Exception as e:
         # Log any other unexpected error during execution
