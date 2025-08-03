@@ -51,20 +51,6 @@ def run_job(script_path, job_name):
         update_scheduler_status(job_name, "Fail", str(e))
         return False
 
-def run_jobs_in_parallel(jobs_to_run):
-    """Runs a dictionary of jobs in parallel threads and waits for all to complete."""
-    threads = []
-    for job_name, script_path in jobs_to_run.items():
-        thread = threading.Thread(target=run_job, args=(script_path, job_name))
-        threads.append(thread)
-        thread.start()
-        time.sleep(0.1) # Stagger start times slightly
-
-    for thread in threads:
-        thread.join() # Wait for all threads to complete
-    print("\n--- Parallel job batch finished. ---")
-
-
 def main():
     """
     The main entry point for the trading station orchestrator.
@@ -82,14 +68,20 @@ def main():
         if not run_job("jobs/update_all_data.py", "update_all_data"): return
         if not run_job("jobs/find_avwap_anchors.py", "find_avwap_anchors"): return
 
-        # --- Stage 3: Screening (can run in parallel) ---
-        print("\n--- Running Screener Jobs in Parallel... ---")
+        # --- Stage 3: Screening (run sequentially in test mode for clear logs) ---
+        print("\n--- Running Screener Jobs Sequentially for Debugging... ---")
         screener_jobs = {
-            "breakout": "screeners/breakout.py", "ema_pullback": "screeners/ema_pullback.py",
-            "exhaustion": "screeners/exhaustion.py", "gapgo": "screeners/gapgo.py",
-            "orb": "screeners/orb.py", "avwap": "screeners/avwap.py"
+            "breakout": "screeners/breakout.py", 
+            "ema_pullback": "screeners/ema_pullback.py",
+            "exhaustion": "screeners/exhaustion.py", 
+            "gapgo": "screeners/gapgo.py",
+            "orb": "screeners/orb.py", 
+            "avwap": "screeners/avwap.py"
         }
-        run_jobs_in_parallel(screener_jobs)
+        for job_name, script_path in screener_jobs.items():
+            if not run_job(script_path, job_name):
+                print(f"\n--- 🛑 Test stopped due to failure in {job_name}. ---")
+                return # Stop the test on the first failure
 
         # --- Stage 4: Final Consolidation ---
         if not run_job("dashboard/master_dashboard.py", "master_dashboard"): return
@@ -97,7 +89,7 @@ def main():
         print("\n--- ✅ Diagnostic test run finished successfully. Exiting. ---")
         return
 
-    # --- LIVE OPERATION LOOP (To be implemented based on test success) ---
+    # --- LIVE OPERATION LOOP ---
     print("--- Live mode is not yet implemented. Set TEST_MODE to True. ---")
 
 
