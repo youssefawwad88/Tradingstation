@@ -7,75 +7,67 @@ from tqdm import tqdm
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_tickerlist_from_s3, save_list_to_s3, update_scheduler_status
-from utils.alpha_vantage_api import get_company_overview
+from utils.helpers import read_df_from_s3, save_list_to_s3, update_scheduler_status
+from utils.alpha_vantage_api import get_daily_data
 
 def run_opportunity_finder():
     """
-    Applies Ashraf-style pre-filters to a universe of stocks (S&P 500)
-    to generate a small, actionable watchlist for the day.
-    This optimized version uses only the OVERVIEW API call for speed.
+    Applies final price and volume filters to a pre-qualified list of stocks
+    to generate the final, actionable watchlist for the day.
+    This job is designed to be very fast.
     """
-    print("--- Starting Opportunity Ticker Finder (Optimized Version) ---")
+    print("--- Starting Daily Opportunity Finder Job ---")
     
-    print("Loading S&P 500 list from cloud storage...")
-    initial_universe = read_tickerlist_from_s3('data/universe/sp500.csv')
-    if not initial_universe:
-        print("Could not load S&P 500 universe. Exiting.")
+    # 1. Load the pre-filtered universe created by the weekly job
+    print("Loading pre-filtered universe from cloud storage...")
+    pre_filtered_df = read_df_from_s3('data/universe/prefiltered_universe.csv')
+    if pre_filtered_df.empty:
+        print("Could not load the pre-filtered universe. The weekly scan may need to be run. Exiting.")
         return
 
-    print(f"Loaded {len(initial_universe)} stocks as the initial universe.")
+    pre_filtered_tickers = pre_filtered_df['ticker'].tolist()
+    print(f"Loaded {len(pre_filtered_tickers)} pre-filtered stocks to analyze.")
     
-    qualified_tickers = []
+    final_watchlist = []
     
-    for ticker in tqdm(initial_universe, desc="Filtering Universe"):
+    # 2. Iterate through the SMALL list and apply final checks
+    for ticker in tqdm(pre_filtered_tickers, desc="Finalizing Watchlist"):
         try:
-            # This single API call gets us most of the data we need for pre-filtering
-            overview = get_company_overview(ticker)
-            if not overview:
-                tqdm.write(f"Skipping {ticker}: Could not fetch company overview.")
-                time.sleep(15) # Sleep longer if overview fails, it's a heavier API call
+            # Fetch just enough daily data to check price and volume
+            daily_data = get_daily_data(ticker, outputsize='compact')
+            if daily_data is None or daily_data.empty or len(daily_data) < 30:
+                tqdm.write(f"Skipping {ticker}: Not enough daily data for final checks.")
                 continue
 
-            # --- Apply All Filters Using the Overview Data ---
-            market_cap = int(overview.get("MarketCapitalization", 0))
-            shares_float = int(overview.get("SharesFloat", 0))
-            exchange = overview.get("Exchange", "")
-            avg_volume_50d = int(overview.get("50DayMovingAverage", 0)) # Using 50d avg as a proxy for volume
-            latest_price = float(overview.get("AnalystTargetPrice", 0)) # Using a proxy for price
+            latest_price = daily_data['close'].iloc[0]
+            avg_volume_30d = daily_data['volume'].head(30).mean()
 
-            if not (500_000_000 <= market_cap < 100_000_000_000):
-                continue
-            
-            if not (10_000_000 <= shares_float <= 150_000_000):
-                continue
-
-            if exchange not in ["NASDAQ", "NYSE"]:
-                continue
-            
-            # Note: Price and Volume from OVERVIEW are less precise but much faster for a first pass.
+            # Apply the final price and volume filters
             if not (2.00 <= latest_price <= 200.00):
-                 continue
-            
-            if avg_volume_50d < 1_000_000:
+                tqdm.write(f"Skipping {ticker}: Fails Price rule (${latest_price:.2f}).")
                 continue
             
-            tqdm.write(f">>> {ticker} is a qualified candidate! <<<")
-            qualified_tickers.append(ticker)
+            if avg_volume_30d < 1_000_000:
+                tqdm.write(f"Skipping {ticker}: Fails Avg Volume rule ({avg_volume_30d:,.0f} shares/day).")
+                continue
+            
+            tqdm.write(f">>> {ticker} added to final daily watchlist! <<<")
+            final_watchlist.append(ticker)
 
         except Exception as e:
             tqdm.write(f"An unexpected error occurred while processing {ticker}: {e}")
         
-        time.sleep(1)
+        time.sleep(1) # Pause briefly between API calls
 
-    print(f"\nFiltering complete. Found {len(qualified_tickers)} qualified tickers.")
-    if qualified_tickers:
-        save_list_to_s3(qualified_tickers, 'tickerlist.txt')
-        print("Successfully saved the new master tickerlist to cloud storage.")
+    # 3. Save the final, filtered list to the master tickerlist.txt
+    print(f"\nFinal filtering complete. Found {len(final_watchlist)} stocks for today's watchlist.")
+    if final_watchlist:
+        save_list_to_s3(final_watchlist, 'tickerlist.txt')
+        print("Successfully saved the new master tickerlist for the day.")
     else:
-        print("No tickers met all criteria. The master list will not be updated.")
+        print("No tickers passed the final checks. The master list will be empty.")
 
-    print("--- Opportunity Ticker Finder Finished ---")
+    print("--- Daily Opportunity Finder Job Finished ---")
 
 if __name__ == "__main__":
     job_name = "opportunity_ticker_finder"
