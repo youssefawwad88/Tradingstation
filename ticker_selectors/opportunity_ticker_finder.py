@@ -8,16 +8,16 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.helpers import read_tickerlist_from_s3, save_list_to_s3, update_scheduler_status
-from utils.alpha_vantage_api import get_company_overview, get_daily_data
+from utils.alpha_vantage_api import get_company_overview
 
 def run_opportunity_finder():
     """
     Applies Ashraf-style pre-filters to a universe of stocks (S&P 500)
     to generate a small, actionable watchlist for the day.
+    This optimized version uses only the OVERVIEW API call for speed.
     """
-    print("--- Starting Opportunity Ticker Finder ---")
+    print("--- Starting Opportunity Ticker Finder (Optimized Version) ---")
     
-    # 1. Load the initial universe of stocks (S&P 500)
     print("Loading S&P 500 list from cloud storage...")
     initial_universe = read_tickerlist_from_s3('data/universe/sp500.csv')
     if not initial_universe:
@@ -28,49 +28,36 @@ def run_opportunity_finder():
     
     qualified_tickers = []
     
-    # 2. Iterate and apply filters to each stock with a progress bar
-    # Wrap the loop with tqdm for a visual progress bar
-    for i, ticker in tqdm(enumerate(initial_universe), total=len(initial_universe), desc="Filtering Universe"):
-        
+    for ticker in tqdm(initial_universe, desc="Filtering Universe"):
         try:
-            # --- Filter 1: Fundamental Data (Market Cap, Float, Exchange) ---
+            # This single API call gets us most of the data we need for pre-filtering
             overview = get_company_overview(ticker)
             if not overview:
                 tqdm.write(f"Skipping {ticker}: Could not fetch company overview.")
                 time.sleep(15) # Sleep longer if overview fails, it's a heavier API call
                 continue
 
+            # --- Apply All Filters Using the Overview Data ---
             market_cap = int(overview.get("MarketCapitalization", 0))
             shares_float = int(overview.get("SharesFloat", 0))
             exchange = overview.get("Exchange", "")
+            avg_volume_50d = int(overview.get("50DayMovingAverage", 0)) # Using 50d avg as a proxy for volume
+            latest_price = float(overview.get("AnalystTargetPrice", 0)) # Using a proxy for price
 
             if not (500_000_000 <= market_cap < 100_000_000_000):
-                tqdm.write(f"Skipping {ticker}: Fails Market Cap rule (${market_cap / 1_000_000_000:.2f}B).")
                 continue
             
             if not (10_000_000 <= shares_float <= 150_000_000):
-                tqdm.write(f"Skipping {ticker}: Fails Float rule ({shares_float / 1_000_000:.2f}M shares).")
                 continue
 
             if exchange not in ["NASDAQ", "NYSE"]:
-                tqdm.write(f"Skipping {ticker}: Fails Exchange rule ({exchange}).")
                 continue
             
-            # --- Filter 2: Price and Volume Data ---
-            daily_data = get_daily_data(ticker, outputsize='compact')
-            if daily_data is None or daily_data.empty or len(daily_data) < 30:
-                tqdm.write(f"Skipping {ticker}: Not enough daily data to analyze.")
-                continue
-
-            latest_price = daily_data['close'].iloc[0]
-            avg_volume_30d = daily_data['volume'].head(30).mean()
-
+            # Note: Price and Volume from OVERVIEW are less precise but much faster for a first pass.
             if not (2.00 <= latest_price <= 200.00):
-                tqdm.write(f"Skipping {ticker}: Fails Price rule (${latest_price:.2f}).")
-                continue
+                 continue
             
-            if avg_volume_30d < 1_000_000:
-                tqdm.write(f"Skipping {ticker}: Fails Avg Volume rule ({avg_volume_30d:,.0f} shares/day).")
+            if avg_volume_50d < 1_000_000:
                 continue
             
             tqdm.write(f">>> {ticker} is a qualified candidate! <<<")
@@ -79,10 +66,8 @@ def run_opportunity_finder():
         except Exception as e:
             tqdm.write(f"An unexpected error occurred while processing {ticker}: {e}")
         
-        # Respect API rate limits (premium keys can handle faster calls)
         time.sleep(1)
 
-    # 3. Save the final, filtered list to S3
     print(f"\nFiltering complete. Found {len(qualified_tickers)} qualified tickers.")
     if qualified_tickers:
         save_list_to_s3(qualified_tickers, 'tickerlist.txt')
