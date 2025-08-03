@@ -14,7 +14,7 @@ def find_and_save_avwap_anchors():
     - Identifies candles with high volume and large range ("power candles").
     - Saves these anchor points to a single CSV file.
     """
-    print("--- Starting Find AVWAP Anchors Job ---")
+    print("--- Starting Find AVWAP Anchors Job (Robust Version) ---")
     
     tickers = read_tickerlist_from_s3()
     if not tickers:
@@ -28,24 +28,22 @@ def find_and_save_avwap_anchors():
             daily_df_path = f'data/daily/{ticker}_daily.csv'
             daily_df = read_df_from_s3(daily_df_path)
 
-            if daily_df.empty:
-                print(f"No daily data for {ticker}, skipping anchor search.")
+            if daily_df.empty or 'timestamp' not in daily_df.columns:
+                print(f"No valid daily data for {ticker}, skipping anchor search.")
                 continue
 
-            # Ensure data is sorted by date, oldest to newest
             daily_df['timestamp'] = pd.to_datetime(daily_df['timestamp'])
             daily_df.sort_values('timestamp', inplace=True)
 
-            # Calculate average volume and candle range
             avg_volume = daily_df['volume'].rolling(window=20).mean()
             candle_range = daily_df['high'] - daily_df['low']
             avg_range = candle_range.rolling(window=20).mean()
 
-            # Identify "power candles" (e.g., volume > 1.5x avg AND range > 1.5x avg)
+            # Identify "power candles"
             power_candles = daily_df[
                 (daily_df['volume'] > avg_volume * 1.5) &
                 (candle_range > avg_range * 1.5)
-            ]
+            ].copy() # Use .copy() to avoid SettingWithCopyWarning
 
             if not power_candles.empty:
                 for _, row in power_candles.iterrows():
@@ -57,8 +55,10 @@ def find_and_save_avwap_anchors():
                     })
                 print(f"Found {len(power_candles)} AVWAP anchor(s) for {ticker}.")
 
+        except KeyError as e:
+             print(f"ERROR finding anchors for {ticker}: A required column is missing - {e}")
         except Exception as e:
-            print(f"ERROR finding anchors for {ticker}: {e}")
+            print(f"An unexpected error occurred while finding anchors for {ticker}: {e}")
 
     if all_anchors:
         anchors_df = pd.DataFrame(all_anchors)
