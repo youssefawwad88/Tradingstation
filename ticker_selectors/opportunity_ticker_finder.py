@@ -15,7 +15,7 @@ def run_opportunity_finder():
     Applies final price and volume filters to a pre-qualified list of stocks
     to generate the final, actionable watchlist for the day. This job is designed to be fast.
     """
-    print("--- Starting Daily Opportunity Finder Job (Final Version) ---")
+    print("--- Starting Daily Opportunity Finder Job (Amended Version) ---")
     
     print("Loading pre-filtered universe from cloud storage...")
     pre_filtered_df = read_df_from_s3('data/universe/prefiltered_universe.csv')
@@ -31,7 +31,6 @@ def run_opportunity_finder():
         try:
             daily_data = get_daily_data(ticker, outputsize='compact')
             if daily_data is None or daily_data.empty or len(daily_data) < 30:
-                tqdm.write(f"Skipping {ticker}: Not enough daily data for final checks.")
                 continue
 
             latest_price = daily_data['close'].iloc[0]
@@ -51,9 +50,17 @@ def run_opportunity_finder():
         time.sleep(0.5)
 
     print(f"\nFinal filtering complete. Found {len(final_watchlist)} stocks for today's watchlist.")
+    
     if final_watchlist:
-        save_list_to_s3(final_watchlist, 'tickerlist.txt')
-        print("Successfully saved the new master tickerlist for the day.")
+        # --- AMENDED SECTION: ADDED ROBUST SAVE CHECK ---
+        print("Attempting to save the new master tickerlist...")
+        save_successful = save_list_to_s3(final_watchlist, 'tickerlist.txt')
+        
+        if save_successful:
+            print("Successfully saved the new master tickerlist for the day.")
+        else:
+            # This will make the job fail loudly if the save operation returns False
+            raise Exception("CRITICAL FAILURE: Could not save the final tickerlist.txt to cloud storage.")
     else:
         print("No tickers passed the final checks. The master list will be empty.")
 
@@ -66,4 +73,7 @@ if __name__ == "__main__":
         run_opportunity_finder()
         update_scheduler_status(job_name, "Success")
     except Exception as e:
+        # This will now catch the critical failure from the save check
         update_scheduler_status(job_name, "Fail", str(e))
+        # Re-raise the exception to ensure the script exits with an error code
+        raise e
