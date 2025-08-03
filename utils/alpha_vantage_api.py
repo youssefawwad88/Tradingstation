@@ -7,7 +7,8 @@ import time
 # Load the API key from environment variables
 API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
 BASE_URL = 'https://www.alphavantage.co/query'
-REQUEST_TIMEOUT = 15 # Set a 15-second timeout for all API calls
+# A short, aggressive timeout for every single API call to prevent hangs.
+REQUEST_TIMEOUT = 15 
 
 def _make_api_request(params):
     """A centralized and robust function for making API requests."""
@@ -20,10 +21,10 @@ def _make_api_request(params):
         response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
         return response
     except requests.exceptions.Timeout:
-        print(f"ERROR: API request timed out after {REQUEST_TIMEOUT} seconds for params: {params.get('symbol')}")
+        print(f"ERROR: API request timed out after {REQUEST_TIMEOUT} seconds for symbol: {params.get('symbol')}")
         return None
     except requests.exceptions.RequestException as e:
-        print(f"ERROR: HTTP request failed for {params.get('symbol')}: {e}")
+        print(f"ERROR: HTTP request failed for symbol {params.get('symbol')}: {e}")
         return None
     except Exception as e:
         print(f"An unexpected error occurred during API request for {params.get('symbol')}: {e}")
