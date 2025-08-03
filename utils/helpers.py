@@ -3,18 +3,19 @@ import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
 import pandas as pd
 from io import StringIO
+import json
 from datetime import datetime, time
 import pytz
 import numpy as np
 
-# --- S3 Client Initialization ---
+# --- Environment Variable Loading & S3 Client Initialization ---
 SPACES_ACCESS_KEY_ID = os.getenv('SPACES_ACCESS_KEY_ID')
 SPACES_SECRET_ACCESS_KEY = os.getenv('SPACES_SECRET_ACCESS_KEY')
 SPACES_BUCKET_NAME = os.getenv('SPACES_BUCKET_NAME')
 SPACES_REGION = os.getenv('SPACES_REGION')
 
 def get_boto_client():
-    """Initializes and returns a Boto3 S3 client, or None if config is missing."""
+    """Initializes and returns a Boto3 S3 client."""
     if not all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME, SPACES_REGION]):
         print("CRITICAL ERROR: S3 environment variables are not fully configured.")
         return None
@@ -29,7 +30,7 @@ def get_boto_client():
         print(f"Error creating Boto3 client: {e}")
         return None
 
-# --- Core S3 I/O Functions ---
+# --- Core S3 Data I/O Functions ---
 def read_df_from_s3(file_path):
     """Reads a CSV file from S3 into a pandas DataFrame."""
     s3_client = get_boto_client()
@@ -37,8 +38,12 @@ def read_df_from_s3(file_path):
     try:
         response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
         return pd.read_csv(response['Body'])
-    except ClientError:
-        # This is an expected failure (e.g., file doesn't exist yet), so no error is printed.
+    except ClientError as e:
+        if e.response['Error']['Code'] != 'NoSuchKey':
+            print(f"ClientError reading DataFrame from {file_path}: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Unexpected error reading DataFrame from {file_path}: {e}")
         return pd.DataFrame()
 
 def save_df_to_s3(df, file_path):
@@ -55,19 +60,34 @@ def save_df_to_s3(df, file_path):
         return False
 
 def read_tickerlist_from_s3(file_path='tickerlist.txt'):
-    """Reads a simple text file (like the tickerlist) from S3."""
+    """
+    Reads a list of tickers from S3. Handles both simple .txt files
+    and the first column of a .csv file.
+    """
     s3_client = get_boto_client()
     if not s3_client: return []
     try:
         response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
         content = response['Body'].read().decode('utf-8')
-        return [line.strip().upper() for line in content.split('\n') if line.strip()]
+        
+        if file_path.lower().endswith('.csv'):
+            # If it's a CSV, read it with pandas and take the first column
+            df = pd.read_csv(StringIO(content))
+            return df.iloc[:, 0].dropna().unique().tolist()
+        else:
+            # Otherwise, treat it as a simple text file
+            return [line.strip().upper() for line in content.split('\n') if line.strip()]
+
+    except ClientError as e:
+        if e.response['Error']['Code'] != 'NoSuchKey':
+             print(f"ClientError reading tickerlist from {file_path}: {e}")
+        return []
     except Exception as e:
         print(f"Error reading tickerlist from {file_path}: {e}")
         return []
 
 def save_list_to_s3(data_list, file_path):
-    """Saves a Python list to a text file in S3."""
+    """Saves a Python list of strings to a text file in S3."""
     s3_client = get_boto_client()
     if not s3_client: return False
     try:
@@ -78,30 +98,19 @@ def save_list_to_s3(data_list, file_path):
         print(f"Error saving list to {file_path}: {e}")
         return False
 
-def list_files_in_s3_dir(prefix):
-    """Lists all file names in a given 'directory' in the S3 bucket."""
-    s3_client = get_boto_client()
-    if not s3_client: return []
-    try:
-        paginator = s3_client.get_paginator('list_objects_v2')
-        pages = paginator.paginate(Bucket=SPACES_BUCKET_NAME, Prefix=prefix)
-        return [os.path.basename(obj['Key']) for page in pages if "Contents" in page for obj in page['Contents'] if not obj['Key'].endswith('/')]
-    except Exception as e:
-        print(f"Error listing files in {prefix}: {e}")
-        return []
-
 # --- System Status & Session Helpers ---
 def update_scheduler_status(job_name, status, details=""):
     """Updates or creates a scheduler status log in S3."""
     log_file_key = 'data/logs/scheduler_status.csv'
     timestamp = datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S')
     status_df = read_df_from_s3(log_file_key)
+    
     if status_df.empty:
         status_df = pd.DataFrame(columns=['job_name', 'last_run_timestamp', 'status', 'details'])
     
     if job_name in status_df['job_name'].values:
-        idx = status_df[status_df['job_name'] == job_name].index[0]
-        status_df.loc[idx, ['last_run_timestamp', 'status', 'details']] = [timestamp, status, details]
+        job_index = status_df[status_df['job_name'] == job_name].index[0]
+        status_df.loc[job_index, ['last_run_timestamp', 'status', 'details']] = [timestamp, status, details]
     else:
         new_row = pd.DataFrame([{'job_name': job_name, 'last_run_timestamp': timestamp, 'status': status, 'details': details}])
         status_df = pd.concat([status_df, new_row], ignore_index=True)
@@ -110,58 +119,85 @@ def update_scheduler_status(job_name, status, details=""):
 
 def detect_market_session():
     """Detects the current market session based on New York time."""
-    ny_time = datetime.now(pytz.timezone('America/New_York')).time()
-    if time(4, 0) <= ny_time < time(9, 30): return 'PRE-MARKET'
-    if time(9, 30) <= ny_time < time(16, 0): return 'REGULAR'
-    return 'CLOSED'
+    ny_timezone = pytz.timezone('America/New_York')
+    ny_time = datetime.now(ny_timezone).time()
+    if time(4, 0) <= ny_time < time(9, 30):
+        return 'PRE-MARKET'
+    elif time(9, 30) <= ny_time < time(16, 0):
+        return 'REGULAR'
+    else:
+        return 'CLOSED'
 
-# --- ALL REQUIRED CALCULATION HELPERS ---
-
+# --- SHARED CALCULATION HELPERS ---
 def format_to_two_decimal(value):
-    """Rounds numeric values to 2 decimal places, handling errors safely."""
-    try: return round(float(value), 2)
-    except (ValueError, TypeError): return None
+    try:
+        return round(float(value), 2)
+    except (ValueError, TypeError):
+        return None
 
 def calculate_vwap(df):
-    """Calculates Volume Weighted Average Price (VWAP)."""
-    if df.empty or not all(k in df for k in ['high', 'low', 'close', 'volume']): return None
+    if df.empty or 'high' not in df.columns or 'volume' not in df.columns:
+        return None
     try:
-        tp = (df['high'] + df['low'] + df['close']) / 3
-        vol = df['volume']
-        return round((tp * vol).sum() / vol.sum(), 2)
-    except ZeroDivisionError: return None
+        typical_price = (df['high'] + df['low'] + df['close']) / 3
+        return round((typical_price * df['volume']).sum() / df['volume'].sum(), 2)
+    except (TypeError, ZeroDivisionError):
+        return None
+
+def calculate_ema(series, span):
+    return series.ewm(span=span, adjust=False).mean()
+
+def calculate_sma(series, window):
+    return series.rolling(window=window).mean()
+
+def calculate_atr(df, window=14):
+    if df.empty: return None
+    high_low = df['high'] - df['low']
+    high_close = abs(df['high'] - df['close'].shift())
+    low_close = abs(df['low'] - df['close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    return tr.rolling(window=window).mean()
+
+def is_volume_spike(current_volume, avg_volume, threshold=1.15):
+    try:
+        return current_volume >= avg_volume * threshold
+    except (ValueError, TypeError):
+        return False
 
 def get_premarket_data(intraday_df):
-    """Extracts pre-market candles from a full day's intraday data."""
-    if intraday_df.empty or 'timestamp' not in intraday_df.columns: return pd.DataFrame()
+    if intraday_df.empty or 'timestamp' not in intraday_df.columns:
+        return {"pre_high": None, "pre_low": None, "pre_vwap": None, "pre_volume": 0, "pre_range": None}
     df = intraday_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.set_index('timestamp').tz_localize('UTC').tz_convert('America/New_York')
-    return df.between_time('04:00', '09:29:59')
+    pre_market_df = df.between_time('04:00', '09:29:59')
+    if pre_market_df.empty:
+        return {"pre_high": None, "pre_low": None, "pre_vwap": None, "pre_volume": 0, "pre_range": None}
+    pre_high = pre_market_df['high'].max()
+    pre_low = pre_market_df['low'].min()
+    pre_volume = int(pre_market_df['volume'].sum())
+    pre_vwap = calculate_vwap(pre_market_df)
+    pre_range = pre_high - pre_low if pre_high is not None and pre_low is not None else None
+    return {
+        "pre_high": pre_high, "pre_low": pre_low, "pre_vwap": pre_vwap,
+        "pre_volume": pre_volume, "pre_range": pre_range
+    }
 
 def get_previous_day_close(daily_df):
-    """Safely gets the previous day's close from a daily DataFrame."""
     if daily_df is not None and len(daily_df) > 1:
-        df = daily_df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        return df.sort_values(by='timestamp', ascending=False)['close'].iloc[1]
+        daily_df['timestamp'] = pd.to_datetime(daily_df['timestamp'])
+        daily_df = daily_df.sort_values(by='timestamp', ascending=False)
+        return daily_df['close'].iloc[1]
     return None
 
-def calculate_avg_early_volume(historical_intraday_df, days=5):
-    """Calculates the average volume for the 9:30-9:44 AM ET window over the last N days."""
-    if historical_intraday_df.empty: return None
-    df = historical_intraday_df.copy()
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df = df.set_index('timestamp').tz_localize('UTC').tz_convert('America/New_York')
-    
-    early_session_df = df.between_time('09:30', '09:44')
-    if early_session_df.empty: return None
-    
-    daily_early_volume = early_session_df.groupby(early_session_df.index.date)['volume'].sum()
-    return daily_early_volume.tail(days).mean()
+def calculate_avg_daily_volume(daily_df, window=20):
+    if daily_df is not None and not daily_df.empty and 'volume' in daily_df.columns:
+        return daily_df['volume'].rolling(window=window).mean().iloc[-1]
+    return 0
 
-def calculate_avg_daily_volume(daily_df, days=10):
-    """Calculates the average daily volume over the last N days."""
-    if daily_df is not None and len(daily_df) >= days:
-        return daily_df.sort_values(by='timestamp', ascending=False).head(days)['volume'].mean()
-    return None
+def calculate_avg_early_volume(daily_df, num_days=5):
+    if daily_df is None or len(daily_df) < num_days:
+        return 0
+    # This is a placeholder; logic would need to be more specific
+    # about what "early volume" means on a daily chart.
+    return daily_df['volume'].tail(num_days).mean()
