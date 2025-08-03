@@ -1,172 +1,102 @@
-import pandas as pd
 import sys
 import os
-import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
-# --- System Path Setup ---
+# Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import (
-    list_files_in_s3_dir,
-    read_df_from_s3,
-    save_df_to_s3,
-    format_to_two_decimal
-)
+from utils.helpers import read_df_from_s3, save_df_to_s3, update_scheduler_status, list_files_in_s3_dir
 
-# --- Trade Plan Logic ---
-
-def is_valid_number(value):
-    """Checks if a value is a valid, non-NaN number."""
-    return isinstance(value, (int, float)) and not np.isnan(value)
-
-def calculate_execution_zone(current_price, entry_price):
-    """Calculates the execution zone based on price proximity to entry."""
-    if not all(is_valid_number(v) for v in [current_price, entry_price]) or entry_price == 0:
-        return "N/A"
+def run_master_dashboard_consolidation():
+    """
+    Consolidates signals from all individual screener files into a single,
+    master trade signals file for the dashboard to display.
+    This script is designed to be robust and handle missing files gracefully.
+    """
+    print("--- Starting Master Dashboard Signal Consolidation ---")
     
-    distance_pct = abs(current_price - entry_price) / entry_price * 100
-    if distance_pct <= 1.5:
-        return "Optimal Zone"
-    elif 1.5 < distance_pct <= 5.0:
-        return "Chased"
-    else:
-        return "Far"
-
-def calculate_gapgo_trade_plan(row: pd.Series, intraday_df: pd.DataFrame) -> dict:
-    """Calculates trade plan for a Gap & Go setup."""
-    plan = {'Trade Type': 'Intraday', 'Holding Days': '0-1'}
-    breakout_time_str = row.get('Breakout Time') # Assuming this column exists from the full-featured screener
-    if not breakout_time_str or pd.isna(breakout_time_str): return {}
-
-    breakout_datetime = pd.to_datetime(f"{row['Date']} {breakout_time_str}")
-    breakout_candle = intraday_df.asof(breakout_datetime)
+    signal_dir = 'data/signals/'
     
-    if row['Direction'] == 'Long':
-        plan['Entry'] = breakout_candle['high']
-        plan['Stop Loss'] = breakout_candle['low']
-    else: # Short
-        plan['Entry'] = breakout_candle['low']
-        plan['Stop Loss'] = breakout_candle['high']
-    return plan
-
-def calculate_orb_trade_plan(row: pd.Series) -> dict:
-    """Calculates trade plan for an ORB setup."""
-    plan = {'Trade Type': 'Intraday', 'Holding Days': '0-1'}
-    if row['Direction'] == 'Long':
-        plan['Entry'] = row['Opening Range High']
-        plan['Stop Loss'] = row['Opening Range Low']
-    else: # Short
-        plan['Entry'] = row['Opening Range Low']
-        plan['Stop Loss'] = row['Opening Range High']
-    return plan
-
-def calculate_swing_trade_plan(row: pd.Series, daily_df: pd.DataFrame) -> dict:
-    """Generic trade plan for daily-chart-based swing trades."""
-    plan = {'Trade Type': 'Swing', 'Holding Days': '2-10'}
-    signal_candle = daily_df[daily_df['timestamp'] == row['Date']].iloc[0]
-    
-    if row['Direction'] == 'Long':
-        plan['Entry'] = signal_candle['high']
-        plan['Stop Loss'] = signal_candle['low']
-    else: # Short
-        plan['Entry'] = signal_candle['low']
-        plan['Stop Loss'] = signal_candle['high']
-    return plan
-
-
-def run_master_dashboard():
-    """Main function to consolidate signals and generate trade plans from cloud storage."""
-    print("\n--- Running Master Dashboard (Cloud-Aware) ---")
-    
-    all_valid_signals = []
-    
-    # --- 1. List and Load All Signal Files from Cloud Storage ---
-    signal_files = list_files_in_s3_dir('data/signals/')
-    
-    for screener_file in signal_files:
-        if screener_file.endswith('_signals.csv'):
-            try:
-                strategy_name = screener_file.replace('_signals.csv', '').capitalize()
-                print(f"  -> Processing signals for: {strategy_name}")
-                
-                df = read_df_from_s3(f"data/signals/{screener_file}")
-                
-                valid_df = df[df['Setup Valid?'] == 'TRUE'].copy()
-                if valid_df.empty:
-                    print(f"       - No valid setups found.")
-                    continue
-                
-                valid_df['Strategy'] = strategy_name
-                all_valid_signals.append(valid_df)
-            except Exception as e:
-                print(f"     - ERROR processing signal file {screener_file}: {e}")
-
-    if not all_valid_signals:
-        print("--- No valid signals found across all screeners. ---")
+    print(f"Scanning for signal files in '{signal_dir}'...")
+    try:
+        signal_files = list_files_in_s3_dir(signal_dir)
+        if not signal_files:
+            print("No signal files found. Exiting job.")
+            return
+    except Exception as e:
+        print(f"Could not list files in S3 directory '{signal_dir}'. Error: {e}")
         return
 
-    consolidated_df = pd.concat(all_valid_signals, ignore_index=True)
-    trade_plans = []
+    print(f"Found {len(signal_files)} signal files to process.")
+    
+    all_signals = []
 
-    # --- 2. Generate Trade Plan for Each Valid Signal ---
-    for index, row in consolidated_df.iterrows():
+    for file_name in tqdm(signal_files, desc="Consolidating Signals"):
         try:
-            plan = {}
-            ticker = row['Ticker']
-            strategy = row['Strategy']
-            
-            daily_df = read_df_from_s3(f"data/daily/{ticker}_daily.csv")
-            intraday_df = read_df_from_s3(f"data/intraday/{ticker}_1min.csv")
-            if daily_df.empty: continue
+            file_path = f"{signal_dir}{file_name}"
+            signal_df = read_df_from_s3(file_path)
 
-            if strategy == 'Gapgo': plan = calculate_gapgo_trade_plan(row, intraday_df)
-            elif strategy == 'Orb': plan = calculate_orb_trade_plan(row)
-            else: # All other screeners are daily/swing based
-                plan = calculate_swing_trade_plan(row, daily_df)
+            if signal_df.empty:
+                tqdm.write(f"Skipping empty signal file: {file_name}")
+                continue
             
-            if plan.get('Entry') and plan.get('Stop Loss'):
-                risk_per_share = abs(plan['Entry'] - plan['Stop Loss'])
-                if risk_per_share > 0:
-                    plan['Risk/Share'] = risk_per_share
-                    if row['Direction'] == 'Long':
-                        plan['Target 1 (2R)'] = plan['Entry'] + (risk_per_share * 2)
-                        plan['Target 2 (3R)'] = plan['Entry'] + (risk_per_share * 3)
-                    else: # Short
-                        plan['Target 1 (2R)'] = plan['Entry'] - (risk_per_share * 2)
-                        plan['Target 2 (3R)'] = plan['Entry'] - (risk_per_share * 3)
-                    
-                    current_price = read_df_from_s3(f"data/intraday/{ticker}_1min.csv")['close'].iloc[-1]
-                    plan['Current Price'] = current_price
-                    plan['Execution Zone'] = calculate_execution_zone(current_price, plan['Entry'])
-                    plan['Tradeable?'] = 'TRUE' if plan['Execution Zone'] != 'Far' else 'FALSE'
-                    
-                    full_signal_data = {**row.to_dict(), **plan}
-                    trade_plans.append(full_signal_data)
+            # --- Standardize and add strategy name ---
+            # Extract strategy name from filename (e.g., 'gapgo_signals.csv' -> 'Gap & Go')
+            strategy_name = file_name.replace('_signals.csv', '').replace('_', ' ').title()
+            signal_df['Strategy'] = strategy_name
+            
+            all_signals.append(signal_df)
+            
         except Exception as e:
-            print(f"   - ERROR generating trade plan for {row['Ticker']} ({row['Strategy']}): {e}")
+            tqdm.write(f"Error processing file {file_name}: {e}")
 
-    if not trade_plans:
-        print("--- No actionable trade plans could be generated. ---")
+    if not all_signals:
+        print("No valid signals found after processing all files.")
+        # Create an empty placeholder file so the dashboard doesn't error
+        empty_df = pd.DataFrame(columns=['Ticker', 'Strategy', 'Direction', 'Entry', 'Stop', 'Valid?'])
+        save_df_to_s3(empty_df, 'data/trade_signals.csv')
         return
 
-    # --- 3. Save Final Reports to Cloud Storage ---
-    final_df = pd.DataFrame(trade_plans)
+    # Concatenate all dataframes into one
+    master_df = pd.concat(all_signals, ignore_index=True)
+
+    # --- Data Cleaning and Filtering ---
+    # We only want to see signals that are marked as valid
+    if 'Setup Valid?' in master_df.columns:
+        master_df = master_df[master_df['Setup Valid?'] == True].copy()
     
-    trade_signals_cols = [
-        "Date", "Ticker", "Strategy", "Direction", "Current Price", "Entry", 
-        "Stop Loss", "Risk/Share", "Target 1 (2R)", "Target 2 (3R)", 
-        "Execution Zone", "Tradeable?", "Trade Type", "Holding Days"
+    # Define a standard column order for the final output
+    final_columns = [
+        'Ticker', 'Strategy', 'Direction', 'Entry', 'Stop', 
+        'Target 2R', 'Target 3R', 'Risk/Share', 'Close', 'Volume'
     ]
     
-    # Ensure all required columns exist, fill missing with N/A
-    for col in trade_signals_cols:
-        if col not in final_df.columns:
-            final_df[col] = "N/A"
+    # Ensure all required columns exist, adding them with None if they don't
+    for col in final_columns:
+        if col not in master_df.columns:
+            master_df[col] = None
+            
+    # Reorder and select only the final columns
+    master_df = master_df[final_columns]
 
-    trade_signals_df = final_df[trade_signals_cols]
+    print(f"\nConsolidation complete. Found {len(master_df)} valid trade plans.")
+    
+    # Save the final, consolidated file
+    save_path = 'data/trade_signals.csv'
+    save_df_to_s3(master_df, save_path)
+    print(f"Successfully saved master trade signals to '{save_path}'.")
 
-    save_df_to_s3(trade_signals_df, 'data/trade_signals.csv')
-    print("--- Master Dashboard finished. Final trade plans saved to cloud. ---")
+    print("--- Master Dashboard Signal Consolidation Finished ---")
+
 
 if __name__ == "__main__":
-    run_master_dashboard()
+    job_name = "master_dashboard"
+    update_scheduler_status(job_name, "Running")
+    try:
+        run_master_dashboard_consolidation()
+        update_scheduler_status(job_name, "Success")
+    except Exception as e:
+        error_message = f"An unexpected error occurred: {e}"
+        print(error_message)
+        update_scheduler_status(job_name, "Fail", str(e))
