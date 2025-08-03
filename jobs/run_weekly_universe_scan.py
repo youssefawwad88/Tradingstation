@@ -13,63 +13,65 @@ from utils.alpha_vantage_api import get_company_overview
 def run_universe_scan():
     """
     Performs an intelligent scan of a large stock universe to create a pre-filtered list.
-    Includes a "circuit breaker" to fail fast if there are persistent API issues.
+    Includes a "pre-flight check" and a "circuit breaker" for maximum stability.
     """
-    print("--- Starting Weekly Universe Scan Job (with Circuit Breaker) ---")
+    print("--- Starting Weekly Universe Scan Job (with Pre-Flight Check) ---")
     
-    print("Loading S&P 500 list from cloud storage...")
+    # --- PRE-FLIGHT CHECK 1: Load Initial Universe ---
+    print("[1/3] Loading S&P 500 list from cloud storage...")
     initial_universe = read_tickerlist_from_s3('data/universe/sp500.csv')
-    if not initial_universe:
-        print("Could not load S&P 500 universe. Exiting.")
-        return
+    if not initial_universe or len(initial_universe) < 100: # Check for a reasonable number of tickers
+        error_msg = "CRITICAL: Could not load a valid S&P 500 list from 'data/universe/sp500.csv'. Exiting."
+        print(error_msg)
+        raise Exception(error_msg)
+    print(f"  ✅  Successfully loaded {len(initial_universe)} stocks to scan.")
 
-    print(f"Loaded {len(initial_universe)} stocks to scan.")
+    # --- PRE-FLIGHT CHECK 2: Test API Key ---
+    print("[2/3] Performing API pre-flight check...")
+    test_overview = get_company_overview('IBM') # Use a reliable, well-known ticker
+    if not test_overview or "MarketCapitalization" not in test_overview:
+        error_msg = "CRITICAL: API pre-flight check failed. The API key may be invalid or the service is down. Exiting."
+        print(error_msg)
+        raise Exception(error_msg)
+    print("  ✅  API key is working correctly.")
     
+    print("[3/3] Pre-flight checks passed. Starting full scan...")
     pre_filtered_stocks = []
     consecutive_failures = 0
-    FAILURE_THRESHOLD = 5  # The number of consecutive failures before stopping
+    FAILURE_THRESHOLD = 10 # Allow for a few more intermittent failures
 
     for ticker in tqdm(initial_universe, desc="Scanning Universe"):
-        # --- Circuit Breaker Check ---
         if consecutive_failures >= FAILURE_THRESHOLD:
-            print(f"\nCRITICAL ERROR: Detected {consecutive_failures} consecutive API failures.")
-            print("Stopping job. Please check your ALPHA_VANTAGE_API_KEY and API subscription status.")
-            raise Exception("Circuit breaker tripped due to persistent API failures.")
+            error_msg = f"Circuit breaker tripped after {consecutive_failures} consecutive API failures."
+            print(f"\nCRITICAL ERROR: {error_msg}")
+            raise Exception(error_msg)
 
         try:
             overview = get_company_overview(ticker)
             if not overview:
                 tqdm.write(f"Warning: Could not fetch company overview for {ticker}.")
                 consecutive_failures += 1
-                time.sleep(5) # Wait 5 seconds after a failure
+                time.sleep(5)
                 continue
             
-            # If we succeed, reset the failure counter
             consecutive_failures = 0
-
-            # Apply the strict fundamental filters
             market_cap = int(overview.get("MarketCapitalization", 0))
             shares_float = int(overview.get("SharesFloat", 0))
             exchange = overview.get("Exchange", "")
             
-            if not (500_000_000 <= market_cap < 100_000_000_000):
-                continue
-            if not (10_000_000 <= shares_float <= 150_000_000):
-                continue
-            if exchange not in ["NASDAQ", "NYSE"]:
-                continue
-            
-            pre_filtered_stocks.append({
-                'ticker': ticker, 'market_cap': market_cap,
-                'float': shares_float, 'exchange': exchange
-            })
-            tqdm.write(f"  ✅ {ticker} passed fundamental checks.")
-
+            if (500_000_000 <= market_cap < 100_000_000_000 and
+                10_000_000 <= shares_float <= 150_000_000 and
+                exchange in ["NASDAQ", "NYSE"]):
+                
+                pre_filtered_stocks.append({
+                    'ticker': ticker, 'market_cap': market_cap,
+                    'float': shares_float, 'exchange': exchange
+                })
         except Exception as e:
             tqdm.write(f"An unexpected error occurred while processing {ticker}: {e}")
             consecutive_failures += 1
         
-        time.sleep(1.5)
+        time.sleep(1) # 1 sec sleep for 150/min premium key is safe
 
     if pre_filtered_stocks:
         pre_filtered_df = pd.DataFrame(pre_filtered_stocks)
