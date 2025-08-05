@@ -86,8 +86,8 @@ def run_avwap_screener():
                 
                 if avwap_df.empty: continue
                 
-                avwap_df['avwap'] = calculate_vwap(avwap_df)
-                avwap_value = avwap_df['avwap'].iloc[-1]
+                avwap_value = calculate_vwap(avwap_df)
+                if avwap_value is None: continue
                 
                 avwap_results[i] = {
                     "value": avwap_value,
