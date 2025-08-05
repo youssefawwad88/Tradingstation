@@ -3,6 +3,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 import time
+import logging
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -10,23 +11,27 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, update_scheduler_status
 from utils.alpha_vantage_api import get_daily_data, get_intraday_data
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def run_full_rebuild():
     """
     Runs the full data rebuild process once per day.
     - Fetches a clean, extended history for daily, 30-min, and 1-min data.
     - Overwrites existing files to ensure a clean slate.
     """
-    print("--- Starting Daily Full Data Rebuild Job ---")
+    logger.info("Starting Daily Full Data Rebuild Job")
     
     tickers = read_tickerlist_from_s3()
     if not tickers:
-        print("No tickers found in tickerlist.txt. Exiting job.")
+        logger.warning("No tickers found in tickerlist.txt")
         return
 
-    print(f"Found {len(tickers)} tickers to process for full rebuild.")
+    logger.info(f"Processing {len(tickers)} tickers for full rebuild")
 
     for ticker in tickers:
-        print(f"\n--- Processing {ticker} for full rebuild ---")
+        logger.debug(f"Processing {ticker} for full rebuild")
 
         # 1. Daily Data (200 days)
         try:
@@ -35,11 +40,11 @@ def run_full_rebuild():
             if not daily_df.empty:
                 daily_df = daily_df.head(200)
                 save_df_to_s3(daily_df, f'data/daily/{ticker}_daily.csv')
-                print(f"Successfully saved {len(daily_df)} rows of daily data for {ticker}.")
+                logger.debug(f"Saved {len(daily_df)} rows of daily data for {ticker}")
             else:
-                print(f"Warning: No daily data returned for {ticker}.")
+                logger.warning(f"No daily data returned for {ticker}")
         except Exception as e:
-            print(f"ERROR fetching or saving daily data for {ticker}: {e}")
+            logger.error(f"Error fetching daily data for {ticker}: {e}")
 
         # 2. 30-Minute Intraday Data (500 rows)
         try:
@@ -48,11 +53,11 @@ def run_full_rebuild():
             if not intraday_30min_df.empty:
                 intraday_30min_df = intraday_30min_df.head(500)
                 save_df_to_s3(intraday_30min_df, f'data/intraday_30min/{ticker}_30min.csv')
-                print(f"Successfully saved {len(intraday_30min_df)} rows of 30-min data for {ticker}.")
+                logger.debug(f"Saved {len(intraday_30min_df)} rows of 30-min data for {ticker}")
             else:
-                print(f"Warning: No 30-min data returned for {ticker}.")
+                logger.warning(f"No 30-min data returned for {ticker}")
         except Exception as e:
-            print(f"ERROR fetching or saving 30-min data for {ticker}: {e}")
+            logger.error(f"Error fetching 30-min data for {ticker}: {e}")
 
         # 3. 1-Minute Intraday Data (Last 7 days)
         try:
@@ -64,17 +69,16 @@ def run_full_rebuild():
                 intraday_1min_df = intraday_1min_df[intraday_1min_df['timestamp'] >= seven_days_ago]
                 
                 save_df_to_s3(intraday_1min_df, f'data/intraday/{ticker}_1min.csv')
-                print(f"Successfully saved {len(intraday_1min_df)} rows of 1-min data for {ticker} (last 7 days).")
+                logger.debug(f"Saved {len(intraday_1min_df)} rows of 1-min data for {ticker} (last 7 days)")
             else:
-                print(f"Warning: No 1-min data returned for {ticker}.")
+                logger.warning(f"No 1-min data returned for {ticker}")
         except Exception as e:
-            print(f"ERROR fetching or saving 1-min data for {ticker}: {e}")
+            logger.error(f"Error fetching 1-min data for {ticker}: {e}")
         
         # Respect API rate limits
         time.sleep(1)
 
-
-    print("\n--- Daily Full Data Rebuild Job Finished ---")
+    logger.info("Daily Full Data Rebuild Job Finished")
 
 if __name__ == "__main__":
     job_name = "update_all_data"

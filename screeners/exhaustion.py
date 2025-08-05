@@ -2,6 +2,12 @@ import pandas as pd
 import sys
 import os
 import numpy as np
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # --- System Path Setup ---
 # This makes sure the script can find the 'utils' directory
@@ -23,12 +29,12 @@ MIN_RED_DAYS_IN_PREVIOUS_5 = 3
 
 def run_exhaustion_screener():
     """Main function to execute the cloud-aware Exhaustion Reversal screening logic."""
-    print("\n--- Running Exhaustion Reversal Screener (Cloud-Aware) ---")
+    logger.info("Running Exhaustion Reversal Screener (Cloud-Aware)")
     
     # --- 1. Load Prerequisite Data from Cloud Storage ---
     tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
-        print("Ticker list from cloud is empty. Exiting.")
+        logger.warning("Ticker list from cloud is empty")
         return
         
     all_results = []
@@ -94,18 +100,18 @@ def run_exhaustion_screener():
             all_results.append(result)
 
         except Exception as e:
-            print(f"   - ERROR processing {ticker} for Exhaustion Reversal: {e}")
+            logger.error(f"Error processing {ticker}: {e}")
 
     # --- 6. Final Processing & Save to Cloud ---
     if not all_results:
-        print("--- No Exhaustion Reversal signals were generated. ---")
+        logger.info("No Exhaustion Reversal signals were generated.")
         return
 
     final_df = pd.DataFrame(all_results)
     final_df.sort_values(by=["Setup Valid?", "Ticker"], ascending=[False, True], inplace=True)
     
     save_df_to_s3(final_df, 'data/signals/exhaustion_signals.csv')
-    print("--- Exhaustion Reversal Screener finished. Results saved to cloud. ---")
+    logger.info("Exhaustion Reversal Screener finished. Results saved to cloud.")
 
 if __name__ == "__main__":
     run_exhaustion_screener()
