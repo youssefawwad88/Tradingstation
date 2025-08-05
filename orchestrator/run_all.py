@@ -129,11 +129,9 @@ def setup_production_schedule():
     # Daily data jobs - 5:00 PM ET
     schedule.every().day.at("17:00").do(run_daily_data_jobs).tag('daily')
     
-    # Intraday updates - every minute during market hours (9:30 AM - 4:00 PM ET)
-    for hour in range(9, 16):
+    # Intraday updates - every minute during extended hours (4:00 AM - 8:00 PM ET)
+    for hour in range(4, 20):
         for minute in range(0, 60):
-            if hour == 9 and minute < 30:
-                continue  # Skip before 9:30 AM
             time_str = f"{hour:02d}:{minute:02d}"
             schedule.every().day.at(time_str).do(run_intraday_updates).tag('intraday_1min')
     
