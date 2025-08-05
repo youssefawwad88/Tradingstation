@@ -260,9 +260,9 @@ def process_ticker_interval(ticker, interval):
         # Apply rolling window trimming (keep last 5 days + current day)
         combined_df = trim_to_rolling_window(combined_df, days=5)
         
-        # Sort by timestamp (most recent first for consistency with existing format)
+        # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
         timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
-        combined_df.sort_values(by=timestamp_col, ascending=False, inplace=True)
+        combined_df.sort_values(by=timestamp_col, ascending=True, inplace=True)
         
         # Save the updated file back to S3
         save_df_to_s3(combined_df, file_path)
