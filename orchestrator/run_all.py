@@ -24,7 +24,7 @@ def run_job(script_path, job_name):
     print(f"\n--- Starting Job: {job_name} ---")
     update_scheduler_status(job_name, "Running")
     try:
-        full_path = os.path.join('/workspace', script_path)
+        full_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', script_path))
         result = subprocess.run(
             [sys.executable, full_path],
             check=True,

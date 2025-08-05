@@ -165,23 +165,40 @@ def is_volume_spike(current_volume, avg_volume, threshold=1.15):
         return False
 
 def get_premarket_data(intraday_df):
-    if intraday_df.empty or 'timestamp' not in intraday_df.columns:
-        return {"pre_high": None, "pre_low": None, "pre_vwap": None, "pre_volume": 0, "pre_range": None}
-    df = intraday_df.copy()
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df = df.set_index('timestamp').tz_localize('UTC').tz_convert('America/New_York')
-    pre_market_df = df.between_time('04:00', '09:29:59')
-    if pre_market_df.empty:
-        return {"pre_high": None, "pre_low": None, "pre_vwap": None, "pre_volume": 0, "pre_range": None}
-    pre_high = pre_market_df['high'].max()
-    pre_low = pre_market_df['low'].min()
-    pre_volume = int(pre_market_df['volume'].sum())
-    pre_vwap = calculate_vwap(pre_market_df)
-    pre_range = pre_high - pre_low if pre_high is not None and pre_low is not None else None
-    return {
-        "pre_high": pre_high, "pre_low": pre_low, "pre_vwap": pre_vwap,
-        "pre_volume": pre_volume, "pre_range": pre_range
-    }
+    """
+    Extract premarket data (4:00 AM - 9:29:59 AM ET) from intraday DataFrame.
+    Returns DataFrame with premarket data only.
+    """
+    if intraday_df.empty:
+        return pd.DataFrame()
+    
+    try:
+        df = intraday_df.copy()
+        
+        # Handle different timestamp formats
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        
+        # Ensure we have a datetime index
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return pd.DataFrame()
+        
+        # Handle timezone conversion carefully
+        ny_tz = pytz.timezone('America/New_York')
+        if df.index.tz is None:
+            # Assume data is already in ET if no timezone info
+            df.index = df.index.tz_localize(ny_tz)
+        elif df.index.tz != ny_tz:
+            df.index = df.index.tz_convert(ny_tz)
+        
+        # Filter for premarket hours (4:00 AM - 9:29:59 AM ET)
+        pre_market_df = df.between_time('04:00', '09:29:59')
+        return pre_market_df
+        
+    except Exception as e:
+        print(f"Error in get_premarket_data: {e}")
+        return pd.DataFrame()
 
 def get_previous_day_close(daily_df):
     if daily_df is not None and len(daily_df) > 1:
@@ -195,9 +212,42 @@ def calculate_avg_daily_volume(daily_df, window=20):
         return daily_df['volume'].rolling(window=window).mean().iloc[-1]
     return 0
 
-def calculate_avg_early_volume(daily_df, num_days=5):
-    if daily_df is None or len(daily_df) < num_days:
+def calculate_avg_early_volume(intraday_df, days=5):
+    """
+    Calculate average early volume for the first 15 minutes of trading (9:30-9:44 AM)
+    for a given number of days from intraday data.
+    """
+    if intraday_df is None or intraday_df.empty:
         return 0
-    # This is a placeholder; logic would need to be more specific
-    # about what "early volume" means on a daily chart.
-    return daily_df['volume'].tail(num_days).mean()
+    
+    try:
+        # Ensure timestamp is in datetime format and set as index
+        if 'timestamp' in intraday_df.columns:
+            df = intraday_df.copy()
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        else:
+            df = intraday_df.copy()
+        
+        # Convert to NY timezone if not already
+        if df.index.tz is None:
+            df.index = df.index.tz_localize('UTC').tz_convert('America/New_York')
+        elif df.index.tz != pytz.timezone('America/New_York'):
+            df.index = df.index.tz_convert('America/New_York')
+        
+        # Get early volume for each day (9:30-9:44 AM)
+        early_volumes = []
+        unique_dates = df.index.date
+        unique_dates = sorted(set(unique_dates))[-days:]  # Get last N days
+        
+        for date in unique_dates:
+            day_data = df[df.index.date == date]
+            early_data = day_data.between_time('09:30', '09:44')
+            if not early_data.empty:
+                early_volumes.append(early_data['volume'].sum())
+        
+        return sum(early_volumes) / len(early_volumes) if early_volumes else 0
+        
+    except Exception as e:
+        print(f"Error in calculate_avg_early_volume: {e}")
+        return 0

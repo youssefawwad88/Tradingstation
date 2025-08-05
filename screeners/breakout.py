@@ -1,13 +1,25 @@
 import sys
 import os
 import pandas as pd
-import pandas_ta as ta
+import numpy as np
 from tqdm import tqdm
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.helpers import read_tickerlist_from_s3, read_df_from_s3, save_df_to_s3, update_scheduler_status, format_to_two_decimal
+
+def calculate_bollinger_bands(series, window=20, num_std=2):
+    """Calculate Bollinger Bands manually"""
+    rolling_mean = series.rolling(window=window).mean()
+    rolling_std = series.rolling(window=window).std()
+    upper_band = rolling_mean + (rolling_std * num_std)
+    lower_band = rolling_mean - (rolling_std * num_std)
+    return upper_band, lower_band, rolling_mean
+
+def calculate_ema(series, span=20):
+    """Calculate Exponential Moving Average"""
+    return series.ewm(span=span, adjust=False).mean()
 
 def run_breakout_screener():
     """
@@ -41,14 +53,19 @@ def run_breakout_screener():
                 continue
 
             # --- Calculate Technical Indicators ---
-            daily_df.ta.bbands(length=20, append=True)
-            daily_df['EMA20'] = ta.ema(daily_df['close'], length=20)
+            upper_band, lower_band, bb_middle = calculate_bollinger_bands(daily_df['close'], window=20, num_std=2)
+            daily_df['BBU_20_2.0'] = upper_band
+            daily_df['BBL_20_2.0'] = lower_band
+            daily_df['EMA20'] = calculate_ema(daily_df['close'], span=20)
             daily_df['AvgVol20'] = daily_df['volume'].rolling(window=20).mean()
             daily_df['BodyAbs'] = abs(daily_df['close'] - daily_df['open'])
             daily_df['CandleRange'] = daily_df['high'] - daily_df['low']
             
             # Avoid division by zero for Body %
-            daily_df['BodyPercent'] = (daily_df['BodyAbs'] / daily_df['CandleRange']).fillna(0) * 100
+            daily_df['BodyPercent'] = daily_df.apply(
+                lambda row: (abs(row['close'] - row['open']) / (row['high'] - row['low']) * 100) 
+                if (row['high'] - row['low']) > 0 else 0, axis=1
+            )
 
             # Get the latest candle data
             latest = daily_df.iloc[-1]
@@ -72,7 +89,12 @@ def run_breakout_screener():
                 avwap_reclaimed = "N/A"
                 if anchor_df is not None and ticker in anchor_df.index:
                     # A simple check if the close is above any anchor price
-                    if latest['close'] > anchor_df.loc[ticker, 'anchor_price'].max():
+                    anchor_prices = anchor_df.loc[ticker, 'anchor_price']
+                    if isinstance(anchor_prices, pd.Series):
+                        max_anchor_price = anchor_prices.max()
+                    else:
+                        max_anchor_price = anchor_prices
+                    if latest['close'] > max_anchor_price:
                          avwap_reclaimed = "Yes"
                     else:
                          avwap_reclaimed = "No"
