@@ -131,7 +131,12 @@ def detect_market_session():
 # --- SHARED CALCULATION HELPERS ---
 def format_to_two_decimal(value):
     try:
-        return round(float(value), 2)
+        if value is None:
+            return None
+        float_val = float(value)
+        if np.isnan(float_val) or np.isinf(float_val):
+            return None
+        return round(float_val, 2)
     except (ValueError, TypeError):
         return None
 
