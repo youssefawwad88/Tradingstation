@@ -4,6 +4,7 @@ import os
 from datetime import datetime, time
 import pytz
 import numpy as np
+import logging
 
 # --- System Path Setup ---
 # This makes sure the script can find the 'utils' directory
@@ -22,20 +23,24 @@ from utils.helpers import (
     format_to_two_decimal
 )
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def run_gapgo_screener():
     """Main function to execute the FULL, cloud-aware Gap & Go screening logic."""
-    print("\n--- Running Gap & Go Screener (Full-Featured, Cloud-Aware) ---")
+    logger.info("Running Gap & Go Screener")
     
     session = detect_market_session()
-    print(f"Current Market Session Detected: {session}")
+    logger.info(f"Market Session: {session}")
     
     if session == 'CLOSED':
-        print("--- Market is closed. Skipping screener. ---")
+        logger.info("Market is closed - skipping screener")
         return
 
     tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
-        print("Ticker list from cloud is empty. Exiting.")
+        logger.warning("Ticker list from cloud is empty")
         return
 
     all_results = []
@@ -51,7 +56,7 @@ def run_gapgo_screener():
             intraday_df = read_df_from_s3(f"data/intraday/{ticker}_1min.csv")
             
             if daily_df.empty or intraday_df.empty:
-                print(f"Data missing for {ticker} in cloud storage. Skipping.")
+                logger.debug(f"Data missing for {ticker} - skipping")
                 continue
 
             # Convert index to datetime objects
@@ -195,7 +200,7 @@ def run_gapgo_screener():
             all_results.append(result)
 
         except Exception as e:
-            print(f"   - ERROR processing {ticker}: {e}")
+            logger.error(f"Error processing {ticker}: {e}")
 
     # --- 10. Final Processing & Save to Cloud ---
     if all_results:
@@ -204,9 +209,9 @@ def run_gapgo_screener():
         
         # Save the results to a CSV file in our S3 bucket
         save_df_to_s3(final_df, 'data/signals/gapgo_signals.csv')
-        print("--- Gap & Go screener finished. Results saved to cloud. ---")
+        logger.info(f"Gap & Go screener finished - {len(all_results)} signals saved")
     else:
-        print("--- No tickers were processed. ---")
+        logger.info("No Gap & Go signals generated")
 
 if __name__ == "__main__":
     run_gapgo_screener()

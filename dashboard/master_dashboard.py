@@ -2,11 +2,17 @@ import sys
 import os
 import pandas as pd
 from tqdm import tqdm
+import logging
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_df_from_s3, save_df_to_s3, update_scheduler_status, list_files_in_s3_dir
+from utils.helpers import read_df_from_s3, save_df_to_s3, update_scheduler_status
+from utils.spaces_manager import spaces_manager
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def run_master_dashboard_consolidation():
     """
@@ -14,21 +20,21 @@ def run_master_dashboard_consolidation():
     master trade signals file for the dashboard to display.
     This script is designed to be robust and handle missing files gracefully.
     """
-    print("--- Starting Master Dashboard Signal Consolidation ---")
+    logger.info("Starting Master Dashboard Signal Consolidation")
     
     signal_dir = 'data/signals/'
     
-    print(f"Scanning for signal files in '{signal_dir}'...")
+    logger.info(f"Scanning for signal files in '{signal_dir}'")
     try:
-        signal_files = list_files_in_s3_dir(signal_dir)
+        signal_files = spaces_manager.list_objects(signal_dir)
         if not signal_files:
-            print("No signal files found. Exiting job.")
+            logger.warning("No signal files found")
             return
     except Exception as e:
-        print(f"Could not list files in S3 directory '{signal_dir}'. Error: {e}")
+        logger.error(f"Could not list files in S3 directory '{signal_dir}': {e}")
         return
 
-    print(f"Found {len(signal_files)} signal files to process.")
+    logger.info(f"Found {len(signal_files)} signal files to process.")
     
     all_signals = []
 
@@ -52,7 +58,7 @@ def run_master_dashboard_consolidation():
             tqdm.write(f"Error processing file {file_name}: {e}")
 
     if not all_signals:
-        print("No valid signals found after processing all files.")
+        logger.info("No valid signals found after processing all files.")
         # Create an empty placeholder file so the dashboard doesn't error
         empty_df = pd.DataFrame(columns=['Ticker', 'Strategy', 'Direction', 'Entry', 'Stop', 'Valid?'])
         save_df_to_s3(empty_df, 'data/trade_signals.csv')
@@ -80,14 +86,14 @@ def run_master_dashboard_consolidation():
     # Reorder and select only the final columns
     master_df = master_df[final_columns]
 
-    print(f"\nConsolidation complete. Found {len(master_df)} valid trade plans.")
+    logger.info(f"\nConsolidation complete. Found {len(master_df)} valid trade plans.")
     
     # Save the final, consolidated file
     save_path = 'data/trade_signals.csv'
     save_df_to_s3(master_df, save_path)
-    print(f"Successfully saved master trade signals to '{save_path}'.")
+    logger.info(f"Successfully saved master trade signals to '{save_path}'.")
 
-    print("--- Master Dashboard Signal Consolidation Finished ---")
+    logger.info("--- Master Dashboard Signal Consolidation Finished ---")
 
 
 if __name__ == "__main__":
@@ -98,5 +104,5 @@ if __name__ == "__main__":
         update_scheduler_status(job_name, "Success")
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
-        print(error_message)
+        logger.info(error_message)
         update_scheduler_status(job_name, "Fail", str(e))

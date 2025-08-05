@@ -4,6 +4,12 @@ import os
 from datetime import datetime
 import pytz
 import numpy as np
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # --- System Path Setup ---
 # This makes sure the script can find the 'utils' directory
@@ -37,12 +43,12 @@ def get_reclaim_quality(candle: pd.Series) -> str:
 
 def run_avwap_screener():
     """Main function to execute the cloud-aware AVWAP screening logic."""
-    print("\n--- Running Anchored VWAP (AVWAP) Screener (Cloud-Aware) ---")
+    logger.info("Running Anchored VWAP (AVWAP) Screener (Cloud-Aware)")
     
     # --- 1. Load Prerequisite Data from Cloud Storage ---
     anchor_df = read_df_from_s3("data/avwap_anchors.csv")
     if anchor_df.empty:
-        print("ERROR: Anchor file not found in cloud storage. Please run the find_avwap_anchors.py job first.")
+        logger.error("Anchor file not found in cloud storage. Please run the find_avwap_anchors.py job first.")
         return
         
     anchor_df = anchor_df.set_index('Ticker')
@@ -121,18 +127,18 @@ def run_avwap_screener():
             all_results.append(result)
 
         except Exception as e:
-            print(f"   - ERROR processing {ticker} for AVWAP: {e}")
+            logger.error(f"Error processing {ticker}: {e}")
 
     # --- 8. Final Processing & Save to Cloud ---
     if not all_results:
-        print("--- No AVWAP signals were generated. ---")
+        logger.info("No AVWAP signals were generated.")
         return
         
     final_df = pd.DataFrame(all_results)
     final_df.sort_values(by=['Setup Valid?', 'Ticker'], ascending=[False, True], inplace=True)
     
     save_df_to_s3(final_df, 'data/signals/avwap_signals.csv')
-    print("--- AVWAP Screener finished. Results saved to cloud. ---")
+    logger.info("AVWAP Screener finished. Results saved to cloud.")
 
 if __name__ == "__main__":
     run_avwap_screener()

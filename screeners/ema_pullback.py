@@ -2,6 +2,12 @@ import pandas as pd
 import sys
 import os
 import numpy as np
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # --- System Path Setup ---
 # This makes sure the script can find the 'utils' directory
@@ -23,12 +29,12 @@ VOLUME_SPIKE_THRESHOLD_PCT = 115
 
 def run_ema_pullback_screener():
     """Main function to execute the cloud-aware EMA Trend Pullback screening logic."""
-    print("\n--- Running EMA Trend Pullback Screener (Cloud-Aware) ---")
+    logger.info("Running EMA Trend Pullback Screener (Cloud-Aware)")
     
     # --- 1. Load Prerequisite Data from Cloud Storage ---
     tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
-        print("Ticker list from cloud is empty. Exiting.")
+        logger.warning("Ticker list from cloud is empty")
         return
         
     all_results = []
@@ -87,18 +93,18 @@ def run_ema_pullback_screener():
             all_results.append(result)
 
         except Exception as e:
-            print(f"   - ERROR processing {ticker} for EMA Pullback: {e}")
+            logger.error(f"Error processing {ticker}: {e}")
 
     # --- 6. Final Processing & Save to Cloud ---
     if not all_results:
-        print("--- No EMA Pullback signals were generated. ---")
+        logger.info("No EMA Pullback signals were generated.")
         return
 
     final_df = pd.DataFrame(all_results)
     final_df.sort_values(by=["Setup Valid?", "Ticker"], ascending=[False, True], inplace=True)
     
     save_df_to_s3(final_df, 'data/signals/ema_pullback_signals.csv')
-    print("--- EMA Pullback Screener finished. Results saved to cloud. ---")
+    logger.info("EMA Pullback Screener finished. Results saved to cloud.")
 
 if __name__ == "__main__":
     run_ema_pullback_screener()
