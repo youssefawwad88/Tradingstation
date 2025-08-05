@@ -3,6 +3,12 @@ import os
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -25,7 +31,7 @@ def run_breakout_screener():
     """
     Scans for daily breakouts based on Bollinger Bands, volume, and other criteria.
     """
-    print("--- Starting Daily Breakout Screener ---")
+    logger.info("Starting Daily Breakout Screener")
     
     tickers = read_tickerlist_from_s3()
     if not tickers:
@@ -39,7 +45,7 @@ def run_breakout_screener():
         if 'ticker' in anchor_df.columns:
             anchor_df = anchor_df.set_index('ticker')
         else:
-            print("Warning: 'ticker' column not found in avwap_anchors.csv. AVWAP confluence will not be calculated.")
+            logger.warning("'ticker' column not found in avwap_anchors.csv. AVWAP confluence will not be calculated.")
             anchor_df = None # Set to None if column is missing
     else:
         anchor_df = None
@@ -118,11 +124,11 @@ def run_breakout_screener():
     if all_signals:
         signals_df = pd.DataFrame(all_signals)
         save_df_to_s3(signals_df, 'data/signals/breakout_signals.csv')
-        print(f"\nFound {len(signals_df)} breakout signals. Saved to cloud.")
+        logger.info(f"Found {len(signals_df)} breakout signals - saved to cloud")
     else:
-        print("\nNo breakout signals found.")
+        logger.info("No breakout signals found")
 
-    print("--- Daily Breakout Screener Finished ---")
+    logger.info("Daily Breakout Screener Finished")
 
 if __name__ == "__main__":
     run_breakout_screener()

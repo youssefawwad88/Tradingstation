@@ -4,6 +4,7 @@ import os
 from datetime import datetime, time
 import pytz
 import numpy as np
+import logging
 
 # --- System Path Setup ---
 # This makes sure the script can find the 'utils' directory
@@ -16,6 +17,10 @@ from utils.helpers import (
     format_to_two_decimal
 )
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # --- ORB Screener Specific Configuration ---
 ORB_WINDOW_END_MINUTE = 39
 ORB_TRIGGER_MINUTE = 40
@@ -23,11 +28,11 @@ MIN_LAST_PRICE_THRESHOLD = 2.0
 
 def run_orb_screener():
     """Main function to execute the cloud-aware ORB screening logic."""
-    print("\n--- Running Opening Range Breakout (ORB) Screener (Cloud-Aware) ---")
+    logger.info("Running Opening Range Breakout (ORB) Screener")
     
     session = detect_market_session()
     if session != 'REGULAR':
-        print(f"Market session is {session}. ORB screener only runs during REGULAR session.")
+        logger.info(f"Market session is {session} - ORB screener only runs during REGULAR session")
         return
 
     ny_timezone = pytz.timezone('America/New_York')
@@ -36,15 +41,15 @@ def run_orb_screener():
     # Define the time after which this screener should run.
     orb_trigger_time = time(9, ORB_TRIGGER_MINUTE)
     if current_ny_time < orb_trigger_time:
-        print(f"Waiting to run ORB screener. Trigger time is {orb_trigger_time.strftime('%H:%M:%S')} NY time.")
+        logger.info(f"Waiting to run ORB screener - trigger time is {orb_trigger_time.strftime('%H:%M:%S')} NY time")
         return
 
     # --- 1. Load Prerequisite Data from Cloud Storage ---
-    print("Loading prerequisite Gap & Go signals from cloud...")
+    logger.info("Loading prerequisite Gap & Go signals from cloud")
     gapgo_df = read_df_from_s3('data/signals/gapgo_signals.csv')
     
     if gapgo_df.empty:
-        print("ERROR: Gap & Go signals file not found in cloud storage. Cannot run ORB screener.")
+        logger.error("Gap & Go signals file not found in cloud storage - cannot run ORB screener")
         return
         
     tickers = gapgo_df['Ticker'].tolist()
@@ -130,11 +135,11 @@ def run_orb_screener():
             all_results.append(result)
 
         except Exception as e:
-            print(f"   - ERROR processing {ticker} for ORB: {e}")
+            logger.error(f"Error processing {ticker} for ORB: {e}")
 
     # --- 8. Final Processing & Save to Cloud ---
     if not all_results:
-        print("--- No tickers were processed for ORB. ---")
+        logger.info("No tickers processed for ORB")
         return
         
     final_df = pd.DataFrame(all_results)
@@ -142,7 +147,7 @@ def run_orb_screener():
     final_df.sort_values(by=['Status', 'Setup Score %'], ascending=[True, False], inplace=True)
     
     save_df_to_s3(final_df, 'data/signals/orb_signals.csv')
-    print("--- ORB screener finished. Results saved to cloud. ---")
+    logger.info(f"ORB screener finished - {len(all_results)} signals saved")
 
 if __name__ == "__main__":
     run_orb_screener()
