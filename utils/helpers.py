@@ -208,3 +208,154 @@ def calculate_avg_early_volume(intraday_df, days=5):
     except Exception as e:
         print(f"Error in calculate_avg_early_volume: {e}")
         return 0
+
+def is_today_present(df):
+    """
+    Check if today's date is present in the intraday DataFrame.
+    
+    Args:
+        df: DataFrame with Date column (as per existing format) or timestamp column or datetime index
+        
+    Returns:
+        bool: True if today's data is present, False otherwise
+    """
+    if df is None or df.empty:
+        return False
+    
+    try:
+        # Get today's date in NY timezone
+        ny_tz = pytz.timezone('America/New_York')
+        today = datetime.now(ny_tz).date()
+        
+        # Handle DataFrame with Date column (existing format)
+        if 'Date' in df.columns:
+            df_copy = df.copy()
+            df_copy['Date'] = pd.to_datetime(df_copy['Date'])
+            
+            # Convert to NY timezone if needed
+            if df_copy['Date'].dt.tz is None:
+                # Assume UTC if no timezone info
+                df_copy['Date'] = df_copy['Date'].dt.tz_localize('UTC').dt.tz_convert(ny_tz)
+            else:
+                df_copy['Date'] = df_copy['Date'].dt.tz_convert(ny_tz)
+            
+            dates = df_copy['Date'].dt.date
+        # Handle DataFrame with timestamp column
+        elif 'timestamp' in df.columns:
+            df_copy = df.copy()
+            df_copy['timestamp'] = pd.to_datetime(df_copy['timestamp'])
+            
+            # Convert to NY timezone if needed
+            if df_copy['timestamp'].dt.tz is None:
+                # Assume UTC if no timezone info
+                df_copy['timestamp'] = df_copy['timestamp'].dt.tz_localize('UTC').dt.tz_convert(ny_tz)
+            else:
+                df_copy['timestamp'] = df_copy['timestamp'].dt.tz_convert(ny_tz)
+            
+            dates = df_copy['timestamp'].dt.date
+        else:
+            # Handle DataFrame with datetime index
+            df_copy = df.copy()
+            if df_copy.index.tz is None:
+                df_copy.index = df_copy.index.tz_localize('UTC').tz_convert(ny_tz)
+            else:
+                df_copy.index = df_copy.index.tz_convert(ny_tz)
+            
+            dates = df_copy.index.date
+        
+        return today in dates.unique()
+        
+    except Exception as e:
+        print(f"Error in is_today_present: {e}")
+        return False
+
+def get_last_market_day():
+    """
+    Get the last market day (excluding weekends).
+    
+    Returns:
+        datetime.date: The last market day
+    """
+    try:
+        ny_tz = pytz.timezone('America/New_York')
+        now = datetime.now(ny_tz)
+        current_date = now.date()
+        
+        # If it's Monday, last market day was Friday
+        if current_date.weekday() == 0:  # Monday
+            last_market_day = current_date - pd.Timedelta(days=3)
+        # If it's Sunday, last market day was Friday  
+        elif current_date.weekday() == 6:  # Sunday
+            last_market_day = current_date - pd.Timedelta(days=2)
+        # Otherwise, yesterday was a market day (assuming no holidays)
+        else:
+            last_market_day = current_date - pd.Timedelta(days=1)
+            
+        return last_market_day.date() if hasattr(last_market_day, 'date') else last_market_day
+        
+    except Exception as e:
+        print(f"Error in get_last_market_day: {e}")
+        return (datetime.now() - pd.Timedelta(days=1)).date()
+
+def trim_to_rolling_window(df, days=5):
+    """
+    Trim DataFrame to keep only the last N days plus current day.
+    
+    Args:
+        df: DataFrame with Date column (as per existing format) or timestamp column or datetime index
+        days: Number of days to keep (default 5)
+        
+    Returns:
+        DataFrame: Trimmed DataFrame
+    """
+    if df is None or df.empty:
+        return df
+    
+    try:
+        ny_tz = pytz.timezone('America/New_York')
+        today = datetime.now(ny_tz).date()
+        cutoff_date = today - pd.Timedelta(days=days)
+        
+        # Handle DataFrame with Date column (existing format)
+        if 'Date' in df.columns:
+            df_copy = df.copy()
+            df_copy['Date'] = pd.to_datetime(df_copy['Date'])
+            
+            # Convert to NY timezone if needed
+            if df_copy['Date'].dt.tz is None:
+                df_copy['Date'] = df_copy['Date'].dt.tz_localize('UTC').dt.tz_convert(ny_tz)
+            else:
+                df_copy['Date'] = df_copy['Date'].dt.tz_convert(ny_tz)
+            
+            # Filter to keep only last N days + today
+            mask = df_copy['Date'].dt.date >= cutoff_date
+            return df_copy[mask].copy()
+        # Handle DataFrame with timestamp column
+        elif 'timestamp' in df.columns:
+            df_copy = df.copy()
+            df_copy['timestamp'] = pd.to_datetime(df_copy['timestamp'])
+            
+            # Convert to NY timezone if needed
+            if df_copy['timestamp'].dt.tz is None:
+                df_copy['timestamp'] = df_copy['timestamp'].dt.tz_localize('UTC').dt.tz_convert(ny_tz)
+            else:
+                df_copy['timestamp'] = df_copy['timestamp'].dt.tz_convert(ny_tz)
+            
+            # Filter to keep only last N days + today
+            mask = df_copy['timestamp'].dt.date >= cutoff_date
+            return df_copy[mask].copy()
+        else:
+            # Handle DataFrame with datetime index
+            df_copy = df.copy()
+            if df_copy.index.tz is None:
+                df_copy.index = df_copy.index.tz_localize('UTC').tz_convert(ny_tz)
+            else:
+                df_copy.index = df_copy.index.tz_convert(ny_tz)
+            
+            # Filter to keep only last N days + today
+            mask = df_copy.index.date >= cutoff_date
+            return df_copy[mask].copy()
+            
+    except Exception as e:
+        print(f"Error in trim_to_rolling_window: {e}")
+        return df

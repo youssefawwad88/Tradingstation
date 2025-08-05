@@ -6,68 +6,321 @@ import time
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status
+from utils.helpers import (
+    read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status,
+    is_today_present, get_last_market_day, trim_to_rolling_window, detect_market_session
+)
 from utils.alpha_vantage_api import get_intraday_data
 
+def normalize_column_names(df):
+    """
+    Normalize column names to match existing data format.
+    Expected format: Date, Open, High, Low, Close, Volume
+    """
+    if df.empty:
+        return df
+    
+    # Mapping of possible column names to standard format
+    column_mapping = {
+        'timestamp': 'Date',
+        'date': 'Date',
+        'time': 'Date',
+        'datetime': 'Date',
+        'open': 'Open',
+        'high': 'High', 
+        'low': 'Low',
+        'close': 'Close',
+        'volume': 'Volume'
+    }
+    
+    # Create a mapping for the current DataFrame columns
+    rename_dict = {}
+    for col in df.columns:
+        col_lower = col.lower()
+        if col_lower in column_mapping:
+            rename_dict[col] = column_mapping[col_lower]
+    
+    # Apply the renaming
+    df_renamed = df.rename(columns=rename_dict)
+    
+    return df_renamed
+
+def resample_to_30min(df_1min):
+    """
+    Resample 1-minute data to 30-minute candles.
+    
+    Args:
+        df_1min: DataFrame with 1-minute OHLCV data
+        
+    Returns:
+        DataFrame: 30-minute OHLCV data
+    """
+    if df_1min.empty:
+        return pd.DataFrame()
+    
+    try:
+        df = df_1min.copy()
+        
+        # Handle timestamp column - check for both Date and timestamp columns
+        timestamp_col = None
+        if 'Date' in df.columns:
+            timestamp_col = 'Date'
+        elif 'timestamp' in df.columns:
+            timestamp_col = 'timestamp'
+        
+        if timestamp_col:
+            df[timestamp_col] = pd.to_datetime(df[timestamp_col], errors='coerce')
+            df = df.set_index(timestamp_col)
+        else:
+            print("Error: No timestamp/Date column found for resampling")
+            return pd.DataFrame()
+        
+        # Drop any rows with invalid timestamps
+        df = df.dropna()
+        
+        # Ensure we have the required columns (check both lowercase and uppercase)
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        available_cols = [col.lower() for col in df.columns]
+        
+        # Map columns to lowercase for consistency
+        col_mapping = {}
+        for col in required_cols:
+            matching_col = None
+            for df_col in df.columns:
+                if df_col.lower() == col:
+                    matching_col = df_col
+                    break
+            if matching_col:
+                col_mapping[matching_col] = col
+        
+        if len(col_mapping) < 5:
+            print(f"Missing required columns for resampling. Found: {df.columns.tolist()}")
+            return pd.DataFrame()
+        
+        # Rename columns to lowercase
+        df = df.rename(columns=col_mapping)
+        
+        # Resample to 30-minute intervals
+        resampled = df.resample('30min').agg({
+            'open': 'first',
+            'high': 'max', 
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        }).dropna()
+        
+        # Reset index to get timestamp back as a column
+        resampled = resampled.reset_index()
+        
+        # Normalize column names to match existing data format
+        resampled = normalize_column_names(resampled)
+        
+        return resampled
+        
+    except Exception as e:
+        print(f"Error in resample_to_30min: {e}")
+        return pd.DataFrame()
+
+def process_ticker_interval(ticker, interval):
+    """
+    Process a single ticker for a specific interval (1min or 30min).
+    
+    Args:
+        ticker: Stock symbol
+        interval: '1min' or '30min'
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    print(f"\n--- Processing {ticker} for {interval} interval ---")
+    
+    try:
+        # Determine file paths
+        if interval == '1min':
+            file_path = f'data/intraday/{ticker}_{interval}.csv'
+        else:  # 30min
+            file_path = f'data/intraday_30min/{ticker}_{interval}.csv'
+        
+        # Check if file exists (new ticker vs existing ticker)
+        existing_df = read_df_from_s3(file_path)
+        is_new_ticker = existing_df.empty
+        
+        if is_new_ticker:
+            print(f"New ticker detected: {ticker}. Fetching full intraday history...")
+            
+            # For new tickers, fetch full history (outputsize='full')
+            if interval == '1min':
+                # Fetch 1min data first
+                latest_df = get_intraday_data(ticker, interval='1min', outputsize='full')
+                if latest_df.empty:
+                    print(f"No intraday data returned for new ticker {ticker}. Skipping.")
+                    return False
+                
+                # Ensure proper column names (API returns different formats)
+                if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
+                    latest_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                
+                # Normalize column names to match existing format
+                latest_df = normalize_column_names(latest_df)
+                
+                # Save 1min data
+                combined_df = latest_df.copy()
+                
+            else:  # 30min
+                # For 30min interval, we need to check if we have 1min data to resample
+                min_1_file_path = f'data/intraday/{ticker}_1min.csv'
+                min_1_df = read_df_from_s3(min_1_file_path)
+                
+                if not min_1_df.empty:
+                    # Resample from existing 1min data
+                    print(f"Resampling existing 1min data to 30min for {ticker}")
+                    combined_df = resample_to_30min(min_1_df)
+                else:
+                    # Fetch 30min data directly from API
+                    latest_df = get_intraday_data(ticker, interval='30min', outputsize='full')
+                    if latest_df.empty:
+                        print(f"No 30min intraday data returned for new ticker {ticker}. Skipping.")
+                        return False
+                    
+                    # Ensure proper column names
+                    if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
+                        latest_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                    
+                    # Normalize column names to match existing format
+                    latest_df = normalize_column_names(latest_df)
+                    
+                    combined_df = latest_df.copy()
+        else:
+            print(f"Existing ticker: {ticker}. Checking for today's data...")
+            
+            # Check if today's data is present
+            today_present = is_today_present(existing_df)
+            
+            if not today_present:
+                print(f"Today's data missing for {ticker}. Fetching latest data...")
+                
+                # Check if we're in market hours and should warn
+                market_session = detect_market_session()
+                if market_session in ['PRE-MARKET', 'REGULAR']:
+                    print(f"⚠️  WARNING: Today's data missing for {ticker} during {market_session} hours")
+                
+                # Fetch latest compact data (100 rows) to get today's data
+                latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
+                if latest_df.empty:
+                    print(f"No new {interval} data returned for {ticker}. Skipping.")
+                    return False
+                
+                # Ensure proper column names
+                if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
+                    latest_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                
+                # Normalize column names to match existing format
+                latest_df = normalize_column_names(latest_df)
+                    
+            else:
+                print(f"Today's data already present for {ticker}. Fetching latest updates...")
+                
+                # Fetch compact data to get any new candles
+                latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
+                if latest_df.empty:
+                    print(f"No new {interval} data returned for {ticker}. Using existing data.")
+                    latest_df = pd.DataFrame()  # Empty, will use existing data
+                else:
+                    # Ensure proper column names
+                    if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
+                        latest_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                    
+                    # Normalize column names to match existing format
+                    latest_df = normalize_column_names(latest_df)
+            
+            # Combine existing and new data
+            if not latest_df.empty:
+                # Determine the timestamp column name to use for deduplication
+                timestamp_col = 'Date' if 'Date' in existing_df.columns else 'timestamp'
+                
+                # Ensure both DataFrames have the same timestamp column name
+                if timestamp_col not in latest_df.columns:
+                    # This shouldn't happen after normalization, but just in case
+                    if 'Date' in latest_df.columns:
+                        timestamp_col = 'Date'
+                    elif 'timestamp' in latest_df.columns:
+                        timestamp_col = 'timestamp'
+                    else:
+                        print(f"Error: No timestamp column found in latest data for {ticker}")
+                        return False
+                
+                existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
+                latest_df[timestamp_col] = pd.to_datetime(latest_df[timestamp_col])
+                
+                combined_df = pd.concat([existing_df, latest_df], ignore_index=True)
+                combined_df.drop_duplicates(subset=[timestamp_col], keep='last', inplace=True)
+            else:
+                combined_df = existing_df.copy()
+        
+        # Apply rolling window trimming (keep last 5 days + current day)
+        combined_df = trim_to_rolling_window(combined_df, days=5)
+        
+        # Sort by timestamp (most recent first for consistency with existing format)
+        timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
+        combined_df.sort_values(by=timestamp_col, ascending=False, inplace=True)
+        
+        # Save the updated file back to S3
+        save_df_to_s3(combined_df, file_path)
+        print(f"✅ Finished processing {ticker} for {interval}. Total rows: {len(combined_df)}")
+        
+        # Check if today's data is now present
+        if not is_today_present(combined_df):
+            print(f"⚠️  WARNING: Today's data still missing for {ticker} after update")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ ERROR processing {ticker} for {interval}: {e}")
+        return False
 def run_compact_append():
     """
-    Runs the compact append process for intraday data.
-    - Fetches the latest 'compact' data (100 rows).
-    - Reads the existing full data from S3.
-    - Appends new, unique rows and saves back.
+    Runs the enhanced intraday data update process.
+    - Handles both new and existing tickers
+    - Ensures today's data is always included
+    - Maintains rolling window of last 5 days + current day
+    - Provides robust error handling and warnings
     """
-    print("--- Starting Compact Intraday Data Append Job ---")
+    print("--- Starting Enhanced Intraday Data Update Job ---")
     
     tickers = read_tickerlist_from_s3()
     if not tickers:
         print("No tickers found in tickerlist.txt. Exiting job.")
         return
 
-    print(f"Processing {len(tickers)} tickers for compact update...")
-
+    print(f"Processing {len(tickers)} tickers for intraday updates...")
+    
+    # Track processing results
+    success_count = 0
+    total_operations = len(tickers) * 2  # Both 1min and 30min for each ticker
+    
     for ticker in tickers:
-        for interval in ['1min', '30min']:
-            print(f"\n--- Processing {ticker} for {interval} interval ---")
-            try:
-                # 1. Fetch the latest compact data from API
-                # CORRECTED: Changed 'output_size' to 'outputsize'
-                latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
-                if latest_df.empty:
-                    print(f"No new {interval} data returned for {ticker}. Skipping.")
-                    continue
-                
-                print(f"Successfully fetched {len(latest_df)} latest intraday data points for {ticker}.")
-
-                # 2. Read the existing full data file from S3
-                file_path = f'data/intraday/{ticker}_{interval}.csv'
-                if interval == '30min':
-                    file_path = f'data/intraday_30min/{ticker}_{interval}.csv'
-                
-                existing_df = read_df_from_s3(file_path)
-
-                # 3. Combine, deduplicate, and sort
-                if not existing_df.empty:
-                    existing_df['timestamp'] = pd.to_datetime(existing_df['timestamp'])
-                    latest_df['timestamp'] = pd.to_datetime(latest_df['timestamp'])
-                    
-                    combined_df = pd.concat([existing_df, latest_df], ignore_index=True)
-                    combined_df.drop_duplicates(subset=['timestamp'], keep='last', inplace=True)
-                else:
-                    combined_df = latest_df
-
-                combined_df.sort_values(by='timestamp', ascending=False, inplace=True)
-                
-                # 4. Save the updated file back to S3
-                save_df_to_s3(combined_df, file_path)
-                print(f"Finished processing {ticker} for {interval}. Total rows now: {len(combined_df)}")
-
-            except Exception as e:
-                print(f"ERROR processing {ticker} for {interval}: {e}")
+        print(f"\n{'='*50}")
+        print(f"Processing ticker: {ticker}")
+        print(f"{'='*50}")
+        
+        # Process 1-minute interval first
+        success_1min = process_ticker_interval(ticker, '1min')
+        if success_1min:
+            success_count += 1
+        
+        # Process 30-minute interval 
+        # Note: For 30min, we prefer resampling from 1min data when available
+        success_30min = process_ticker_interval(ticker, '30min')
+        if success_30min:
+            success_count += 1
         
         # Respect API rate limits
         time.sleep(1)
 
-    print("\n--- Compact Intraday Data Append Job Finished ---")
+    print(f"\n{'='*60}")
+    print(f"Enhanced Intraday Data Update Job Completed")
+    print(f"Success rate: {success_count}/{total_operations} operations")
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
     job_name = "update_intraday_compact"
