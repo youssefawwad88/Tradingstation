@@ -8,67 +8,31 @@ from datetime import datetime, time
 import pytz
 import numpy as np
 
-# --- Environment Variable Loading & S3 Client Initialization ---
-SPACES_ACCESS_KEY_ID = os.getenv('SPACES_ACCESS_KEY_ID')
-SPACES_SECRET_ACCESS_KEY = os.getenv('SPACES_SECRET_ACCESS_KEY')
-SPACES_BUCKET_NAME = os.getenv('SPACES_BUCKET_NAME')
-SPACES_REGION = os.getenv('SPACES_REGION')
+from .spaces_manager import spaces_manager
+from .config import DO_SPACES_CONFIG
 
 def get_boto_client():
-    """Initializes and returns a Boto3 S3 client."""
-    if not all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME, SPACES_REGION]):
-        print("CRITICAL ERROR: S3 environment variables are not fully configured.")
-        return None
-    try:
-        session = boto3.session.Session()
-        return session.client('s3',
-                              region_name=SPACES_REGION,
-                              endpoint_url=f'https://{SPACES_REGION}.digitaloceanspaces.com',
-                              aws_access_key_id=SPACES_ACCESS_KEY_ID,
-                              aws_secret_access_key=SPACES_SECRET_ACCESS_KEY)
-    except Exception as e:
-        print(f"Error creating Boto3 client: {e}")
-        return None
+    """Initializes and returns a Boto3 S3 client. Maintained for backward compatibility."""
+    return spaces_manager.client
 
 # --- Core S3 Data I/O Functions ---
 def read_df_from_s3(file_path):
     """Reads a CSV file from S3 into a pandas DataFrame."""
-    s3_client = get_boto_client()
-    if not s3_client: return pd.DataFrame()
-    try:
-        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
-        return pd.read_csv(response['Body'])
-    except ClientError as e:
-        if e.response['Error']['Code'] != 'NoSuchKey':
-            print(f"ClientError reading DataFrame from {file_path}: {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"Unexpected error reading DataFrame from {file_path}: {e}")
-        return pd.DataFrame()
+    return spaces_manager.download_dataframe(file_path)
 
 def save_df_to_s3(df, file_path):
     """Saves a pandas DataFrame to a CSV file in S3."""
-    s3_client = get_boto_client()
-    if not s3_client: return False
-    try:
-        csv_buffer = StringIO()
-        df.to_csv(csv_buffer, index=False)
-        s3_client.put_object(Bucket=SPACES_BUCKET_NAME, Key=file_path, Body=csv_buffer.getvalue())
-        return True
-    except Exception as e:
-        print(f"Error saving DataFrame to {file_path}: {e}")
-        return False
+    return spaces_manager.upload_dataframe(df, file_path)
 
 def read_tickerlist_from_s3(file_path='tickerlist.txt'):
     """
     Reads a list of tickers from S3. Handles both simple .txt files
     and the first column of a .csv file.
     """
-    s3_client = get_boto_client()
-    if not s3_client: return []
     try:
-        response = s3_client.get_object(Bucket=SPACES_BUCKET_NAME, Key=file_path)
-        content = response['Body'].read().decode('utf-8')
+        content = spaces_manager.download_string(file_path)
+        if content is None:
+            return []
         
         if file_path.lower().endswith('.csv'):
             # If it's a CSV, read it with pandas and take the first column
@@ -78,25 +42,13 @@ def read_tickerlist_from_s3(file_path='tickerlist.txt'):
             # Otherwise, treat it as a simple text file
             return [line.strip().upper() for line in content.split('\n') if line.strip()]
 
-    except ClientError as e:
-        if e.response['Error']['Code'] != 'NoSuchKey':
-             print(f"ClientError reading tickerlist from {file_path}: {e}")
-        return []
     except Exception as e:
         print(f"Error reading tickerlist from {file_path}: {e}")
         return []
 
 def save_list_to_s3(data_list, file_path):
     """Saves a Python list of strings to a text file in S3."""
-    s3_client = get_boto_client()
-    if not s3_client: return False
-    try:
-        content = "\n".join(data_list)
-        s3_client.put_object(Bucket=SPACES_BUCKET_NAME, Key=file_path, Body=content)
-        return True
-    except Exception as e:
-        print(f"Error saving list to {file_path}: {e}")
-        return False
+    return spaces_manager.upload_list(data_list, file_path)
 
 # --- System Status & Session Helpers ---
 def update_scheduler_status(job_name, status, details=""):
