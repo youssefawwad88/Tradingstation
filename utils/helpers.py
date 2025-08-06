@@ -17,20 +17,84 @@ def get_boto_client():
 
 # --- Core S3 Data I/O Functions ---
 def read_df_from_s3(file_path):
-    """Reads a CSV file from S3 into a pandas DataFrame."""
-    return spaces_manager.download_dataframe(file_path)
+    """
+    Reads a CSV file from S3 into a pandas DataFrame.
+    Falls back to local filesystem if S3 is unavailable.
+    """
+    # Try to read from Spaces first
+    df = spaces_manager.download_dataframe(file_path)
+    
+    # If Spaces failed, try local filesystem as fallback
+    if df.empty:
+        try:
+            current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            local_file_path = os.path.join(current_dir, file_path)
+            
+            if os.path.exists(local_file_path):
+                df = pd.read_csv(local_file_path)
+                print(f"Loaded data from local file: {local_file_path}")
+        except Exception as e:
+            print(f"Error loading from local file {file_path}: {e}")
+    
+    return df
 
 def save_df_to_s3(df, file_path):
-    """Saves a pandas DataFrame to a CSV file in S3."""
-    return spaces_manager.upload_dataframe(df, file_path)
+    """
+    Saves a pandas DataFrame to a CSV file in S3.
+    Falls back to local filesystem if S3 is unavailable for critical data persistence.
+    """
+    # Try to save to Spaces first
+    spaces_success = spaces_manager.upload_dataframe(df, file_path)
+    
+    # Always also save to local filesystem as backup/fallback
+    local_success = False
+    try:
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        local_file_path = os.path.join(current_dir, file_path)
+        
+        # Create directories if they don't exist
+        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+        
+        # Save locally
+        df.to_csv(local_file_path, index=False)
+        local_success = True
+        print(f"Successfully saved data locally: {local_file_path}")
+        
+        if not spaces_success:
+            print(f"⚠️  WARNING: Spaces upload failed for {file_path}, but data saved locally")
+            
+    except Exception as e:
+        print(f"Error saving to local file {file_path}: {e}")
+    
+    # Return True if either method succeeded
+    return spaces_success or local_success
 
 def read_tickerlist_from_s3(file_path='tickerlist.txt'):
     """
     Reads a list of tickers from S3. Handles both simple .txt files
     and the first column of a .csv file.
+    Falls back to local filesystem if S3 is unavailable.
     """
     try:
         content = spaces_manager.download_string(file_path)
+        
+        # If Spaces failed, try local filesystem as fallback
+        if content is None:
+            try:
+                # Get the current script directory and construct the full path
+                current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                local_file_path = os.path.join(current_dir, file_path)
+                
+                if os.path.exists(local_file_path):
+                    with open(local_file_path, 'r') as f:
+                        content = f.read()
+                    print(f"Loaded ticker list from local file: {local_file_path}")
+                else:
+                    return []
+            except Exception as local_error:
+                print(f"Error loading from local file: {local_error}")
+                return []
+        
         if content is None:
             return []
         
