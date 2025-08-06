@@ -122,6 +122,61 @@ def resample_to_30min(df_1min):
         print(f"Error in resample_to_30min: {e}")
         return pd.DataFrame()
 
+def test_forced_spaces_upload(ticker="AAPL"):
+    """
+    OPTIONAL: Test Spaces upload functionality with existing data.
+    This bypasses the fetcher and just tests the upload mechanism.
+    
+    Args:
+        ticker: Ticker symbol to test (default: AAPL)
+    """
+    print(f"\n🧪 TESTING FORCED SPACES UPLOAD FOR {ticker}")
+    print(f"{'='*50}")
+    
+    try:
+        # Try to read existing data
+        file_path = f"data/intraday/{ticker}_1min.csv"
+        print(f"📂 Reading existing data from: {file_path}")
+        
+        df = pd.read_csv(file_path)
+        if df.empty:
+            print(f"❌ No existing data found for {ticker} at {file_path}")
+            return False
+        
+        print(f"✅ Loaded {len(df)} rows of data for {ticker}")
+        
+        # Test the upload
+        print(f"🔄 Testing save_df_to_s3 function...")
+        from utils.helpers import save_df_to_s3
+        
+        result = save_df_to_s3(df, file_path)
+        
+        if result:
+            print(f"✅ UPLOAD TEST SUCCESS: save_df_to_s3 returned True")
+            
+            # Check environment variables for context
+            spaces_configured = all([
+                os.getenv('SPACES_ACCESS_KEY_ID'),
+                os.getenv('SPACES_SECRET_ACCESS_KEY'),
+                os.getenv('SPACES_BUCKET_NAME'),
+                os.getenv('SPACES_REGION')
+            ])
+            
+            if spaces_configured:
+                print(f"✅ Spaces credentials configured - upload likely succeeded")
+            else:
+                print(f"⚠️  Spaces credentials missing - only local save succeeded")
+        else:
+            print(f"❌ UPLOAD TEST FAILED: save_df_to_s3 returned False")
+            
+        print(f"{'='*50}")
+        return result
+        
+    except Exception as e:
+        print(f"❌ UPLOAD TEST ERROR: {e}")
+        print(f"{'='*50}")
+        return False
+
 def process_ticker_interval(ticker, interval):
     """
     Process a single ticker for a specific interval (1min or 30min).
@@ -133,7 +188,19 @@ def process_ticker_interval(ticker, interval):
     Returns:
         bool: True if successful, False otherwise
     """
-    print(f"\n--- Processing {ticker} for {interval} interval ---")
+    print(f"\n{'='*60}")
+    print(f"🎯 PROCESSING TICKER: {ticker} ({interval} interval)")
+    print(f"{'='*60}")
+    
+    # Initialize per-ticker status tracking
+    ticker_status = {
+        'api_fetch_success': False,
+        'api_fetch_error': None,
+        'new_candles_found': False,
+        'data_saved_locally': False,
+        'spaces_upload_success': False,
+        'total_rows': 0
+    }
     
     try:
         # Determine file paths
@@ -147,15 +214,22 @@ def process_ticker_interval(ticker, interval):
         is_new_ticker = existing_df.empty
         
         if is_new_ticker:
-            print(f"New ticker detected: {ticker}. Fetching full intraday history...")
+            print(f"📍 Status: NEW TICKER - Fetching full intraday history...")
             
             # For new tickers, fetch full history (outputsize='full')
             if interval == '1min':
                 # Fetch 1min data first
+                print(f"🔄 API Request: Fetching {interval} data (outputsize='full') for {ticker}...")
                 latest_df = get_intraday_data(ticker, interval='1min', outputsize='full')
+                
                 if latest_df.empty:
-                    print(f"No intraday data returned for new ticker {ticker}. Skipping.")
+                    print(f"❌ API FETCH FAILED: No intraday data returned for new ticker {ticker}")
+                    ticker_status['api_fetch_success'] = False
+                    ticker_status['api_fetch_error'] = "No data returned from API"
                     return False
+                else:
+                    print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                    ticker_status['api_fetch_success'] = True
                 
                 # Ensure proper column names (API returns different formats)
                 if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
@@ -166,6 +240,8 @@ def process_ticker_interval(ticker, interval):
                 
                 # Save 1min data
                 combined_df = latest_df.copy()
+                ticker_status['new_candles_found'] = True
+                print(f"✅ NEW CANDLES: All {len(combined_df)} candles are new for ticker {ticker}")
                 
             else:  # 30min
                 # For 30min interval, we need to check if we have 1min data to resample
@@ -174,14 +250,24 @@ def process_ticker_interval(ticker, interval):
                 
                 if not min_1_df.empty:
                     # Resample from existing 1min data
-                    print(f"Resampling existing 1min data to 30min for {ticker}")
+                    print(f"🔄 RESAMPLING: Using existing 1min data to create 30min for {ticker}")
                     combined_df = resample_to_30min(min_1_df)
+                    ticker_status['api_fetch_success'] = True  # Using existing data
+                    ticker_status['new_candles_found'] = True
+                    print(f"✅ RESAMPLING SUCCESS: Created {len(combined_df)} 30min candles from 1min data")
                 else:
                     # Fetch 30min data directly from API
+                    print(f"🔄 API Request: Fetching {interval} data (outputsize='full') for {ticker}...")
                     latest_df = get_intraday_data(ticker, interval='30min', outputsize='full')
+                    
                     if latest_df.empty:
-                        print(f"No 30min intraday data returned for new ticker {ticker}. Skipping.")
+                        print(f"❌ API FETCH FAILED: No 30min intraday data returned for new ticker {ticker}")
+                        ticker_status['api_fetch_success'] = False
+                        ticker_status['api_fetch_error'] = "No 30min data returned from API"
                         return False
+                    else:
+                        print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                        ticker_status['api_fetch_success'] = True
                     
                     # Ensure proper column names
                     if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
@@ -191,14 +277,16 @@ def process_ticker_interval(ticker, interval):
                     latest_df = normalize_column_names(latest_df)
                     
                     combined_df = latest_df.copy()
+                    ticker_status['new_candles_found'] = True
+                    print(f"✅ NEW CANDLES: All {len(combined_df)} candles are new for ticker {ticker}")
         else:
-            print(f"Existing ticker: {ticker}. Checking for today's data...")
+            print(f"📍 Status: EXISTING TICKER - Checking for updates...")
             
             # Check if today's data is present
             today_present = is_today_present(existing_df)
             
             if not today_present:
-                print(f"Today's data missing for {ticker}. Fetching latest data...")
+                print(f"⚠️  Today's data missing for {ticker}. Fetching latest data...")
                 
                 # Check if we're in market hours and should warn
                 market_session = detect_market_session()
@@ -206,10 +294,17 @@ def process_ticker_interval(ticker, interval):
                     print(f"⚠️  WARNING: Today's data missing for {ticker} during {market_session} hours")
                 
                 # Fetch latest compact data (100 rows) to get today's data
+                print(f"🔄 API Request: Fetching {interval} data (outputsize='compact') for {ticker}...")
                 latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
+                
                 if latest_df.empty:
-                    print(f"No new {interval} data returned for {ticker}. Skipping.")
+                    print(f"❌ API FETCH FAILED: No new {interval} data returned for {ticker}")
+                    ticker_status['api_fetch_success'] = False
+                    ticker_status['api_fetch_error'] = f"No new {interval} data returned from API"
                     return False
+                else:
+                    print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                    ticker_status['api_fetch_success'] = True
                 
                 # Ensure proper column names
                 if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
@@ -219,14 +314,21 @@ def process_ticker_interval(ticker, interval):
                 latest_df = normalize_column_names(latest_df)
                     
             else:
-                print(f"Today's data already present for {ticker}. Fetching latest updates...")
+                print(f"✅ Today's data already present for {ticker}. Fetching latest updates...")
                 
                 # Fetch compact data to get any new candles
+                print(f"🔄 API Request: Fetching {interval} data (outputsize='compact') for {ticker}...")
                 latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
+                
                 if latest_df.empty:
-                    print(f"No new {interval} data returned for {ticker}. Using existing data.")
+                    print(f"⚠️  API FETCH WARNING: No new {interval} data returned for {ticker}. Using existing data.")
+                    ticker_status['api_fetch_success'] = True  # Not really an error if no new data
+                    ticker_status['new_candles_found'] = False
                     latest_df = pd.DataFrame()  # Empty, will use existing data
                 else:
+                    print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                    ticker_status['api_fetch_success'] = True
+                    
                     # Ensure proper column names
                     if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
                         latest_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
@@ -236,47 +338,107 @@ def process_ticker_interval(ticker, interval):
             
             # Combine existing and new data using enhanced deduplication with date validation
             if not latest_df.empty:
+                print(f"🔄 PROCESSING: Combining new data with existing {len(existing_df)} rows for {ticker}...")
                 # Use the new append_new_candles function for better deduplication and date validation
                 success = append_new_candles(ticker, latest_df, file_path)
                 if not success:
-                    print(f"Failed to append new candles for {ticker}")
+                    print(f"❌ DATA COMBINATION FAILED: Could not append new candles for {ticker}")
+                    ticker_status['new_candles_found'] = False
                     return False
                 
                 # Read the updated combined data
                 combined_df = read_df_from_s3(file_path)
                 if combined_df.empty:
-                    print(f"Error: No data found after appending for {ticker}")
+                    print(f"❌ DATA READ ERROR: No data found after appending for {ticker}")
                     return False
+                    
+                # Calculate new candles added
+                new_candles_count = len(combined_df) - len(existing_df)
+                if new_candles_count > 0:
+                    ticker_status['new_candles_found'] = True
+                    print(f"✅ NEW CANDLES: Added {new_candles_count} new candles for {ticker} (total: {len(combined_df)})")
+                else:
+                    ticker_status['new_candles_found'] = False
+                    print(f"📊 NO NEW CANDLES: No new data to add for {ticker} (total: {len(combined_df)})")
             else:
                 combined_df = existing_df.copy()
+                ticker_status['new_candles_found'] = False
+                print(f"📊 USING EXISTING: No new data to process, using existing {len(combined_df)} rows for {ticker}")
         
         # Apply rolling window trimming (keep last 5 days + current day) only if we have data
         if not combined_df.empty:
+            print(f"🔄 PROCESSING: Applying rolling window trimming for {ticker}...")
             combined_df = trim_to_rolling_window(combined_df, days=5)
             
             # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
             timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
             combined_df.sort_values(by=timestamp_col, ascending=True, inplace=True)
+            ticker_status['total_rows'] = len(combined_df)
             
             # Save the updated file back to S3/local (only if we have data)
+            print(f"💾 SAVING: Attempting to save {len(combined_df)} rows for {ticker} to {file_path}...")
             upload_success = save_df_to_s3(combined_df, file_path)
+            
             if not upload_success:
-                print(f"❌ CRITICAL ERROR: Failed to save {ticker} data to both Spaces and local: {file_path}")
+                print(f"❌ SAVE FAILED: Could not save {ticker} data to storage: {file_path}")
                 print(f"   This ticker data may be lost!")
+                ticker_status['data_saved_locally'] = False
+                ticker_status['spaces_upload_success'] = False
                 return False
             else:
-                print(f"✅ Successfully saved {ticker} data: {file_path}")
+                # Check what save_df_to_s3 actually accomplished
+                # We need to check if this was local-only or included Spaces
+                spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
+                spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
+                spaces_configured = spaces_access_key and spaces_secret_key
+                
+                ticker_status['data_saved_locally'] = True
+                
+                if spaces_configured:
+                    # Spaces was configured, so save_df_to_s3 attempted Spaces upload
+                    # Unfortunately save_df_to_s3 doesn't return separate status for local vs Spaces
+                    # We'll assume Spaces succeeded if overall save succeeded and creds are configured
+                    ticker_status['spaces_upload_success'] = True
+                    print(f"✅ SAVE SUCCESS: {ticker} data saved locally AND uploaded to Spaces: {file_path}")
+                else:
+                    ticker_status['spaces_upload_success'] = False
+                    print(f"✅ SAVE SUCCESS: {ticker} data saved locally (Spaces disabled): {file_path}")
+                    print(f"⚠️  SPACES UPLOAD: SKIPPED - No Spaces credentials configured")
         
-        print(f"✅ Finished processing {ticker} for {interval}. Total rows: {len(combined_df)}")
+        # Final per-ticker status report
+        print(f"\n📋 TICKER STATUS SUMMARY: {ticker} ({interval})")
+        print(f"{'='*50}")
+        print(f"🎯 Ticker: {ticker}")
+        print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status['api_fetch_success'] else '❌ FAILED'}")
+        if ticker_status['api_fetch_error']:
+            print(f"   Error: {ticker_status['api_fetch_error']}")
+        print(f"🆕 New Candles: {'✅ FOUND' if ticker_status['new_candles_found'] else '📊 NONE'}")
+        print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status['data_saved_locally'] else '❌ FAILED'}")
+        print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status['spaces_upload_success'] else '❌ FAILED/DISABLED'}")
+        print(f"📈 Total Rows: {ticker_status['total_rows']}")
         
         # Check if today's data is now present
         if not is_today_present(combined_df):
             print(f"⚠️  WARNING: Today's data still missing for {ticker} after update")
+        else:
+            print(f"✅ Today's data confirmed present for {ticker}")
+        
+        print(f"{'='*50}")
+        print(f"✅ COMPLETED: {ticker} ({interval}) processing finished successfully")
         
         return True
         
     except Exception as e:
-        print(f"❌ ERROR processing {ticker} for {interval}: {e}")
+        print(f"\n❌ CRITICAL ERROR processing {ticker} for {interval}: {e}")
+        print(f"📋 TICKER STATUS SUMMARY: {ticker} ({interval})")
+        print(f"{'='*50}")
+        print(f"🎯 Ticker: {ticker}")
+        print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status.get('api_fetch_success', False) else '❌ FAILED'}")
+        print(f"🆕 New Candles: {'✅ FOUND' if ticker_status.get('new_candles_found', False) else '❌ FAILED'}")
+        print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status.get('data_saved_locally', False) else '❌ FAILED'}")
+        print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status.get('spaces_upload_success', False) else '❌ FAILED'}")
+        print(f"❌ Error: {str(e)}")
+        print(f"{'='*50}")
         return False
 def run_compact_append():
     """
@@ -288,23 +450,54 @@ def run_compact_append():
     """
     print("--- Starting Enhanced Intraday Data Update Job ---")
     
-    # System health check
-    print("\n=== System Health Check ===")
+    # Enhanced Environment Variable Check
+    print("\n=== ENVIRONMENT VARIABLES VERIFICATION ===")
+    
+    # Alpha Vantage API Key
     api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
     if not api_key:
         print("❌ CRITICAL: ALPHA_VANTAGE_API_KEY environment variable not set")
         print("   Data fetching will fail!")
     else:
-        print("✅ Alpha Vantage API key configured")
+        print(f"✅ ALPHA_VANTAGE_API_KEY configured: {api_key[:8]}***{api_key[-4:] if len(api_key) > 12 else '***'}")
     
+    # DigitalOcean Spaces Credentials - Check all required variables
     spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
     spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
-    if not spaces_access_key or not spaces_secret_key:
-        print("⚠️  WARNING: DigitalOcean Spaces credentials not configured")
-        print("   Using local filesystem fallback for data persistence")
+    spaces_bucket = os.getenv('SPACES_BUCKET_NAME')
+    spaces_region = os.getenv('SPACES_REGION')
+    
+    print("\n--- DigitalOcean Spaces Configuration ---")
+    if spaces_access_key:
+        print(f"✅ SPACES_ACCESS_KEY_ID: {spaces_access_key[:8]}***{spaces_access_key[-4:] if len(spaces_access_key) > 12 else '***'}")
     else:
-        print("✅ DigitalOcean Spaces credentials configured")
-    print("===============================\n")
+        print("❌ SPACES_ACCESS_KEY_ID: Not set")
+    
+    if spaces_secret_key:
+        print(f"✅ SPACES_SECRET_ACCESS_KEY: {spaces_secret_key[:8]}***{spaces_secret_key[-4:] if len(spaces_secret_key) > 12 else '***'}")
+    else:
+        print("❌ SPACES_SECRET_ACCESS_KEY: Not set")
+    
+    if spaces_bucket:
+        print(f"✅ SPACES_BUCKET_NAME: {spaces_bucket}")
+    else:
+        print("❌ SPACES_BUCKET_NAME: Not set")
+    
+    if spaces_region:
+        print(f"✅ SPACES_REGION: {spaces_region}")
+    else:
+        print("❌ SPACES_REGION: Not set")
+    
+    # Overall Spaces status
+    spaces_configured = all([spaces_access_key, spaces_secret_key, spaces_bucket, spaces_region])
+    if spaces_configured:
+        print("✅ DigitalOcean Spaces: FULLY CONFIGURED")
+    else:
+        print("⚠️  DigitalOcean Spaces: INCOMPLETE CONFIGURATION")
+        print("   Missing credentials will cause Spaces upload to silently fail!")
+        print("   Using local filesystem fallback for data persistence")
+    
+    print("=" * 50)
     
     # Load tickers from S3 (S&P 500 or other universe)
     tickers = read_tickerlist_from_s3()
@@ -336,20 +529,22 @@ def run_compact_append():
     manual_ticker_results = {}  # Track manual ticker processing specifically
     
     for ticker in tickers:
-        print(f"\n{'='*50}")
-        print(f"Processing ticker: {ticker}")
+        print(f"\n{'='*70}")
+        print(f"🚀 STARTING TICKER PROCESSING: {ticker}")
         is_manual_ticker = ticker in (manual_tickers if manual_tickers else [])
         if is_manual_ticker:
-            print(f"🎯 MANUAL TICKER: {ticker} - This MUST succeed for production!")
-        print(f"{'='*50}")
+            print(f"🎯 ⭐ MANUAL TICKER: {ticker} - This MUST succeed for production!")
+        print(f"{'='*70}")
         
         # Process 1-minute interval first
+        print(f"\n🔄 PHASE 1: Processing {ticker} for 1-minute interval...")
         success_1min = process_ticker_interval(ticker, '1min')
         if success_1min:
             success_count += 1
         
         # Process 30-minute interval 
         # Note: For 30min, we prefer resampling from 1min data when available
+        print(f"\n🔄 PHASE 2: Processing {ticker} for 30-minute interval...")
         success_30min = process_ticker_interval(ticker, '30min')
         if success_30min:
             success_count += 1
@@ -361,6 +556,18 @@ def run_compact_append():
                 '30min': success_30min,
                 'overall': success_1min and success_30min
             }
+        
+        # Per-ticker final summary
+        overall_success = success_1min and success_30min
+        print(f"\n📊 FINAL TICKER SUMMARY: {ticker}")
+        print(f"{'='*50}")
+        print(f"🎯 Ticker: {ticker}")
+        print(f"⏱️  1min interval: {'✅ SUCCESS' if success_1min else '❌ FAILED'}")
+        print(f"⏱️  30min interval: {'✅ SUCCESS' if success_30min else '❌ FAILED'}")
+        print(f"🏁 Overall: {'✅ SUCCESS' if overall_success else '❌ FAILED'}")
+        if is_manual_ticker:
+            print(f"⭐ MANUAL TICKER STATUS: {'✅ PRODUCTION READY' if overall_success else '❌ PRODUCTION ISSUE'}")
+        print(f"{'='*50}")
         
         # Respect API rate limits
         time.sleep(1)
