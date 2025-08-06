@@ -81,6 +81,8 @@ class SpacesManager:
             bool: True if successful, False otherwise
         """
         if not self.client:
+            print(f"❌ ERROR: Cannot upload {remote_key} - DigitalOcean Spaces client not initialized!")
+            print("   Check that SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, and other credentials are set.")
             return False
         
         try:
@@ -94,7 +96,7 @@ class SpacesManager:
             print(f"Successfully uploaded DataFrame to {remote_key}")
             return True
         except Exception as e:
-            print(f"Error uploading DataFrame to {remote_key}: {e}")
+            print(f"❌ ERROR uploading DataFrame to {remote_key}: {e}")
             return False
     
     def upload_string(self, content: str, remote_key: str) -> bool:

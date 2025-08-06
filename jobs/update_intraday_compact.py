@@ -259,7 +259,13 @@ def process_ticker_interval(ticker, interval):
             combined_df.sort_values(by=timestamp_col, ascending=True, inplace=True)
             
             # Save the updated file back to S3 (only if we applied trimming)
-            save_df_to_s3(combined_df, file_path)
+            upload_success = save_df_to_s3(combined_df, file_path)
+            if not upload_success:
+                print(f"❌ CRITICAL ERROR: Failed to upload {ticker} data to Spaces: {file_path}")
+                print(f"   This ticker will not appear in production Spaces storage!")
+                return False
+            else:
+                print(f"✅ Successfully uploaded {ticker} to Spaces: {file_path}")
         
         print(f"✅ Finished processing {ticker} for {interval}. Total rows: {len(combined_df)}")
         
@@ -292,6 +298,7 @@ def run_compact_append():
     manual_tickers = load_manual_tickers()
     if manual_tickers:
         print(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
+        print("⚠️  CRITICAL: These manual tickers MUST appear in Spaces storage!")
         tickers.extend(manual_tickers)
     else:
         print("No manual tickers found in ticker_selectors/tickerlist.txt")
@@ -308,10 +315,14 @@ def run_compact_append():
     # Track processing results
     success_count = 0
     total_operations = len(tickers) * 2  # Both 1min and 30min for each ticker
+    manual_ticker_results = {}  # Track manual ticker processing specifically
     
     for ticker in tickers:
         print(f"\n{'='*50}")
         print(f"Processing ticker: {ticker}")
+        is_manual_ticker = ticker in (manual_tickers if manual_tickers else [])
+        if is_manual_ticker:
+            print(f"🎯 MANUAL TICKER: {ticker} - This MUST succeed for production!")
         print(f"{'='*50}")
         
         # Process 1-minute interval first
@@ -325,12 +336,46 @@ def run_compact_append():
         if success_30min:
             success_count += 1
         
+        # Track manual ticker results specifically
+        if is_manual_ticker:
+            manual_ticker_results[ticker] = {
+                '1min': success_1min,
+                '30min': success_30min,
+                'overall': success_1min and success_30min
+            }
+        
         # Respect API rate limits
         time.sleep(1)
 
     print(f"\n{'='*60}")
     print(f"Enhanced Intraday Data Update Job Completed")
     print(f"Success rate: {success_count}/{total_operations} operations")
+    
+    # Report manual ticker status specifically
+    if manual_ticker_results:
+        print(f"\n🎯 MANUAL TICKER STATUS REPORT:")
+        print(f"{'='*40}")
+        failed_manual_tickers = []
+        for ticker, results in manual_ticker_results.items():
+            status_1min = "✅" if results['1min'] else "❌"
+            status_30min = "✅" if results['30min'] else "❌"
+            overall_status = "✅ SUCCESS" if results['overall'] else "❌ FAILED"
+            
+            print(f"{ticker}: {overall_status}")
+            print(f"  1min: {status_1min}  30min: {status_30min}")
+            
+            if not results['overall']:
+                failed_manual_tickers.append(ticker)
+        
+        if failed_manual_tickers:
+            print(f"\n❌ CRITICAL: {len(failed_manual_tickers)} manual tickers FAILED:")
+            print(f"   {failed_manual_tickers}")
+            print(f"   These tickers will NOT appear in production Spaces storage!")
+            print(f"   Check DigitalOcean Spaces credentials and connectivity.")
+        else:
+            print(f"\n✅ SUCCESS: All {len(manual_ticker_results)} manual tickers processed successfully!")
+            print(f"   Manual tickers should now be available in Spaces storage.")
+    
     print(f"{'='*60}")
 
 if __name__ == "__main__":
