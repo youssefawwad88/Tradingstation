@@ -363,13 +363,34 @@ def trim_to_rolling_window(df, days=5):
 # --- MANUAL TICKER MANAGEMENT ---
 def load_manual_tickers():
     """
-    Load manually selected tickers from ticker_selectors/tickerlist.txt
+    Load manually selected tickers from tickerlist.txt (root directory)
     Always include these tickers regardless of whether it's Sunday or scheduled runs.
     Returns deduplicated list of uppercase tickers.
     """
     try:
-        file_path = 'ticker_selectors/tickerlist.txt'
+        file_path = 'tickerlist.txt'
+        
+        # Try to load from Spaces first
         content = spaces_manager.download_string(file_path)
+        
+        # If Spaces failed, try local filesystem as fallback
+        if content is None:
+            try:
+                # Get the current script directory and construct the full path
+                current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                local_file_path = os.path.join(current_dir, file_path)
+                
+                if os.path.exists(local_file_path):
+                    with open(local_file_path, 'r') as f:
+                        content = f.read()
+                    print(f"Loaded manual tickers from local file: {local_file_path}")
+                else:
+                    print(f"Warning: Neither Spaces nor local file found: {local_file_path}")
+                    return []
+            except Exception as local_error:
+                print(f"Error loading from local file: {local_error}")
+                return []
+        
         if content is None:
             print(f"Warning: Could not load manual tickers from {file_path}")
             return []
