@@ -258,14 +258,14 @@ def process_ticker_interval(ticker, interval):
             timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
             combined_df.sort_values(by=timestamp_col, ascending=True, inplace=True)
             
-            # Save the updated file back to S3 (only if we applied trimming)
+            # Save the updated file back to S3/local (only if we have data)
             upload_success = save_df_to_s3(combined_df, file_path)
             if not upload_success:
-                print(f"❌ CRITICAL ERROR: Failed to upload {ticker} data to Spaces: {file_path}")
-                print(f"   This ticker will not appear in production Spaces storage!")
+                print(f"❌ CRITICAL ERROR: Failed to save {ticker} data to both Spaces and local: {file_path}")
+                print(f"   This ticker data may be lost!")
                 return False
             else:
-                print(f"✅ Successfully uploaded {ticker} to Spaces: {file_path}")
+                print(f"✅ Successfully saved {ticker} data: {file_path}")
         
         print(f"✅ Finished processing {ticker} for {interval}. Total rows: {len(combined_df)}")
         
@@ -287,6 +287,24 @@ def run_compact_append():
     - Provides robust error handling and warnings
     """
     print("--- Starting Enhanced Intraday Data Update Job ---")
+    
+    # System health check
+    print("\n=== System Health Check ===")
+    api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+    if not api_key:
+        print("❌ CRITICAL: ALPHA_VANTAGE_API_KEY environment variable not set")
+        print("   Data fetching will fail!")
+    else:
+        print("✅ Alpha Vantage API key configured")
+    
+    spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
+    spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
+    if not spaces_access_key or not spaces_secret_key:
+        print("⚠️  WARNING: DigitalOcean Spaces credentials not configured")
+        print("   Using local filesystem fallback for data persistence")
+    else:
+        print("✅ DigitalOcean Spaces credentials configured")
+    print("===============================\n")
     
     # Load tickers from S3 (S&P 500 or other universe)
     tickers = read_tickerlist_from_s3()
