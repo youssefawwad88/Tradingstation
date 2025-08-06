@@ -8,7 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.helpers import (
     read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status,
-    is_today_present, get_last_market_day, trim_to_rolling_window, detect_market_session
+    is_today_present, get_last_market_day, trim_to_rolling_window, detect_market_session,
+    load_manual_tickers, is_today, append_new_candles
 )
 from utils.alpha_vantage_api import get_intraday_data
 
@@ -233,39 +234,33 @@ def process_ticker_interval(ticker, interval):
                     # Normalize column names to match existing format
                     latest_df = normalize_column_names(latest_df)
             
-            # Combine existing and new data
+            # Combine existing and new data using enhanced deduplication with date validation
             if not latest_df.empty:
-                # Determine the timestamp column name to use for deduplication
-                timestamp_col = 'Date' if 'Date' in existing_df.columns else 'timestamp'
+                # Use the new append_new_candles function for better deduplication and date validation
+                success = append_new_candles(ticker, latest_df, file_path)
+                if not success:
+                    print(f"Failed to append new candles for {ticker}")
+                    return False
                 
-                # Ensure both DataFrames have the same timestamp column name
-                if timestamp_col not in latest_df.columns:
-                    # This shouldn't happen after normalization, but just in case
-                    if 'Date' in latest_df.columns:
-                        timestamp_col = 'Date'
-                    elif 'timestamp' in latest_df.columns:
-                        timestamp_col = 'timestamp'
-                    else:
-                        print(f"Error: No timestamp column found in latest data for {ticker}")
-                        return False
-                
-                existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
-                latest_df[timestamp_col] = pd.to_datetime(latest_df[timestamp_col])
-                
-                combined_df = pd.concat([existing_df, latest_df], ignore_index=True)
-                combined_df.drop_duplicates(subset=[timestamp_col], keep='last', inplace=True)
+                # Read the updated combined data
+                combined_df = read_df_from_s3(file_path)
+                if combined_df.empty:
+                    print(f"Error: No data found after appending for {ticker}")
+                    return False
             else:
                 combined_df = existing_df.copy()
         
-        # Apply rolling window trimming (keep last 5 days + current day)
-        combined_df = trim_to_rolling_window(combined_df, days=5)
+        # Apply rolling window trimming (keep last 5 days + current day) only if we have data
+        if not combined_df.empty:
+            combined_df = trim_to_rolling_window(combined_df, days=5)
+            
+            # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
+            timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
+            combined_df.sort_values(by=timestamp_col, ascending=True, inplace=True)
+            
+            # Save the updated file back to S3 (only if we applied trimming)
+            save_df_to_s3(combined_df, file_path)
         
-        # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
-        timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
-        combined_df.sort_values(by=timestamp_col, ascending=True, inplace=True)
-        
-        # Save the updated file back to S3
-        save_df_to_s3(combined_df, file_path)
         print(f"✅ Finished processing {ticker} for {interval}. Total rows: {len(combined_df)}")
         
         # Check if today's data is now present
@@ -287,12 +282,28 @@ def run_compact_append():
     """
     print("--- Starting Enhanced Intraday Data Update Job ---")
     
+    # Load tickers from S3 (S&P 500 or other universe)
     tickers = read_tickerlist_from_s3()
     if not tickers:
-        print("No tickers found in tickerlist.txt. Exiting job.")
+        tickers = []
+        print("No tickers found in tickerlist.txt")
+    
+    # Always load and include manual tickers from ticker_selectors/tickerlist.txt
+    manual_tickers = load_manual_tickers()
+    if manual_tickers:
+        print(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
+        tickers.extend(manual_tickers)
+    else:
+        print("No manual tickers found in ticker_selectors/tickerlist.txt")
+    
+    # Remove duplicates while preserving order
+    tickers = list(dict.fromkeys(tickers))
+    
+    if not tickers:
+        print("No tickers to process. Exiting job.")
         return
 
-    print(f"Processing {len(tickers)} tickers for intraday updates...")
+    print(f"Processing {len(tickers)} tickers for intraday updates (including manual tickers)...")
     
     # Track processing results
     success_count = 0

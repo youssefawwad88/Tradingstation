@@ -359,3 +359,166 @@ def trim_to_rolling_window(df, days=5):
     except Exception as e:
         print(f"Error in trim_to_rolling_window: {e}")
         return df
+
+# --- MANUAL TICKER MANAGEMENT ---
+def load_manual_tickers():
+    """
+    Load manually selected tickers from ticker_selectors/tickerlist.txt
+    Always include these tickers regardless of whether it's Sunday or scheduled runs.
+    Returns deduplicated list of uppercase tickers.
+    """
+    try:
+        file_path = 'ticker_selectors/tickerlist.txt'
+        content = spaces_manager.download_string(file_path)
+        if content is None:
+            print(f"Warning: Could not load manual tickers from {file_path}")
+            return []
+        
+        # Process each line, remove numbering (like "1.NVDA"), strip whitespace, and uppercase
+        manual_tickers = []
+        for line in content.split('\n'):
+            line = line.strip()
+            if line:
+                # Remove numbering pattern like "1.", "2.", etc.
+                if '.' in line and line.split('.')[0].isdigit():
+                    ticker = line.split('.', 1)[1].strip().upper()
+                else:
+                    ticker = line.strip().upper()
+                if ticker:
+                    manual_tickers.append(ticker)
+        
+        # Return deduplicated list
+        return list(set(manual_tickers))
+        
+    except Exception as e:
+        print(f"Error loading manual tickers: {e}")
+        return []
+
+def is_today(timestamp_str, format_str="%Y-%m-%d %H:%M:%S"):
+    """
+    Check if a timestamp string represents today's date (U.S. Eastern Time preferred).
+    
+    Args:
+        timestamp_str: Timestamp string to check
+        format_str: Format of the timestamp string
+        
+    Returns:
+        bool: True if timestamp is for today's date, False otherwise
+    """
+    try:
+        # Parse the timestamp
+        dt = datetime.strptime(timestamp_str, format_str)
+        
+        # Get today's date in Eastern Time
+        ny_tz = pytz.timezone('America/New_York')
+        today_ny = datetime.now(ny_tz).date()
+        
+        # If timestamp is naive, assume it's in NY timezone
+        if dt.tzinfo is None:
+            dt = ny_tz.localize(dt)
+        else:
+            dt = dt.astimezone(ny_tz)
+            
+        return dt.date() == today_ny
+        
+    except Exception as e:
+        print(f"Error checking if timestamp is today: {e}")
+        return False
+
+def append_new_candles(ticker, new_rows, file_path):
+    """
+    Append new candles to existing ticker data with proper deduplication.
+    Only appends candles that are newer than the last saved timestamp and are for today.
+    
+    Args:
+        ticker: Stock symbol
+        new_rows: List of dictionaries or DataFrame with new candle data
+        file_path: Path to save the data (e.g., "data/intraday/AAPL_1min.csv")
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Convert new_rows to DataFrame if it's a list
+        if isinstance(new_rows, list):
+            if not new_rows:
+                return True  # Nothing to append
+            df_new = pd.DataFrame(new_rows)
+        else:
+            df_new = new_rows.copy()
+            
+        if df_new.empty:
+            return True
+            
+        # Determine timestamp column name
+        timestamp_col = None
+        for col in ['timestamp', 'Date', 'date', 'datetime']:
+            if col in df_new.columns:
+                timestamp_col = col
+                break
+                
+        if timestamp_col is None:
+            print(f"Error: No timestamp column found in new data for {ticker}")
+            return False
+            
+        # Read existing data
+        df_existing = read_df_from_s3(file_path)
+        
+        if not df_existing.empty:
+            # Find timestamp column in existing data
+            existing_timestamp_col = None
+            for col in ['timestamp', 'Date', 'date', 'datetime']:
+                if col in df_existing.columns:
+                    existing_timestamp_col = col
+                    break
+                    
+            if existing_timestamp_col is None:
+                print(f"Error: No timestamp column found in existing data for {ticker}")
+                return False
+                
+            # Ensure both DataFrames use the same timestamp column name
+            if timestamp_col != existing_timestamp_col:
+                df_new = df_new.rename(columns={timestamp_col: existing_timestamp_col})
+                timestamp_col = existing_timestamp_col
+                
+            # Convert timestamps to datetime
+            df_existing[timestamp_col] = pd.to_datetime(df_existing[timestamp_col])
+            df_new[timestamp_col] = pd.to_datetime(df_new[timestamp_col])
+            
+            # Get the last timestamp from existing data
+            last_time = df_existing[timestamp_col].max()
+            
+            # Filter new rows: only keep those that are newer than last saved timestamp and are for today
+            today_mask = df_new[timestamp_col].apply(lambda x: is_today(x.strftime("%Y-%m-%d %H:%M:%S")))
+            newer_mask = df_new[timestamp_col] > last_time
+            
+            # Apply both filters
+            df_new_filtered = df_new[today_mask & newer_mask]
+            
+            if df_new_filtered.empty:
+                print(f"No new candles to append for {ticker} (already up to date)")
+                return True
+                
+            # Combine existing and new data
+            df_combined = pd.concat([df_existing, df_new_filtered], ignore_index=True)
+        else:
+            # No existing data, filter new data to only today's candles
+            df_new[timestamp_col] = pd.to_datetime(df_new[timestamp_col])
+            today_mask = df_new[timestamp_col].apply(lambda x: is_today(x.strftime("%Y-%m-%d %H:%M:%S")))
+            df_combined = df_new[today_mask].copy()
+            
+        # Remove any duplicates based on timestamp (keep last occurrence)
+        df_combined = df_combined.drop_duplicates(subset=[timestamp_col], keep='last')
+        
+        # Sort by timestamp
+        df_combined = df_combined.sort_values(by=timestamp_col, ascending=True)
+        
+        # Save back to S3
+        save_df_to_s3(df_combined, file_path)
+        print(f"Successfully appended {len(df_combined) - (len(df_existing) if not df_existing.empty else 0)} new candles for {ticker}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error appending new candles for {ticker}: {e}")
+        return False

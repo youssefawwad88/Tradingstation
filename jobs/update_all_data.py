@@ -8,7 +8,7 @@ import logging
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, update_scheduler_status
+from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, update_scheduler_status, load_manual_tickers
 from utils.alpha_vantage_api import get_daily_data, get_intraday_data
 
 # Set up logging
@@ -23,12 +23,28 @@ def run_full_rebuild():
     """
     logger.info("Starting Daily Full Data Rebuild Job")
     
+    # Load tickers from S3 (S&P 500 or other universe)
     tickers = read_tickerlist_from_s3()
     if not tickers:
+        tickers = []
         logger.warning("No tickers found in tickerlist.txt")
+    
+    # Always load and include manual tickers from ticker_selectors/tickerlist.txt
+    manual_tickers = load_manual_tickers()
+    if manual_tickers:
+        logger.info(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
+        tickers.extend(manual_tickers)
+    else:
+        logger.warning("No manual tickers found in ticker_selectors/tickerlist.txt")
+    
+    # Remove duplicates while preserving order
+    tickers = list(dict.fromkeys(tickers))
+    
+    if not tickers:
+        logger.error("No tickers to process. Exiting.")
         return
 
-    logger.info(f"Processing {len(tickers)} tickers for full rebuild")
+    logger.info(f"Processing {len(tickers)} tickers for full rebuild (including manual tickers)")
 
     for ticker in tickers:
         logger.debug(f"Processing {ticker} for full rebuild")
