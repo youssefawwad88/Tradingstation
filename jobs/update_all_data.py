@@ -33,6 +33,7 @@ def run_full_rebuild():
     manual_tickers = load_manual_tickers()
     if manual_tickers:
         logger.info(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
+        logger.info("⚠️  CRITICAL: These manual tickers MUST appear in Spaces storage!")
         tickers.extend(manual_tickers)
     else:
         logger.warning("No manual tickers found in ticker_selectors/tickerlist.txt")
@@ -55,8 +56,11 @@ def run_full_rebuild():
             daily_df = get_daily_data(ticker, outputsize='full')
             if not daily_df.empty:
                 daily_df = daily_df.head(200)
-                save_df_to_s3(daily_df, f'data/daily/{ticker}_daily.csv')
-                logger.debug(f"Saved {len(daily_df)} rows of daily data for {ticker}")
+                upload_success = save_df_to_s3(daily_df, f'data/daily/{ticker}_daily.csv')
+                if upload_success:
+                    logger.debug(f"Saved {len(daily_df)} rows of daily data for {ticker}")
+                else:
+                    logger.error(f"❌ FAILED to upload daily data for {ticker} to Spaces!")
             else:
                 logger.warning(f"No daily data returned for {ticker}")
         except Exception as e:
@@ -68,8 +72,11 @@ def run_full_rebuild():
             intraday_30min_df = get_intraday_data(ticker, interval='30min', outputsize='full')
             if not intraday_30min_df.empty:
                 intraday_30min_df = intraday_30min_df.head(500)
-                save_df_to_s3(intraday_30min_df, f'data/intraday_30min/{ticker}_30min.csv')
-                logger.debug(f"Saved {len(intraday_30min_df)} rows of 30-min data for {ticker}")
+                upload_success = save_df_to_s3(intraday_30min_df, f'data/intraday_30min/{ticker}_30min.csv')
+                if upload_success:
+                    logger.debug(f"Saved {len(intraday_30min_df)} rows of 30-min data for {ticker}")
+                else:
+                    logger.error(f"❌ FAILED to upload 30-min data for {ticker} to Spaces!")
             else:
                 logger.warning(f"No 30-min data returned for {ticker}")
         except Exception as e:
@@ -84,8 +91,11 @@ def run_full_rebuild():
                 seven_days_ago = datetime.now() - timedelta(days=7)
                 intraday_1min_df = intraday_1min_df[intraday_1min_df['timestamp'] >= seven_days_ago]
                 
-                save_df_to_s3(intraday_1min_df, f'data/intraday/{ticker}_1min.csv')
-                logger.debug(f"Saved {len(intraday_1min_df)} rows of 1-min data for {ticker} (last 7 days)")
+                upload_success = save_df_to_s3(intraday_1min_df, f'data/intraday/{ticker}_1min.csv')
+                if upload_success:
+                    logger.debug(f"Saved {len(intraday_1min_df)} rows of 1-min data for {ticker} (last 7 days)")
+                else:
+                    logger.error(f"❌ FAILED to upload 1-min data for {ticker} to Spaces!")
             else:
                 logger.warning(f"No 1-min data returned for {ticker}")
         except Exception as e:
