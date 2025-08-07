@@ -42,6 +42,9 @@ def save_df_to_s3(df, file_path):
     """
     Saves a pandas DataFrame to a CSV file in S3.
     Falls back to local filesystem if S3 is unavailable for critical data persistence.
+    
+    Returns:
+        bool: True if either Spaces or local save succeeded, False if both failed
     """
     # Try to save to Spaces first
     spaces_success = spaces_manager.upload_dataframe(df, file_path)

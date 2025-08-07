@@ -13,6 +13,156 @@ from utils.helpers import (
 )
 from utils.alpha_vantage_api import get_intraday_data
 
+def test_debug_logging():
+    """
+    Test the debug logging functionality with sample data.
+    This demonstrates the enhanced logging without requiring API access.
+    """
+    print("🧪 TESTING DEBUG LOGGING FUNCTIONALITY")
+    print("="*60)
+    
+    # Create sample status for successful case
+    success_status = {
+        'api_fetch_success': True,
+        'api_fetch_error': None,
+        'new_candles_found': True,
+        'data_saved_locally': True,
+        'spaces_upload_success': True,
+        'spaces_configured': True,
+        'save_path': 'data/intraday/AAPL_1min.csv',
+        'total_rows': 1250
+    }
+    
+    print("\n✅ TESTING SUCCESSFUL CASE:")
+    log_ticker_debug_status("AAPL", "1min", success_status, debug=True)
+    
+    # Create sample status for failed case
+    failed_status = {
+        'api_fetch_success': False,
+        'api_fetch_error': 'API limit exceeded',
+        'new_candles_found': False,
+        'data_saved_locally': True,
+        'spaces_upload_success': False,
+        'spaces_configured': False,
+        'save_path': 'data/intraday/NVDA_1min.csv',
+        'total_rows': 0
+    }
+    
+    print("\n❌ TESTING FAILED CASE:")
+    log_ticker_debug_status("NVDA", "1min", failed_status, debug=True)
+    
+    # Test directory listing
+    print("\n📂 TESTING DIRECTORY LISTING:")
+    list_intraday_files(debug=True)
+    
+    print("\n🎯 TEST COMPLETED - All debug functions working properly!")
+    print("="*60)
+
+def log_ticker_debug_status(ticker, interval, status_dict, debug=False):
+    """
+    Log detailed ticker processing status in the specified format for debugging.
+    
+    Args:
+        ticker: Stock symbol
+        interval: '1min' or '30min'  
+        status_dict: Dictionary containing status information
+        debug: Whether to show debug logging
+    """
+    if not debug:
+        return
+        
+    print(f"\n🎯 DEBUG MODE: Enhanced Ticker Status Report")
+    print(f"{'='*60}")
+    print(f"🎯 Ticker: {ticker}")
+    
+    # API Fetch Status
+    if status_dict.get('api_fetch_success', False):
+        print(f"📊 API Fetch: ✅")
+    else:
+        error_msg = status_dict.get('api_fetch_error', 'Unknown error')
+        print(f"📊 API Fetch: ❌ [Error: {error_msg}]")
+    
+    # Local Save Path
+    save_path = status_dict.get('save_path', 'Unknown')
+    # Convert relative path to absolute for clarity
+    if not save_path.startswith('/'):
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        abs_save_path = os.path.join(current_dir, save_path)
+    else:
+        abs_save_path = save_path
+    print(f"💾 Local Save Path: {abs_save_path}")
+    
+    # Spaces Upload Status  
+    if status_dict.get('spaces_upload_success', False):
+        print(f"☁️ Spaces Upload: ✅")
+    elif status_dict.get('spaces_configured', False):
+        print(f"☁️ Spaces Upload: ❌ [Error: Upload failed]")
+    else:
+        print(f"☁️ Spaces Upload: ❌ [Error: Missing credentials]")
+    
+    # Where saved summary
+    saved_locally = status_dict.get('data_saved_locally', False)
+    saved_spaces = status_dict.get('spaces_upload_success', False)
+    
+    if saved_locally and saved_spaces:
+        print(f"🧭 Where saved: [Spaces ✅ / Local ✅]")
+    elif saved_locally and not saved_spaces:
+        print(f"🧭 Where saved: [Spaces ❌ / Local ✅]")
+    elif saved_spaces and not saved_locally:
+        print(f"🧭 Where saved: [Spaces ✅ / Local ❌]")  
+    else:
+        print(f"🧭 Where saved: [Neither ❌]")
+    
+    print(f"{'='*60}")
+
+def list_intraday_files(debug=False):
+    """
+    List actual files in the intraday directories for debugging.
+    
+    Args:
+        debug: Whether to show debug logging
+    """
+    if not debug:
+        return
+        
+    print(f"\n📂 DEBUG MODE: Directory File Listing")
+    print(f"{'='*50}")
+    
+    try:
+        # Get current working directory  
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        # Check 1min intraday directory
+        intraday_1min_path = os.path.join(current_dir, 'data', 'intraday')
+        print(f"📁 Directory: {intraday_1min_path}")
+        if os.path.exists(intraday_1min_path):
+            files = os.listdir(intraday_1min_path)
+            if files:
+                for file in sorted(files):
+                    print(f"   📄 {file}")
+            else:
+                print(f"   📂 (empty)")
+        else:
+            print(f"   ❌ Directory does not exist")
+        
+        # Check 30min intraday directory  
+        intraday_30min_path = os.path.join(current_dir, 'data', 'intraday_30min')
+        print(f"\n📁 Directory: {intraday_30min_path}")
+        if os.path.exists(intraday_30min_path):
+            files = os.listdir(intraday_30min_path)
+            if files:
+                for file in sorted(files):
+                    print(f"   📄 {file}")
+            else:
+                print(f"   📂 (empty)")
+        else:
+            print(f"   ❌ Directory does not exist")
+            
+    except Exception as e:
+        print(f"❌ Error listing files: {e}")
+    
+    print(f"{'='*50}")
+
 def normalize_column_names(df):
     """
     Normalize column names to match existing data format.
@@ -177,13 +327,14 @@ def test_forced_spaces_upload(ticker="AAPL"):
         print(f"{'='*50}")
         return False
 
-def process_ticker_interval(ticker, interval):
+def process_ticker_interval(ticker, interval, debug=False):
     """
     Process a single ticker for a specific interval (1min or 30min).
     
     Args:
         ticker: Stock symbol
         interval: '1min' or '30min'
+        debug: Enable enhanced debug logging with detailed status
         
     Returns:
         bool: True if successful, False otherwise
@@ -192,13 +343,15 @@ def process_ticker_interval(ticker, interval):
     print(f"🎯 PROCESSING TICKER: {ticker} ({interval} interval)")
     print(f"{'='*60}")
     
-    # Initialize per-ticker status tracking
+    # Initialize per-ticker status tracking with more detailed information
     ticker_status = {
         'api_fetch_success': False,
         'api_fetch_error': None,
         'new_candles_found': False,
         'data_saved_locally': False,
         'spaces_upload_success': False,
+        'spaces_configured': False,
+        'save_path': '',
         'total_rows': 0
     }
     
@@ -208,6 +361,9 @@ def process_ticker_interval(ticker, interval):
             file_path = f'data/intraday/{ticker}_{interval}.csv'
         else:  # 30min
             file_path = f'data/intraday_30min/{ticker}_{interval}.csv'
+        
+        # Store the save path for debugging
+        ticker_status['save_path'] = file_path
         
         # Check if file exists (new ticker vs existing ticker)
         existing_df = read_df_from_s3(file_path)
@@ -226,6 +382,9 @@ def process_ticker_interval(ticker, interval):
                     print(f"❌ API FETCH FAILED: No intraday data returned for new ticker {ticker}")
                     ticker_status['api_fetch_success'] = False
                     ticker_status['api_fetch_error'] = "No data returned from API"
+                    
+                    # Enhanced debug logging for early failure
+                    log_ticker_debug_status(ticker, interval, ticker_status, debug)
                     return False
                 else:
                     print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
@@ -264,6 +423,9 @@ def process_ticker_interval(ticker, interval):
                         print(f"❌ API FETCH FAILED: No 30min intraday data returned for new ticker {ticker}")
                         ticker_status['api_fetch_success'] = False
                         ticker_status['api_fetch_error'] = "No 30min data returned from API"
+                        
+                        # Enhanced debug logging for early failure
+                        log_ticker_debug_status(ticker, interval, ticker_status, debug)
                         return False
                     else:
                         print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
@@ -301,6 +463,9 @@ def process_ticker_interval(ticker, interval):
                     print(f"❌ API FETCH FAILED: No new {interval} data returned for {ticker}")
                     ticker_status['api_fetch_success'] = False
                     ticker_status['api_fetch_error'] = f"No new {interval} data returned from API"
+                    
+                    # Enhanced debug logging for early failure
+                    log_ticker_debug_status(ticker, interval, ticker_status, debug)
                     return False
                 else:
                     print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
@@ -377,6 +542,15 @@ def process_ticker_interval(ticker, interval):
             
             # Save the updated file back to S3/local (only if we have data)
             print(f"💾 SAVING: Attempting to save {len(combined_df)} rows for {ticker} to {file_path}...")
+            
+            # Check Spaces configuration before attempting save
+            spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
+            spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
+            spaces_bucket = os.getenv('SPACES_BUCKET_NAME')
+            spaces_region = os.getenv('SPACES_REGION')
+            spaces_configured = all([spaces_access_key, spaces_secret_key, spaces_bucket, spaces_region])
+            ticker_status['spaces_configured'] = spaces_configured
+            
             upload_success = save_df_to_s3(combined_df, file_path)
             
             if not upload_success:
@@ -387,11 +561,6 @@ def process_ticker_interval(ticker, interval):
                 return False
             else:
                 # Check what save_df_to_s3 actually accomplished
-                # We need to check if this was local-only or included Spaces
-                spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
-                spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
-                spaces_configured = spaces_access_key and spaces_secret_key
-                
                 ticker_status['data_saved_locally'] = True
                 
                 if spaces_configured:
@@ -426,6 +595,9 @@ def process_ticker_interval(ticker, interval):
         print(f"{'='*50}")
         print(f"✅ COMPLETED: {ticker} ({interval}) processing finished successfully")
         
+        # Enhanced debug logging if enabled
+        log_ticker_debug_status(ticker, interval, ticker_status, debug)
+        
         return True
         
     except Exception as e:
@@ -439,16 +611,27 @@ def process_ticker_interval(ticker, interval):
         print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status.get('spaces_upload_success', False) else '❌ FAILED'}")
         print(f"❌ Error: {str(e)}")
         print(f"{'='*50}")
+        
+        # Enhanced debug logging if enabled (for errors too)
+        log_ticker_debug_status(ticker, interval, ticker_status, debug)
+        
         return False
-def run_compact_append():
+def run_compact_append(debug=False):
     """
     Runs the enhanced intraday data update process.
     - Handles both new and existing tickers
     - Ensures today's data is always included
     - Maintains rolling window of last 5 days + current day
     - Provides robust error handling and warnings
+    
+    Args:
+        debug: Enable enhanced debug logging with detailed status for each ticker
     """
     print("--- Starting Enhanced Intraday Data Update Job ---")
+    
+    if debug:
+        print("🧪 DEBUG MODE: Enhanced logging enabled")
+        print("   Additional detailed status will be shown for each ticker")
     
     # Enhanced Environment Variable Check
     print("\n=== ENVIRONMENT VARIABLES VERIFICATION ===")
@@ -538,14 +721,14 @@ def run_compact_append():
         
         # Process 1-minute interval first
         print(f"\n🔄 PHASE 1: Processing {ticker} for 1-minute interval...")
-        success_1min = process_ticker_interval(ticker, '1min')
+        success_1min = process_ticker_interval(ticker, '1min', debug)
         if success_1min:
             success_count += 1
         
         # Process 30-minute interval 
         # Note: For 30min, we prefer resampling from 1min data when available
         print(f"\n🔄 PHASE 2: Processing {ticker} for 30-minute interval...")
-        success_30min = process_ticker_interval(ticker, '30min')
+        success_30min = process_ticker_interval(ticker, '30min', debug)
         if success_30min:
             success_count += 1
         
@@ -576,6 +759,9 @@ def run_compact_append():
     print(f"Enhanced Intraday Data Update Job Completed")
     print(f"Success rate: {success_count}/{total_operations} operations")
     
+    # Show file listing if debug mode is enabled
+    list_intraday_files(debug)
+    
     # Report manual ticker status specifically
     if manual_ticker_results:
         print(f"\n🎯 MANUAL TICKER STATUS REPORT:")
@@ -604,10 +790,14 @@ def run_compact_append():
     print(f"{'='*60}")
 
 if __name__ == "__main__":
+    # Check for debug mode argument
+    import sys
+    debug_mode = "--debug" in sys.argv or "-d" in sys.argv
+    
     job_name = "update_intraday_compact"
     update_scheduler_status(job_name, "Running")
     try:
-        run_compact_append()
+        run_compact_append(debug=debug_mode)
         update_scheduler_status(job_name, "Success")
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
