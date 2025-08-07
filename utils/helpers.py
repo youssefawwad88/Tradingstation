@@ -237,6 +237,55 @@ def read_tickerlist_from_s3(filename):
     logger.warning(f"Using default tickers: {DEFAULT_TICKERS}")
     return DEFAULT_TICKERS
 
+def read_master_tickerlist():
+    """
+    Read master ticker list from master_tickerlist.csv (local or Spaces).
+    This is the unified function used by all fetchers.
+    
+    Returns:
+        list: List of ticker symbols from master list
+    """
+    logger.info("Reading master ticker list from master_tickerlist.csv")
+    
+    try:
+        # Try local file first
+        local_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "master_tickerlist.csv")
+        if os.path.exists(local_file):
+            df = pd.read_csv(local_file)
+            if 'ticker' in df.columns:
+                tickers = df['ticker'].tolist()
+                logger.info(f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv")
+                return tickers
+        
+        # Try to read from Spaces
+        df = read_df_from_s3("master_tickerlist.csv")
+        if not df.empty and 'ticker' in df.columns:
+            tickers = df['ticker'].tolist()
+            logger.info(f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv (Spaces)")
+            return tickers
+        
+        # Fallback: generate master list if it doesn't exist
+        logger.warning("⚠️ master_tickerlist.csv not found, falling back to manual tickers")
+        manual_tickers = load_manual_tickers()
+        if manual_tickers:
+            logger.info(f"Using {len(manual_tickers)} manual tickers as fallback")
+            return manual_tickers
+        
+        # Final fallback to default tickers
+        from utils.config import DEFAULT_TICKERS
+        logger.warning(f"Using default tickers as last resort: {DEFAULT_TICKERS}")
+        return DEFAULT_TICKERS
+        
+    except Exception as e:
+        logger.error(f"Error reading master ticker list: {e}")
+        # Fallback to manual tickers
+        manual_tickers = load_manual_tickers()
+        if manual_tickers:
+            return manual_tickers
+        
+        from utils.config import DEFAULT_TICKERS
+        return DEFAULT_TICKERS
+
 def read_df_from_s3(object_name):
     """
     Read DataFrame from S3/Spaces or local fallback.

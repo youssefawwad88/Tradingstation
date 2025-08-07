@@ -10,6 +10,30 @@ To build an autonomous, institutional-style trade discovery and execution system
 
 ---
 
+## 🚀 New: Unified Ticker Management System
+
+The system now includes a unified ticker management strategy that merges two sources:
+
+- **Manual Tickers** (from `tickerlist.txt`) - Always included, no filters
+- **S&P 500 Tickers** (filtered using Ashraf's breakout logic)
+
+### Quick Start
+```bash
+# Generate master ticker list (daily at 6 AM ET)
+python generate_master_tickerlist.py
+
+# Run full data fetch (once per day)
+python fetch_daily.py      # Daily data (200 rows)
+python fetch_30min.py      # 30-min data (500 rows)
+
+# Run intraday updates (every minute)
+python fetch_intraday_compact.py
+```
+
+📖 **Full Documentation**: See [TICKER_MANAGEMENT.md](TICKER_MANAGEMENT.md) for complete details.
+
+---
+
 ## 🧱 Folder Structure
 
 | Folder | Description |
