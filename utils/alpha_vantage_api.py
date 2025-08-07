@@ -88,3 +88,50 @@ def get_company_overview(symbol):
         except Exception as e:
             print(f"ERROR: Failed to process overview JSON data for {symbol}: {e}")
     return None
+
+def get_real_time_price(symbol):
+    """
+    Fetches real-time price using Alpha Vantage Global Quote.
+    Used for live price checks (TP/SL validation in dashboards).
+    
+    Args:
+        symbol (str): Stock symbol
+        
+    Returns:
+        dict: Dictionary with price data or None if failed
+    """
+    params = {
+        'function': 'GLOBAL_QUOTE',
+        'symbol': symbol,
+        'apikey': API_KEY
+    }
+    response = _make_api_request(params)
+    if response:
+        try:
+            quote_data = response.json()
+            global_quote = quote_data.get('Global Quote', {})
+            
+            if not global_quote:
+                print(f"ERROR: No Global Quote data returned for {symbol}")
+                return None
+            
+            # Extract key price information
+            price_data = {
+                'symbol': global_quote.get('01. symbol', symbol),
+                'price': float(global_quote.get('05. price', 0)),
+                'open': float(global_quote.get('02. open', 0)),
+                'high': float(global_quote.get('03. high', 0)),
+                'low': float(global_quote.get('04. low', 0)),
+                'previous_close': float(global_quote.get('08. previous close', 0)),
+                'change': float(global_quote.get('09. change', 0)),
+                'change_percent': global_quote.get('10. change percent', '0%').rstrip('%'),
+                'volume': int(global_quote.get('06. volume', 0)),
+                'latest_trading_day': global_quote.get('07. latest trading day', ''),
+                'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            return price_data
+            
+        except Exception as e:
+            print(f"ERROR: Failed to process real-time price data for {symbol}: {e}")
+    return None

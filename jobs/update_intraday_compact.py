@@ -16,7 +16,7 @@ from utils.config import (
     DEBUG_MODE
 )
 from utils.helpers import (
-    read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status,
+    read_master_tickerlist, save_df_to_s3, read_df_from_s3, update_scheduler_status,
     is_today_present, get_last_market_day, trim_to_rolling_window, detect_market_session,
     load_manual_tickers, is_today, append_new_candles, save_to_local_filesystem
 )
@@ -738,23 +738,8 @@ def run_compact_append(debug=False):
         
         print("=" * 50)
     
-    # Load tickers from S3 (S&P 500 or other universe)
-    tickers = read_tickerlist_from_s3('tickerlist.txt')
-    if not tickers:
-        tickers = []
-        print("No tickers found in tickerlist.txt")
-    
-    # Always load and include manual tickers from ticker_selectors/tickerlist.txt
-    manual_tickers = load_manual_tickers()
-    if manual_tickers:
-        logger.info(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
-        logger.warning("⚠️  CRITICAL: These manual tickers MUST appear in Spaces storage!")
-        tickers.extend(manual_tickers)
-    else:
-        logger.info("No manual tickers found in ticker_selectors/tickerlist.txt")
-    
-    # Remove duplicates while preserving order
-    tickers = list(dict.fromkeys(tickers))
+    # Load tickers from master_tickerlist.csv (unified source)
+    tickers = read_master_tickerlist()
     
     if not tickers:
         logger.error("No tickers to process. Exiting job.")
@@ -766,7 +751,7 @@ def run_compact_append(debug=False):
             'manual_tickers_status': 'N/A'
         }
 
-    logger.info(f"🚀 Processing {len(tickers)} tickers for intraday updates: {tickers}")
+    logger.info(f"🚀 Processing {len(tickers)} tickers from master_tickerlist.csv for intraday updates: {tickers}")
     logger.info(f"📊 Storage configuration: {'Cloud (Spaces) + Local' if spaces_configured else 'Local filesystem only'}")
     
     # Track processing results
