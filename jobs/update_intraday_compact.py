@@ -1,17 +1,33 @@
-import pandas as pd
-import sys
 import os
+import logging
+import pandas as pd
+from datetime import datetime
+import sys
+import traceback
 import time
 
-# Add project root to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add the project root to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.config import (
+    DEFAULT_TICKERS, 
+    INTRADAY_INTERVALS,
+    INTRADAY_DATA_DIR,
+    DEBUG_MODE
+)
 from utils.helpers import (
     read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status,
     is_today_present, get_last_market_day, trim_to_rolling_window, detect_market_session,
-    load_manual_tickers, is_today, append_new_candles
+    load_manual_tickers, is_today, append_new_candles, save_to_local_filesystem
 )
 from utils.alpha_vantage_api import get_intraday_data
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def test_debug_logging():
     """
@@ -140,11 +156,11 @@ def list_intraday_files(debug=False):
             files = os.listdir(intraday_1min_path)
             if files:
                 for file in sorted(files):
-                    print(f"   📄 {file}")
+                    print(f"    📄 {file}")
             else:
-                print(f"   📂 (empty)")
+                print(f"    📂 (empty)")
         else:
-            print(f"   ❌ Directory does not exist")
+            print(f"    ❌ Directory does not exist")
         
         # Check 30min intraday directory  
         intraday_30min_path = os.path.join(current_dir, 'data', 'intraday_30min')
@@ -153,11 +169,11 @@ def list_intraday_files(debug=False):
             files = os.listdir(intraday_30min_path)
             if files:
                 for file in sorted(files):
-                    print(f"   📄 {file}")
+                    print(f"    📄 {file}")
             else:
-                print(f"   📂 (empty)")
+                print(f"    📂 (empty)")
         else:
-            print(f"   ❌ Directory does not exist")
+            print(f"    ❌ Directory does not exist")
             
     except Exception as e:
         print(f"❌ Error listing files: {e}")
@@ -179,7 +195,7 @@ def normalize_column_names(df):
         'time': 'Date',
         'datetime': 'Date',
         'open': 'Open',
-        'high': 'High', 
+        'high': 'High',  
         'low': 'Low',
         'close': 'Close',
         'volume': 'Volume'
@@ -255,7 +271,7 @@ def resample_to_30min(df_1min):
         # Resample to 30-minute intervals
         resampled = df.resample('30min').agg({
             'open': 'first',
-            'high': 'max', 
+            'high': 'max',  
             'low': 'min',
             'close': 'last',
             'volume': 'sum'
@@ -556,7 +572,7 @@ def process_ticker_interval(ticker, interval, debug=False):
             
             if not upload_success:
                 print(f"❌ SAVE FAILED: Could not save {ticker} data to storage: {file_path}")
-                print(f"   This ticker data may be lost!")
+                print(f"    This ticker data may be lost!")
                 ticker_status['data_saved_locally'] = False
                 ticker_status['spaces_upload_success'] = False
                 return False
@@ -581,7 +597,7 @@ def process_ticker_interval(ticker, interval, debug=False):
         print(f"🎯 Ticker: {ticker}")
         print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status['api_fetch_success'] else '❌ FAILED'}")
         if ticker_status['api_fetch_error']:
-            print(f"   Error: {ticker_status['api_fetch_error']}")
+            print(f"    Error: {ticker_status['api_fetch_error']}")
         print(f"🆕 New Candles: {'✅ FOUND' if ticker_status['new_candles_found'] else '📊 NONE'}")
         print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status['data_saved_locally'] else '❌ FAILED'}")
         print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status['spaces_upload_success'] else '❌ FAILED/DISABLED'}")
@@ -632,7 +648,7 @@ def run_compact_append(debug=False):
     
     if debug:
         print("🧪 DEBUG MODE: Enhanced logging enabled")
-        print("   Additional detailed status will be shown for each ticker")
+        print("    Additional detailed status will be shown for each ticker")
     
     # PHASE 3: Enhanced Environment Variable Logging (as requested in problem statement)
     print("\n📦 DigitalOcean Config:")
@@ -641,10 +657,10 @@ def run_compact_append(debug=False):
     spaces_bucket = os.getenv('SPACES_BUCKET_NAME')
     spaces_region = os.getenv('SPACES_REGION')
     
-    print(f"   SPACES_ACCESS_KEY_ID = {spaces_access_key if spaces_access_key else '❌ Not Set'}")
-    print(f"   SPACES_SECRET_ACCESS_KEY = {'*' * 8 if spaces_secret_key else '❌ Not Set'}")
-    print(f"   SPACES_BUCKET_NAME = {spaces_bucket if spaces_bucket else '❌ Not Set'}")
-    print(f"   Saving locally to: /workspace/data/intraday/")
+    print(f"    SPACES_ACCESS_KEY_ID = {spaces_access_key if spaces_access_key else '❌ Not Set'}")
+    print(f"    SPACES_SECRET_ACCESS_KEY = {'*' * 8 if spaces_secret_key else '❌ Not Set'}")
+    print(f"    SPACES_BUCKET_NAME = {spaces_bucket if spaces_bucket else '❌ Not Set'}")
+    print(f"    Saving locally to: /workspace/data/intraday/")
     
     # Additional detailed environment check for troubleshooting
     print("\n=== DETAILED ENVIRONMENT VARIABLES VERIFICATION ===")
@@ -653,7 +669,7 @@ def run_compact_append(debug=False):
     api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
     if not api_key:
         print("❌ CRITICAL: ALPHA_VANTAGE_API_KEY environment variable not set")
-        print("   Data fetching will fail!")
+        print("    Data fetching will fail!")
     else:
         print(f"✅ ALPHA_VANTAGE_API_KEY configured: {api_key[:8]}***{api_key[-4:] if len(api_key) > 12 else '***'}")
     
@@ -684,8 +700,8 @@ def run_compact_append(debug=False):
         print("✅ DigitalOcean Spaces: FULLY CONFIGURED")
     else:
         print("⚠️  DigitalOcean Spaces: INCOMPLETE CONFIGURATION")
-        print("   Missing credentials will cause Spaces upload to silently fail!")
-        print("   Using local filesystem fallback for data persistence")
+        print("    Missing credentials will cause Spaces upload to silently fail!")
+        print("    Using local filesystem fallback for data persistence")
     
     print("=" * 50)
     
@@ -732,7 +748,7 @@ def run_compact_append(debug=False):
         if success_1min:
             success_count += 1
         
-        # Process 30-minute interval 
+        # Process 30-minute interval  
         # Note: For 30min, we prefer resampling from 1min data when available
         print(f"\n🔄 PHASE 2: Processing {ticker} for 30-minute interval...")
         success_30min = process_ticker_interval(ticker, '30min', debug)
@@ -787,12 +803,12 @@ def run_compact_append(debug=False):
         
         if failed_manual_tickers:
             print(f"\n❌ CRITICAL: {len(failed_manual_tickers)} manual tickers FAILED:")
-            print(f"   {failed_manual_tickers}")
-            print(f"   These tickers will NOT appear in production Spaces storage!")
-            print(f"   Check DigitalOcean Spaces credentials and connectivity.")
+            print(f"    {failed_manual_tickers}")
+            print(f"    These tickers will NOT appear in production Spaces storage!")
+            print(f"    Check DigitalOcean Spaces credentials and connectivity.")
         else:
             print(f"\n✅ SUCCESS: All {len(manual_ticker_results)} manual tickers processed successfully!")
-            print(f"   Manual tickers should now be available in Spaces storage.")
+            print(f"    Manual tickers should now be available in Spaces storage.")
     
     print(f"{'='*60}")
 
