@@ -13,7 +13,7 @@ REQUEST_TIMEOUT = 15
 def _make_api_request(params):
     """A centralized and robust function for making API requests."""
     if not API_KEY:
-        print("CRITICAL ERROR: ALPHA_VANTAGE_API_KEY environment variable not set.")
+        print("WARNING: ALPHA_VANTAGE_API_KEY environment variable not set. API calls will be skipped.")
         return None
     
     try:
