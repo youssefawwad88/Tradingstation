@@ -664,6 +664,9 @@ def run_compact_append(debug=False):
     
     Args:
         debug: Enable enhanced debug logging with detailed status for each ticker
+        
+    Returns:
+        dict: Summary of processing results for orchestrator reporting
     """
     logger.info("--- Starting Enhanced Intraday Data Update Job ---")
     
@@ -755,7 +758,13 @@ def run_compact_append(debug=False):
     
     if not tickers:
         logger.error("No tickers to process. Exiting job.")
-        return
+        return {
+            'success': False,
+            'total_tickers': 0,
+            'successful_tickers': 0,
+            'storage_location': 'N/A',
+            'manual_tickers_status': 'N/A'
+        }
 
     logger.info(f"🚀 Processing {len(tickers)} tickers for intraday updates: {tickers}")
     logger.info(f"📊 Storage configuration: {'Cloud (Spaces) + Local' if spaces_configured else 'Local filesystem only'}")
@@ -904,6 +913,17 @@ def run_compact_append(debug=False):
     
     if debug:
         print(f"{'='*60}")
+    
+    # Return summary for orchestrator reporting
+    return {
+        'success': True,
+        'total_tickers': len(tickers),
+        'successful_tickers': len(successful_tickers),
+        'failed_tickers': len(failed_tickers),
+        'storage_location': 'Cloud (Spaces) + Local' if spaces_configured else 'Local only',
+        'manual_tickers_total': len(manual_ticker_results) if manual_ticker_results else 0,
+        'manual_tickers_failed': len([t for t, r in manual_ticker_results.items() if not r['overall']]) if manual_ticker_results else 0
+    }
 
 if __name__ == "__main__":
     # PHASE 4: Add DEBUG_MODE environment variable support (as requested in problem statement)
@@ -927,9 +947,17 @@ if __name__ == "__main__":
     job_name = "update_intraday_compact"
     update_scheduler_status(job_name, "Running")
     try:
-        run_compact_append(debug=debug_mode)
+        result = run_compact_append(debug=debug_mode)
+        
+        # Output concise summary for orchestrator logs (always shown)
+        if result and result.get('success', False):
+            print(f"📋 ORCHESTRATOR SUMMARY: Processed {result['successful_tickers']}/{result['total_tickers']} tickers | Storage: {result['storage_location']} | Manual tickers: {result['manual_tickers_total'] - result['manual_tickers_failed']}/{result['manual_tickers_total']} OK")
+        else:
+            print(f"📋 ORCHESTRATOR SUMMARY: Job failed or no tickers processed")
+        
         update_scheduler_status(job_name, "Success")
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
-        print(error_message)
+        logger.error(error_message)
+        print(f"❌ ORCHESTRATOR SUMMARY: Intraday update failed - {error_message}")
         update_scheduler_status(job_name, "Fail", error_message)
