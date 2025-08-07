@@ -33,7 +33,7 @@ def test_debug_logging():
         'total_rows': 1250
     }
     
-    print("\n✅ TESTING SUCCESSFUL CASE:")
+    print("\n✅ TESTING SUCCESSFUL CASE (New Format):")
     log_ticker_debug_status("AAPL", "1min", success_status, debug=True)
     
     # Create sample status for failed case
@@ -48,7 +48,7 @@ def test_debug_logging():
         'total_rows': 0
     }
     
-    print("\n❌ TESTING FAILED CASE:")
+    print("\n❌ TESTING FAILED CASE (New Format):")
     log_ticker_debug_status("NVDA", "1min", failed_status, debug=True)
     
     # Test directory listing
@@ -60,7 +60,7 @@ def test_debug_logging():
 
 def log_ticker_debug_status(ticker, interval, status_dict, debug=False):
     """
-    Log detailed ticker processing status in the specified format for debugging.
+    Log detailed ticker processing status in the EXACT format requested in problem statement.
     
     Args:
         ticker: Stock symbol
@@ -71,49 +71,50 @@ def log_ticker_debug_status(ticker, interval, status_dict, debug=False):
     if not debug:
         return
         
-    print(f"\n🎯 DEBUG MODE: Enhanced Ticker Status Report")
-    print(f"{'='*60}")
+    # PHASE 2: Log in the EXACT format requested in the problem statement
     print(f"🎯 Ticker: {ticker}")
     
-    # API Fetch Status
+    # API Fetch Status - exact format from problem statement
     if status_dict.get('api_fetch_success', False):
-        print(f"📊 API Fetch: ✅")
+        print(f"📊 API Fetch: ✅ Success")
     else:
-        error_msg = status_dict.get('api_fetch_error', 'Unknown error')
-        print(f"📊 API Fetch: ❌ [Error: {error_msg}]")
+        print(f"📊 API Fetch: ❌ Failed")
     
-    # Local Save Path
+    # Local Save Path - exact format from problem statement 
     save_path = status_dict.get('save_path', 'Unknown')
-    # Convert relative path to absolute for clarity
-    if not save_path.startswith('/'):
-        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        abs_save_path = os.path.join(current_dir, save_path)
+    # Convert to /workspace/ path as requested in problem statement
+    if not save_path.startswith('/workspace/'):
+        # Convert relative path to /workspace/ format as requested
+        if save_path.startswith('data/'):
+            workspace_path = f"/workspace/{save_path}"
+        else:
+            workspace_path = f"/workspace/data/intraday/{ticker}_{interval}.csv"
     else:
-        abs_save_path = save_path
-    print(f"💾 Local Save Path: {abs_save_path}")
+        workspace_path = save_path
     
-    # Spaces Upload Status  
+    if status_dict.get('data_saved_locally', False):
+        print(f"💾 Local Save Path: {workspace_path}")
+    else:
+        print(f"💾 Local Save Path: ❌ Failed")
+    
+    # Spaces Upload Status - exact format from problem statement
     if status_dict.get('spaces_upload_success', False):
-        print(f"☁️ Spaces Upload: ✅")
-    elif status_dict.get('spaces_configured', False):
-        print(f"☁️ Spaces Upload: ❌ [Error: Upload failed]")
+        print(f"☁️ Spaces Upload: ✅ Success")
     else:
-        print(f"☁️ Spaces Upload: ❌ [Error: Missing credentials]")
+        print(f"☁️ Spaces Upload: ❌ Failed")
     
-    # Where saved summary
-    saved_locally = status_dict.get('data_saved_locally', False)
-    saved_spaces = status_dict.get('spaces_upload_success', False)
-    
-    if saved_locally and saved_spaces:
-        print(f"🧭 Where saved: [Spaces ✅ / Local ✅]")
-    elif saved_locally and not saved_spaces:
-        print(f"🧭 Where saved: [Spaces ❌ / Local ✅]")
-    elif saved_spaces and not saved_locally:
-        print(f"🧭 Where saved: [Spaces ✅ / Local ❌]")  
-    else:
-        print(f"🧭 Where saved: [Neither ❌]")
-    
-    print(f"{'='*60}")
+    # Workspace files listing - exact format from problem statement
+    try:
+        # Try to list files in the intraday directory
+        current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        intraday_path = os.path.join(current_dir, 'data', 'intraday')
+        if os.path.exists(intraday_path):
+            files = [f for f in os.listdir(intraday_path) if f.endswith('.csv')]
+            print(f"📁 Workspace files: {files}")
+        else:
+            print(f"📁 Workspace files: []")
+    except Exception as e:
+        print(f"📁 Workspace files: [] (Error: {e})")
 
 def list_intraday_files(debug=False):
     """
@@ -633,8 +634,20 @@ def run_compact_append(debug=False):
         print("🧪 DEBUG MODE: Enhanced logging enabled")
         print("   Additional detailed status will be shown for each ticker")
     
-    # Enhanced Environment Variable Check
-    print("\n=== ENVIRONMENT VARIABLES VERIFICATION ===")
+    # PHASE 3: Enhanced Environment Variable Logging (as requested in problem statement)
+    print("\n📦 DigitalOcean Config:")
+    spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
+    spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
+    spaces_bucket = os.getenv('SPACES_BUCKET_NAME')
+    spaces_region = os.getenv('SPACES_REGION')
+    
+    print(f"   SPACES_ACCESS_KEY_ID = {spaces_access_key if spaces_access_key else '❌ Not Set'}")
+    print(f"   SPACES_SECRET_ACCESS_KEY = {'*' * 8 if spaces_secret_key else '❌ Not Set'}")
+    print(f"   SPACES_BUCKET_NAME = {spaces_bucket if spaces_bucket else '❌ Not Set'}")
+    print(f"   Saving locally to: /workspace/data/intraday/")
+    
+    # Additional detailed environment check for troubleshooting
+    print("\n=== DETAILED ENVIRONMENT VARIABLES VERIFICATION ===")
     
     # Alpha Vantage API Key
     api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
@@ -643,12 +656,6 @@ def run_compact_append(debug=False):
         print("   Data fetching will fail!")
     else:
         print(f"✅ ALPHA_VANTAGE_API_KEY configured: {api_key[:8]}***{api_key[-4:] if len(api_key) > 12 else '***'}")
-    
-    # DigitalOcean Spaces Credentials - Check all required variables
-    spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
-    spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
-    spaces_bucket = os.getenv('SPACES_BUCKET_NAME')
-    spaces_region = os.getenv('SPACES_REGION')
     
     print("\n--- DigitalOcean Spaces Configuration ---")
     if spaces_access_key:
@@ -790,9 +797,23 @@ def run_compact_append(debug=False):
     print(f"{'='*60}")
 
 if __name__ == "__main__":
-    # Check for debug mode argument
+    # PHASE 4: Add DEBUG_MODE environment variable support (as requested in problem statement)
     import sys
-    debug_mode = "--debug" in sys.argv or "-d" in sys.argv
+    
+    # Check for debug mode from multiple sources
+    debug_mode = False
+    
+    # 1. Environment variable DEBUG_MODE
+    debug_env = os.getenv("DEBUG_MODE", "false").lower() == "true"
+    
+    # 2. Command line arguments
+    debug_cli = "--debug" in sys.argv or "-d" in sys.argv
+    
+    # Enable debug if either source requests it
+    debug_mode = debug_env or debug_cli
+    
+    if debug_mode:
+        print("🛠 DEBUG ON: Verbose logging enabled.")
     
     job_name = "update_intraday_compact"
     update_scheduler_status(job_name, "Running")
