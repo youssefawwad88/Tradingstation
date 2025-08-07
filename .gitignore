@@ -214,3 +214,4 @@ data/intraday_30min/TEST_*.csv
 # Local data backups (keep in local environment only)
 # data/intraday/
 # data/intraday_30min/
+demo_enhanced_logging.py
