@@ -706,7 +706,7 @@ def run_compact_append(debug=False):
     print("=" * 50)
     
     # Load tickers from S3 (S&P 500 or other universe)
-    tickers = read_tickerlist_from_s3()
+    tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
         tickers = []
         print("No tickers found in tickerlist.txt")
