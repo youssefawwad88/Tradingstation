@@ -397,11 +397,12 @@ def process_ticker_interval(ticker, interval, debug=False):
                 latest_df = get_intraday_data(ticker, interval='1min', outputsize='full')
                 
                 if latest_df.empty:
-                    logger.error(f"❌ API FETCH FAILED: No intraday data returned for new ticker {ticker}")
+                    logger.warning(f"⚠️  API FETCH FAILED: No intraday data returned for new ticker {ticker}. Skipping.")
                     ticker_status['api_fetch_success'] = False
                     ticker_status['api_fetch_error'] = "No data returned from API"
                     
-                    # Enhanced debug logging for early failure
+                    # For new tickers that fail API calls, skip processing rather than fail completely
+                    logger.warning(f"⚠️  SKIPPING: Cannot process new ticker {ticker} without API data")
                     log_ticker_debug_status(ticker, interval, ticker_status, debug)
                     return False
                 else:
@@ -438,11 +439,12 @@ def process_ticker_interval(ticker, interval, debug=False):
                     latest_df = get_intraday_data(ticker, interval='30min', outputsize='full')
                     
                     if latest_df.empty:
-                        logger.error(f"❌ API FETCH FAILED: No 30min intraday data returned for new ticker {ticker}")
+                        logger.warning(f"⚠️  API FETCH FAILED: No 30min intraday data returned for new ticker {ticker}. Checking for existing data.")
                         ticker_status['api_fetch_success'] = False
                         ticker_status['api_fetch_error'] = "No 30min data returned from API"
                         
-                        # Enhanced debug logging for early failure
+                        # For new tickers that fail API calls, skip processing rather than fail completely
+                        logger.warning(f"⚠️  SKIPPING: Cannot process new ticker {ticker} without API data")
                         log_ticker_debug_status(ticker, interval, ticker_status, debug)
                         return False
                     else:
@@ -478,13 +480,15 @@ def process_ticker_interval(ticker, interval, debug=False):
                 latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
                 
                 if latest_df.empty:
-                    logger.error(f"❌ API FETCH FAILED: No new {interval} data returned for {ticker}")
+                    logger.warning(f"⚠️  API FETCH FAILED: No new {interval} data returned for {ticker}. Using existing data.")
                     ticker_status['api_fetch_success'] = False
-                    ticker_status['api_fetch_error'] = f"No new {interval} data returned from API"
+                    ticker_status['api_fetch_error'] = f"No new {interval} data returned from API (using existing data)"
                     
-                    # Enhanced debug logging for early failure
-                    log_ticker_debug_status(ticker, interval, ticker_status, debug)
-                    return False
+                    # Fallback: Use existing data when API fails
+                    logger.info(f"📊 FALLBACK: Using existing {len(existing_df)} rows for {ticker} due to API unavailability")
+                    combined_df = existing_df.copy()
+                    ticker_status['new_candles_found'] = False
+                    latest_df = pd.DataFrame()  # Empty, will use existing data
                 else:
                     logger.info(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
                     ticker_status['api_fetch_success'] = True
@@ -551,7 +555,7 @@ def process_ticker_interval(ticker, interval, debug=False):
         # Apply rolling window trimming (keep last 5 days + current day) only if we have data
         if not combined_df.empty:
             logger.info(f"🔄 PROCESSING: Applying rolling window trimming for {ticker}...")
-            combined_df = trim_to_rolling_window(combined_df, days=5)
+            combined_df = trim_to_rolling_window(combined_df, window_days=5)
             
             # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
             timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'

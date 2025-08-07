@@ -103,7 +103,7 @@ def save_df_to_local(df, ticker, interval, directory=INTRADAY_DATA_DIR):
 
 def save_df_to_s3(df, object_name_or_ticker, interval=None, s3_prefix='intraday'):
     """
-    Save DataFrame to DigitalOcean Spaces (with flexible parameters).
+    Save DataFrame to DigitalOcean Spaces (with flexible parameters) with local fallback.
     
     Args:
         df (pandas.DataFrame): DataFrame to save
@@ -112,25 +112,62 @@ def save_df_to_s3(df, object_name_or_ticker, interval=None, s3_prefix='intraday'
         s3_prefix (str): Prefix/folder in the S3 bucket (if ticker provided)
         
     Returns:
-        bool: True if successful, False otherwise
+        bool: True if successful (either Spaces or local), False otherwise
     """
     # Determine if we got an object name or ticker
     if interval is not None:
         # Old-style call with ticker and interval
         object_name = f"{s3_prefix}/{object_name_or_ticker}_{interval}.csv"
+        ticker = object_name_or_ticker
         logger.info(f"Uploading {object_name_or_ticker} data to Spaces at {object_name}")
     else:
         # New-style call with direct object name
         object_name = object_name_or_ticker
+        # Extract ticker from object name for local fallback
+        if '/' in object_name:
+            parts = object_name.split('/')
+            filename = parts[-1]  # Get filename from path
+            if '_' in filename:
+                ticker = filename.split('_')[0]
+                interval_part = filename.replace(f'{ticker}_', '').replace('.csv', '')
+            else:
+                ticker = filename.replace('.csv', '')
+                interval_part = '1min'  # default
+        else:
+            ticker = object_name.replace('.csv', '')
+            interval_part = '1min'  # default
         logger.info(f"Uploading DataFrame to Spaces at {object_name}")
     
+    # Try Spaces upload first
     success = upload_dataframe(df, object_name)
     if success:
         logger.info(f"Successfully uploaded to Spaces at {object_name}")
+        return True
     else:
-        logger.error(f"Failed to upload to Spaces at {object_name}")
-    
-    return success
+        logger.warning(f"Failed to upload to Spaces at {object_name}. Trying local filesystem fallback...")
+        
+        # Fallback to local filesystem
+        try:
+            # Extract interval from object name if not provided
+            if interval is None:
+                interval = interval_part if 'interval_part' in locals() else '1min'
+            
+            # Determine directory based on interval
+            if '30min' in str(interval):
+                directory = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "intraday_30min")
+            else:
+                directory = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "intraday")
+            
+            # Save to local filesystem
+            os.makedirs(directory, exist_ok=True)
+            local_path = os.path.join(directory, f"{ticker}_{interval}.csv")
+            df.to_csv(local_path, index=False)
+            logger.info(f"Successfully saved to local filesystem: {local_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Local filesystem fallback also failed: {e}")
+            return False
 
 def save_to_local_filesystem(df, ticker, interval):
     """
