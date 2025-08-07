@@ -10,7 +10,7 @@ SPACES_BUCKET_NAME = os.getenv("SPACES_BUCKET_NAME")
 SPACES_ENDPOINT_URL = f"https://{SPACES_BUCKET_NAME}.nyc3.digitaloceanspaces.com" if SPACES_BUCKET_NAME else None
 
 # File Paths
-BASE_DATA_DIR = "/workspace/data"
+BASE_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 INTRADAY_DATA_DIR = f"{BASE_DATA_DIR}/intraday"
 DAILY_DATA_DIR = f"{BASE_DATA_DIR}/daily"
 
