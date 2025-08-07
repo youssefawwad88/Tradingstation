@@ -356,9 +356,10 @@ def process_ticker_interval(ticker, interval, debug=False):
     Returns:
         bool: True if successful, False otherwise
     """
-    print(f"\n{'='*60}")
-    print(f"🎯 PROCESSING TICKER: {ticker} ({interval} interval)")
-    print(f"{'='*60}")
+    if debug:
+        print(f"\n{'='*60}")
+        print(f"🎯 PROCESSING TICKER: {ticker} ({interval} interval)")
+        print(f"{'='*60}")
     
     # Initialize per-ticker status tracking with more detailed information
     ticker_status = {
@@ -387,16 +388,16 @@ def process_ticker_interval(ticker, interval, debug=False):
         is_new_ticker = existing_df.empty
         
         if is_new_ticker:
-            print(f"📍 Status: NEW TICKER - Fetching full intraday history...")
+            logger.info(f"📍 Status: NEW TICKER - Fetching full intraday history for {ticker}")
             
             # For new tickers, fetch full history (outputsize='full')
             if interval == '1min':
                 # Fetch 1min data first
-                print(f"🔄 API Request: Fetching {interval} data (outputsize='full') for {ticker}...")
+                logger.info(f"🔄 API Request: Fetching {interval} data (outputsize='full') for {ticker}...")
                 latest_df = get_intraday_data(ticker, interval='1min', outputsize='full')
                 
                 if latest_df.empty:
-                    print(f"❌ API FETCH FAILED: No intraday data returned for new ticker {ticker}")
+                    logger.error(f"❌ API FETCH FAILED: No intraday data returned for new ticker {ticker}")
                     ticker_status['api_fetch_success'] = False
                     ticker_status['api_fetch_error'] = "No data returned from API"
                     
@@ -404,7 +405,7 @@ def process_ticker_interval(ticker, interval, debug=False):
                     log_ticker_debug_status(ticker, interval, ticker_status, debug)
                     return False
                 else:
-                    print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                    logger.info(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
                     ticker_status['api_fetch_success'] = True
                 
                 # Ensure proper column names (API returns different formats)
@@ -417,7 +418,7 @@ def process_ticker_interval(ticker, interval, debug=False):
                 # Save 1min data
                 combined_df = latest_df.copy()
                 ticker_status['new_candles_found'] = True
-                print(f"✅ NEW CANDLES: All {len(combined_df)} candles are new for ticker {ticker}")
+                logger.info(f"✅ NEW CANDLES: All {len(combined_df)} candles are new for ticker {ticker}")
                 
             else:  # 30min
                 # For 30min interval, we need to check if we have 1min data to resample
@@ -426,18 +427,18 @@ def process_ticker_interval(ticker, interval, debug=False):
                 
                 if not min_1_df.empty:
                     # Resample from existing 1min data
-                    print(f"🔄 RESAMPLING: Using existing 1min data to create 30min for {ticker}")
+                    logger.info(f"🔄 RESAMPLING: Using existing 1min data to create 30min for {ticker}")
                     combined_df = resample_to_30min(min_1_df)
                     ticker_status['api_fetch_success'] = True  # Using existing data
                     ticker_status['new_candles_found'] = True
-                    print(f"✅ RESAMPLING SUCCESS: Created {len(combined_df)} 30min candles from 1min data")
+                    logger.info(f"✅ RESAMPLING SUCCESS: Created {len(combined_df)} 30min candles from 1min data")
                 else:
                     # Fetch 30min data directly from API
-                    print(f"🔄 API Request: Fetching {interval} data (outputsize='full') for {ticker}...")
+                    logger.info(f"🔄 API Request: Fetching {interval} data (outputsize='full') for {ticker}...")
                     latest_df = get_intraday_data(ticker, interval='30min', outputsize='full')
                     
                     if latest_df.empty:
-                        print(f"❌ API FETCH FAILED: No 30min intraday data returned for new ticker {ticker}")
+                        logger.error(f"❌ API FETCH FAILED: No 30min intraday data returned for new ticker {ticker}")
                         ticker_status['api_fetch_success'] = False
                         ticker_status['api_fetch_error'] = "No 30min data returned from API"
                         
@@ -445,7 +446,7 @@ def process_ticker_interval(ticker, interval, debug=False):
                         log_ticker_debug_status(ticker, interval, ticker_status, debug)
                         return False
                     else:
-                        print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                        logger.info(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
                         ticker_status['api_fetch_success'] = True
                     
                     # Ensure proper column names
@@ -457,27 +458,27 @@ def process_ticker_interval(ticker, interval, debug=False):
                     
                     combined_df = latest_df.copy()
                     ticker_status['new_candles_found'] = True
-                    print(f"✅ NEW CANDLES: All {len(combined_df)} candles are new for ticker {ticker}")
+                    logger.info(f"✅ NEW CANDLES: All {len(combined_df)} candles are new for ticker {ticker}")
         else:
-            print(f"📍 Status: EXISTING TICKER - Checking for updates...")
+            logger.info(f"📍 Status: EXISTING TICKER - Checking for updates for {ticker}")
             
             # Check if today's data is present
             today_present = is_today_present(existing_df)
             
             if not today_present:
-                print(f"⚠️  Today's data missing for {ticker}. Fetching latest data...")
+                logger.warning(f"⚠️  Today's data missing for {ticker}. Fetching latest data...")
                 
                 # Check if we're in market hours and should warn
                 market_session = detect_market_session()
                 if market_session in ['PRE-MARKET', 'REGULAR']:
-                    print(f"⚠️  WARNING: Today's data missing for {ticker} during {market_session} hours")
+                    logger.warning(f"⚠️  WARNING: Today's data missing for {ticker} during {market_session} hours")
                 
                 # Fetch latest compact data (100 rows) to get today's data
-                print(f"🔄 API Request: Fetching {interval} data (outputsize='compact') for {ticker}...")
+                logger.info(f"🔄 API Request: Fetching {interval} data (outputsize='compact') for {ticker}...")
                 latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
                 
                 if latest_df.empty:
-                    print(f"❌ API FETCH FAILED: No new {interval} data returned for {ticker}")
+                    logger.error(f"❌ API FETCH FAILED: No new {interval} data returned for {ticker}")
                     ticker_status['api_fetch_success'] = False
                     ticker_status['api_fetch_error'] = f"No new {interval} data returned from API"
                     
@@ -485,7 +486,7 @@ def process_ticker_interval(ticker, interval, debug=False):
                     log_ticker_debug_status(ticker, interval, ticker_status, debug)
                     return False
                 else:
-                    print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                    logger.info(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
                     ticker_status['api_fetch_success'] = True
                 
                 # Ensure proper column names
@@ -496,19 +497,19 @@ def process_ticker_interval(ticker, interval, debug=False):
                 latest_df = normalize_column_names(latest_df)
                     
             else:
-                print(f"✅ Today's data already present for {ticker}. Fetching latest updates...")
+                logger.info(f"✅ Today's data already present for {ticker}. Fetching latest updates...")
                 
                 # Fetch compact data to get any new candles
-                print(f"🔄 API Request: Fetching {interval} data (outputsize='compact') for {ticker}...")
+                logger.info(f"🔄 API Request: Fetching {interval} data (outputsize='compact') for {ticker}...")
                 latest_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
                 
                 if latest_df.empty:
-                    print(f"⚠️  API FETCH WARNING: No new {interval} data returned for {ticker}. Using existing data.")
+                    logger.warning(f"⚠️  API FETCH WARNING: No new {interval} data returned for {ticker}. Using existing data.")
                     ticker_status['api_fetch_success'] = True  # Not really an error if no new data
                     ticker_status['new_candles_found'] = False
                     latest_df = pd.DataFrame()  # Empty, will use existing data
                 else:
-                    print(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
+                    logger.info(f"✅ API FETCH SUCCESS: Retrieved {len(latest_df)} rows of {interval} data for {ticker}")
                     ticker_status['api_fetch_success'] = True
                     
                     # Ensure proper column names
@@ -520,36 +521,36 @@ def process_ticker_interval(ticker, interval, debug=False):
             
             # Combine existing and new data using enhanced deduplication with date validation
             if not latest_df.empty:
-                print(f"🔄 PROCESSING: Combining new data with existing {len(existing_df)} rows for {ticker}...")
+                logger.info(f"🔄 PROCESSING: Combining new data with existing {len(existing_df)} rows for {ticker}...")
                 # Use the new append_new_candles function for better deduplication and date validation
                 success = append_new_candles(ticker, latest_df, file_path)
                 if not success:
-                    print(f"❌ DATA COMBINATION FAILED: Could not append new candles for {ticker}")
+                    logger.error(f"❌ DATA COMBINATION FAILED: Could not append new candles for {ticker}")
                     ticker_status['new_candles_found'] = False
                     return False
                 
                 # Read the updated combined data
                 combined_df = read_df_from_s3(file_path)
                 if combined_df.empty:
-                    print(f"❌ DATA READ ERROR: No data found after appending for {ticker}")
+                    logger.error(f"❌ DATA READ ERROR: No data found after appending for {ticker}")
                     return False
                     
                 # Calculate new candles added
                 new_candles_count = len(combined_df) - len(existing_df)
                 if new_candles_count > 0:
                     ticker_status['new_candles_found'] = True
-                    print(f"✅ NEW CANDLES: Added {new_candles_count} new candles for {ticker} (total: {len(combined_df)})")
+                    logger.info(f"✅ NEW CANDLES: Added {new_candles_count} new candles for {ticker} (total: {len(combined_df)})")
                 else:
                     ticker_status['new_candles_found'] = False
-                    print(f"📊 NO NEW CANDLES: No new data to add for {ticker} (total: {len(combined_df)})")
+                    logger.info(f"📊 NO NEW CANDLES: No new data to add for {ticker} (total: {len(combined_df)})")
             else:
                 combined_df = existing_df.copy()
                 ticker_status['new_candles_found'] = False
-                print(f"📊 USING EXISTING: No new data to process, using existing {len(combined_df)} rows for {ticker}")
+                logger.info(f"📊 USING EXISTING: No new data to process, using existing {len(combined_df)} rows for {ticker}")
         
         # Apply rolling window trimming (keep last 5 days + current day) only if we have data
         if not combined_df.empty:
-            print(f"🔄 PROCESSING: Applying rolling window trimming for {ticker}...")
+            logger.info(f"🔄 PROCESSING: Applying rolling window trimming for {ticker}...")
             combined_df = trim_to_rolling_window(combined_df, days=5)
             
             # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
@@ -591,26 +592,37 @@ def process_ticker_interval(ticker, interval, debug=False):
                     print(f"✅ SAVE SUCCESS: {ticker} data saved locally (Spaces disabled): {file_path}")
                     print(f"⚠️  SPACES UPLOAD: SKIPPED - No Spaces credentials configured")
         
-        # Final per-ticker status report
-        print(f"\n📋 TICKER STATUS SUMMARY: {ticker} ({interval})")
-        print(f"{'='*50}")
-        print(f"🎯 Ticker: {ticker}")
-        print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status['api_fetch_success'] else '❌ FAILED'}")
+        # Final per-ticker status report (always show key information)
+        logger.info(f"📋 TICKER STATUS: {ticker} ({interval})")
+        logger.info(f"   📊 API Fetch: {'✅ SUCCESS' if ticker_status['api_fetch_success'] else '❌ FAILED'}")
         if ticker_status['api_fetch_error']:
-            print(f"    Error: {ticker_status['api_fetch_error']}")
-        print(f"🆕 New Candles: {'✅ FOUND' if ticker_status['new_candles_found'] else '📊 NONE'}")
-        print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status['data_saved_locally'] else '❌ FAILED'}")
-        print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status['spaces_upload_success'] else '❌ FAILED/DISABLED'}")
-        print(f"📈 Total Rows: {ticker_status['total_rows']}")
+            logger.warning(f"      Error: {ticker_status['api_fetch_error']}")
+        logger.info(f"   🆕 New Candles: {'✅ FOUND' if ticker_status['new_candles_found'] else '📊 NONE'}")
+        logger.info(f"   💾 Local Save: {'✅ SUCCESS' if ticker_status['data_saved_locally'] else '❌ FAILED'}")
+        logger.info(f"   ☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status['spaces_upload_success'] else '❌ FAILED/DISABLED'}")
+        logger.info(f"   📈 Total Rows: {ticker_status['total_rows']}")
+        
+        if debug:
+            print(f"\n📋 TICKER STATUS SUMMARY: {ticker} ({interval})")
+            print(f"{'='*50}")
+            print(f"🎯 Ticker: {ticker}")
+            print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status['api_fetch_success'] else '❌ FAILED'}")
+            if ticker_status['api_fetch_error']:
+                print(f"    Error: {ticker_status['api_fetch_error']}")
+            print(f"🆕 New Candles: {'✅ FOUND' if ticker_status['new_candles_found'] else '📊 NONE'}")
+            print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status['data_saved_locally'] else '❌ FAILED'}")
+            print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status['spaces_upload_success'] else '❌ FAILED/DISABLED'}")
+            print(f"📈 Total Rows: {ticker_status['total_rows']}")
         
         # Check if today's data is now present
         if not is_today_present(combined_df):
-            print(f"⚠️  WARNING: Today's data still missing for {ticker} after update")
+            logger.warning(f"⚠️  WARNING: Today's data still missing for {ticker} after update")
         else:
-            print(f"✅ Today's data confirmed present for {ticker}")
+            logger.info(f"✅ Today's data confirmed present for {ticker}")
         
-        print(f"{'='*50}")
-        print(f"✅ COMPLETED: {ticker} ({interval}) processing finished successfully")
+        if debug:
+            print(f"{'='*50}")
+            print(f"✅ COMPLETED: {ticker} ({interval}) processing finished successfully")
         
         # Enhanced debug logging if enabled
         log_ticker_debug_status(ticker, interval, ticker_status, debug)
@@ -618,16 +630,25 @@ def process_ticker_interval(ticker, interval, debug=False):
         return True
         
     except Exception as e:
-        print(f"\n❌ CRITICAL ERROR processing {ticker} for {interval}: {e}")
-        print(f"📋 TICKER STATUS SUMMARY: {ticker} ({interval})")
-        print(f"{'='*50}")
-        print(f"🎯 Ticker: {ticker}")
-        print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status.get('api_fetch_success', False) else '❌ FAILED'}")
-        print(f"🆕 New Candles: {'✅ FOUND' if ticker_status.get('new_candles_found', False) else '❌ FAILED'}")
-        print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status.get('data_saved_locally', False) else '❌ FAILED'}")
-        print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status.get('spaces_upload_success', False) else '❌ FAILED'}")
-        print(f"❌ Error: {str(e)}")
-        print(f"{'='*50}")
+        logger.error(f"❌ CRITICAL ERROR processing {ticker} for {interval}: {e}")
+        logger.error(f"📋 TICKER STATUS: {ticker} ({interval})")
+        logger.error(f"   📊 API Fetch: {'✅ SUCCESS' if ticker_status.get('api_fetch_success', False) else '❌ FAILED'}")
+        logger.error(f"   🆕 New Candles: {'✅ FOUND' if ticker_status.get('new_candles_found', False) else '❌ FAILED'}")
+        logger.error(f"   💾 Local Save: {'✅ SUCCESS' if ticker_status.get('data_saved_locally', False) else '❌ FAILED'}")
+        logger.error(f"   ☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status.get('spaces_upload_success', False) else '❌ FAILED'}")
+        logger.error(f"   ❌ Error: {str(e)}")
+        
+        if debug:
+            print(f"\n❌ CRITICAL ERROR processing {ticker} for {interval}: {e}")
+            print(f"📋 TICKER STATUS SUMMARY: {ticker} ({interval})")
+            print(f"{'='*50}")
+            print(f"🎯 Ticker: {ticker}")
+            print(f"📊 API Fetch: {'✅ SUCCESS' if ticker_status.get('api_fetch_success', False) else '❌ FAILED'}")
+            print(f"🆕 New Candles: {'✅ FOUND' if ticker_status.get('new_candles_found', False) else '❌ FAILED'}")
+            print(f"💾 Local Save: {'✅ SUCCESS' if ticker_status.get('data_saved_locally', False) else '❌ FAILED'}")
+            print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status.get('spaces_upload_success', False) else '❌ FAILED'}")
+            print(f"❌ Error: {str(e)}")
+            print(f"{'='*50}")
         
         # Enhanced debug logging if enabled (for errors too)
         log_ticker_debug_status(ticker, interval, ticker_status, debug)
@@ -643,67 +664,79 @@ def run_compact_append(debug=False):
     
     Args:
         debug: Enable enhanced debug logging with detailed status for each ticker
+        
+    Returns:
+        dict: Summary of processing results for orchestrator reporting
     """
-    print("--- Starting Enhanced Intraday Data Update Job ---")
+    logger.info("--- Starting Enhanced Intraday Data Update Job ---")
     
     if debug:
         print("🧪 DEBUG MODE: Enhanced logging enabled")
         print("    Additional detailed status will be shown for each ticker")
     
-    # PHASE 3: Enhanced Environment Variable Logging (as requested in problem statement)
-    print("\n📦 DigitalOcean Config:")
+    # PHASE 3: Enhanced Environment Variable Logging (always show in production)
+    logger.info("📦 DigitalOcean Spaces Configuration Check:")
     spaces_access_key = os.getenv('SPACES_ACCESS_KEY_ID')
     spaces_secret_key = os.getenv('SPACES_SECRET_ACCESS_KEY')
     spaces_bucket = os.getenv('SPACES_BUCKET_NAME')
     spaces_region = os.getenv('SPACES_REGION')
     
-    print(f"    SPACES_ACCESS_KEY_ID = {spaces_access_key if spaces_access_key else '❌ Not Set'}")
-    print(f"    SPACES_SECRET_ACCESS_KEY = {'*' * 8 if spaces_secret_key else '❌ Not Set'}")
-    print(f"    SPACES_BUCKET_NAME = {spaces_bucket if spaces_bucket else '❌ Not Set'}")
-    print(f"    Saving locally to: /workspace/data/intraday/")
+    logger.info(f"    SPACES_ACCESS_KEY_ID = {spaces_access_key if spaces_access_key else '❌ Not Set'}")
+    logger.info(f"    SPACES_SECRET_ACCESS_KEY = {'*' * 8 if spaces_secret_key else '❌ Not Set'}")
+    logger.info(f"    SPACES_BUCKET_NAME = {spaces_bucket if spaces_bucket else '❌ Not Set'}")
+    logger.info(f"    SPACES_REGION = {spaces_region if spaces_region else '❌ Not Set'}")
+    logger.info(f"    Local save path: /workspace/data/intraday/")
     
-    # Additional detailed environment check for troubleshooting
-    print("\n=== DETAILED ENVIRONMENT VARIABLES VERIFICATION ===")
-    
-    # Alpha Vantage API Key
-    api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
-    if not api_key:
-        print("❌ CRITICAL: ALPHA_VANTAGE_API_KEY environment variable not set")
-        print("    Data fetching will fail!")
-    else:
-        print(f"✅ ALPHA_VANTAGE_API_KEY configured: {api_key[:8]}***{api_key[-4:] if len(api_key) > 12 else '***'}")
-    
-    print("\n--- DigitalOcean Spaces Configuration ---")
-    if spaces_access_key:
-        print(f"✅ SPACES_ACCESS_KEY_ID: {spaces_access_key[:8]}***{spaces_access_key[-4:] if len(spaces_access_key) > 12 else '***'}")
-    else:
-        print("❌ SPACES_ACCESS_KEY_ID: Not set")
-    
-    if spaces_secret_key:
-        print(f"✅ SPACES_SECRET_ACCESS_KEY: {spaces_secret_key[:8]}***{spaces_secret_key[-4:] if len(spaces_secret_key) > 12 else '***'}")
-    else:
-        print("❌ SPACES_SECRET_ACCESS_KEY: Not set")
-    
-    if spaces_bucket:
-        print(f"✅ SPACES_BUCKET_NAME: {spaces_bucket}")
-    else:
-        print("❌ SPACES_BUCKET_NAME: Not set")
-    
-    if spaces_region:
-        print(f"✅ SPACES_REGION: {spaces_region}")
-    else:
-        print("❌ SPACES_REGION: Not set")
-    
-    # Overall Spaces status
+    # Overall Spaces status (always log in production)
     spaces_configured = all([spaces_access_key, spaces_secret_key, spaces_bucket, spaces_region])
     if spaces_configured:
-        print("✅ DigitalOcean Spaces: FULLY CONFIGURED")
+        logger.info("✅ DigitalOcean Spaces: FULLY CONFIGURED - Data will be uploaded to cloud")
     else:
-        print("⚠️  DigitalOcean Spaces: INCOMPLETE CONFIGURATION")
-        print("    Missing credentials will cause Spaces upload to silently fail!")
-        print("    Using local filesystem fallback for data persistence")
+        logger.warning("⚠️  DigitalOcean Spaces: INCOMPLETE CONFIGURATION - Using local filesystem only")
+        logger.warning("    Missing credentials will prevent cloud upload!")
     
-    print("=" * 50)
+    if debug:
+        # Additional detailed environment check for troubleshooting (debug only)
+        print("\n=== DETAILED ENVIRONMENT VARIABLES VERIFICATION ===")
+        
+        # Alpha Vantage API Key
+        api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+        if not api_key:
+            print("❌ CRITICAL: ALPHA_VANTAGE_API_KEY environment variable not set")
+            print("    Data fetching will fail!")
+        else:
+            print(f"✅ ALPHA_VANTAGE_API_KEY configured: {api_key[:8]}***{api_key[-4:] if len(api_key) > 12 else '***'}")
+        
+        print("\n--- DigitalOcean Spaces Configuration ---")
+        if spaces_access_key:
+            print(f"✅ SPACES_ACCESS_KEY_ID: {spaces_access_key[:8]}***{spaces_access_key[-4:] if len(spaces_access_key) > 12 else '***'}")
+        else:
+            print("❌ SPACES_ACCESS_KEY_ID: Not set")
+        
+        if spaces_secret_key:
+            print(f"✅ SPACES_SECRET_ACCESS_KEY: {spaces_secret_key[:8]}***{spaces_secret_key[-4:] if len(spaces_secret_key) > 12 else '***'}")
+        else:
+            print("❌ SPACES_SECRET_ACCESS_KEY: Not set")
+        
+        if spaces_bucket:
+            print(f"✅ SPACES_BUCKET_NAME: {spaces_bucket}")
+        else:
+            print("❌ SPACES_BUCKET_NAME: Not set")
+        
+        if spaces_region:
+            print(f"✅ SPACES_REGION: {spaces_region}")
+        else:
+            print("❌ SPACES_REGION: Not set")
+        
+        # Overall Spaces status
+        if spaces_configured:
+            print("✅ DigitalOcean Spaces: FULLY CONFIGURED")
+        else:
+            print("⚠️  DigitalOcean Spaces: INCOMPLETE CONFIGURATION")
+            print("    Missing credentials will cause Spaces upload to silently fail!")
+            print("    Using local filesystem fallback for data persistence")
+        
+        print("=" * 50)
     
     # Load tickers from S3 (S&P 500 or other universe)
     tickers = read_tickerlist_from_s3('tickerlist.txt')
@@ -714,103 +747,183 @@ def run_compact_append(debug=False):
     # Always load and include manual tickers from ticker_selectors/tickerlist.txt
     manual_tickers = load_manual_tickers()
     if manual_tickers:
-        print(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
-        print("⚠️  CRITICAL: These manual tickers MUST appear in Spaces storage!")
+        logger.info(f"Adding {len(manual_tickers)} manual tickers: {manual_tickers}")
+        logger.warning("⚠️  CRITICAL: These manual tickers MUST appear in Spaces storage!")
         tickers.extend(manual_tickers)
     else:
-        print("No manual tickers found in ticker_selectors/tickerlist.txt")
+        logger.info("No manual tickers found in ticker_selectors/tickerlist.txt")
     
     # Remove duplicates while preserving order
     tickers = list(dict.fromkeys(tickers))
     
     if not tickers:
-        print("No tickers to process. Exiting job.")
-        return
+        logger.error("No tickers to process. Exiting job.")
+        return {
+            'success': False,
+            'total_tickers': 0,
+            'successful_tickers': 0,
+            'storage_location': 'N/A',
+            'manual_tickers_status': 'N/A'
+        }
 
-    print(f"Processing {len(tickers)} tickers for intraday updates (including manual tickers)...")
+    logger.info(f"🚀 Processing {len(tickers)} tickers for intraday updates: {tickers}")
+    logger.info(f"📊 Storage configuration: {'Cloud (Spaces) + Local' if spaces_configured else 'Local filesystem only'}")
     
     # Track processing results
     success_count = 0
     total_operations = len(tickers) * 2  # Both 1min and 30min for each ticker
     manual_ticker_results = {}  # Track manual ticker processing specifically
+    ticker_processing_summary = []  # Track per-ticker results for summary
     
     for ticker in tickers:
-        print(f"\n{'='*70}")
-        print(f"🚀 STARTING TICKER PROCESSING: {ticker}")
+        if debug:
+            print(f"\n{'='*70}")
+            print(f"🚀 STARTING TICKER PROCESSING: {ticker}")
         is_manual_ticker = ticker in (manual_tickers if manual_tickers else [])
         if is_manual_ticker:
-            print(f"🎯 ⭐ MANUAL TICKER: {ticker} - This MUST succeed for production!")
-        print(f"{'='*70}")
+            logger.info(f"🎯 ⭐ Processing MANUAL TICKER: {ticker} - This MUST succeed for production!")
+        else:
+            logger.info(f"🎯 Processing ticker: {ticker}")
+        if debug:
+            print(f"{'='*70}")
+        
+        # Track ticker-level results
+        ticker_result = {'ticker': ticker, 'manual': is_manual_ticker, '1min': False, '30min': False, 'save_location': 'Failed'}
         
         # Process 1-minute interval first
-        print(f"\n🔄 PHASE 1: Processing {ticker} for 1-minute interval...")
+        if debug:
+            print(f"\n🔄 PHASE 1: Processing {ticker} for 1-minute interval...")
         success_1min = process_ticker_interval(ticker, '1min', debug)
         if success_1min:
             success_count += 1
+            ticker_result['1min'] = True
         
         # Process 30-minute interval  
         # Note: For 30min, we prefer resampling from 1min data when available
-        print(f"\n🔄 PHASE 2: Processing {ticker} for 30-minute interval...")
+        if debug:
+            print(f"\n🔄 PHASE 2: Processing {ticker} for 30-minute interval...")
         success_30min = process_ticker_interval(ticker, '30min', debug)
         if success_30min:
             success_count += 1
+            ticker_result['30min'] = True
+        
+        # Determine save location for this ticker
+        overall_success = success_1min and success_30min
+        if overall_success:
+            ticker_result['save_location'] = 'Cloud (Spaces) + Local' if spaces_configured else 'Local only'
+        
+        ticker_processing_summary.append(ticker_result)
         
         # Track manual ticker results specifically
         if is_manual_ticker:
             manual_ticker_results[ticker] = {
                 '1min': success_1min,
                 '30min': success_30min,
-                'overall': success_1min and success_30min
+                'overall': overall_success
             }
         
-        # Per-ticker final summary
-        overall_success = success_1min and success_30min
-        print(f"\n📊 FINAL TICKER SUMMARY: {ticker}")
-        print(f"{'='*50}")
-        print(f"🎯 Ticker: {ticker}")
-        print(f"⏱️  1min interval: {'✅ SUCCESS' if success_1min else '❌ FAILED'}")
-        print(f"⏱️  30min interval: {'✅ SUCCESS' if success_30min else '❌ FAILED'}")
-        print(f"🏁 Overall: {'✅ SUCCESS' if overall_success else '❌ FAILED'}")
-        if is_manual_ticker:
-            print(f"⭐ MANUAL TICKER STATUS: {'✅ PRODUCTION READY' if overall_success else '❌ PRODUCTION ISSUE'}")
-        print(f"{'='*50}")
+        # Production-friendly per-ticker summary (always show)
+        logger.info(f"📊 TICKER COMPLETED: {ticker} | 1min: {'✅' if success_1min else '❌'} | 30min: {'✅' if success_30min else '❌'} | Storage: {ticker_result['save_location']}")
+        
+        # Per-ticker final summary (debug only)
+        if debug:
+            overall_success = success_1min and success_30min
+            print(f"\n📊 FINAL TICKER SUMMARY: {ticker}")
+            print(f"{'='*50}")
+            print(f"🎯 Ticker: {ticker}")
+            print(f"⏱️  1min interval: {'✅ SUCCESS' if success_1min else '❌ FAILED'}")
+            print(f"⏱️  30min interval: {'✅ SUCCESS' if success_30min else '❌ FAILED'}")
+            print(f"🏁 Overall: {'✅ SUCCESS' if overall_success else '❌ FAILED'}")
+            if is_manual_ticker:
+                print(f"⭐ MANUAL TICKER STATUS: {'✅ PRODUCTION READY' if overall_success else '❌ PRODUCTION ISSUE'}")
+            print(f"{'='*50}")
         
         # Respect API rate limits
         time.sleep(1)
 
-    print(f"\n{'='*60}")
-    print(f"Enhanced Intraday Data Update Job Completed")
-    print(f"Success rate: {success_count}/{total_operations} operations")
+    # Job completion summary (always show in production)
+    logger.info(f"🏁 Enhanced Intraday Data Update Job Completed")
+    logger.info(f"📈 Success rate: {success_count}/{total_operations} operations")
+    
+    # Summary of where data was saved
+    successful_tickers = [r for r in ticker_processing_summary if r['1min'] and r['30min']]
+    failed_tickers = [r for r in ticker_processing_summary if not (r['1min'] and r['30min'])]
+    
+    if successful_tickers:
+        logger.info(f"✅ Successfully processed {len(successful_tickers)} tickers:")
+        for ticker_info in successful_tickers:
+            logger.info(f"   📊 {ticker_info['ticker']}: Saved to {ticker_info['save_location']}")
+    
+    if failed_tickers:
+        logger.warning(f"❌ Failed to process {len(failed_tickers)} tickers:")
+        for ticker_info in failed_tickers:
+            logger.warning(f"   📊 {ticker_info['ticker']}: Processing failed")
+
+    if debug:
+        print(f"\n{'='*60}")
+        print(f"Enhanced Intraday Data Update Job Completed")
+        print(f"Success rate: {success_count}/{total_operations} operations")
     
     # Show file listing if debug mode is enabled
     list_intraday_files(debug)
     
-    # Report manual ticker status specifically
+    # Report manual ticker status specifically (always show if there are manual tickers)
     if manual_ticker_results:
-        print(f"\n🎯 MANUAL TICKER STATUS REPORT:")
-        print(f"{'='*40}")
+        logger.info(f"🎯 MANUAL TICKER STATUS REPORT:")
         failed_manual_tickers = []
+        successful_manual_tickers = []
         for ticker, results in manual_ticker_results.items():
-            status_1min = "✅" if results['1min'] else "❌"
-            status_30min = "✅" if results['30min'] else "❌"
             overall_status = "✅ SUCCESS" if results['overall'] else "❌ FAILED"
             
-            print(f"{ticker}: {overall_status}")
-            print(f"  1min: {status_1min}  30min: {status_30min}")
-            
-            if not results['overall']:
+            if results['overall']:
+                successful_manual_tickers.append(ticker)
+                logger.info(f"   ✅ {ticker}: SUCCESS - Available in {'cloud + local' if spaces_configured else 'local'} storage")
+            else:
                 failed_manual_tickers.append(ticker)
+                logger.warning(f"   ❌ {ticker}: FAILED - Check logs above for details")
         
         if failed_manual_tickers:
-            print(f"\n❌ CRITICAL: {len(failed_manual_tickers)} manual tickers FAILED:")
-            print(f"    {failed_manual_tickers}")
-            print(f"    These tickers will NOT appear in production Spaces storage!")
-            print(f"    Check DigitalOcean Spaces credentials and connectivity.")
+            logger.error(f"❌ CRITICAL: {len(failed_manual_tickers)} manual tickers FAILED: {failed_manual_tickers}")
+            logger.error(f"   These tickers will NOT appear in production storage!")
         else:
-            print(f"\n✅ SUCCESS: All {len(manual_ticker_results)} manual tickers processed successfully!")
-            print(f"    Manual tickers should now be available in Spaces storage.")
+            logger.info(f"✅ SUCCESS: All {len(manual_ticker_results)} manual tickers processed successfully!")
+            
+        if debug:
+            print(f"\n🎯 MANUAL TICKER STATUS REPORT:")
+            print(f"{'='*40}")
+            for ticker, results in manual_ticker_results.items():
+                status_1min = "✅" if results['1min'] else "❌"
+                status_30min = "✅" if results['30min'] else "❌"
+                overall_status = "✅ SUCCESS" if results['overall'] else "❌ FAILED"
+                
+                print(f"{ticker}: {overall_status}")
+                print(f"  1min: {status_1min}  30min: {status_30min}")
+                
+                if not results['overall']:
+                    failed_manual_tickers.append(ticker)
+            
+            if failed_manual_tickers:
+                print(f"\n❌ CRITICAL: {len(failed_manual_tickers)} manual tickers FAILED:")
+                print(f"    {failed_manual_tickers}")
+                print(f"    These tickers will NOT appear in production Spaces storage!")
+                print(f"    Check DigitalOcean Spaces credentials and connectivity.")
+            else:
+                print(f"\n✅ SUCCESS: All {len(manual_ticker_results)} manual tickers processed successfully!")
+                print(f"    Manual tickers should now be available in Spaces storage.")
     
-    print(f"{'='*60}")
+    if debug:
+        print(f"{'='*60}")
+    
+    # Return summary for orchestrator reporting
+    return {
+        'success': True,
+        'total_tickers': len(tickers),
+        'successful_tickers': len(successful_tickers),
+        'failed_tickers': len(failed_tickers),
+        'storage_location': 'Cloud (Spaces) + Local' if spaces_configured else 'Local only',
+        'manual_tickers_total': len(manual_ticker_results) if manual_ticker_results else 0,
+        'manual_tickers_failed': len([t for t, r in manual_ticker_results.items() if not r['overall']]) if manual_ticker_results else 0
+    }
 
 if __name__ == "__main__":
     # PHASE 4: Add DEBUG_MODE environment variable support (as requested in problem statement)
@@ -834,9 +947,17 @@ if __name__ == "__main__":
     job_name = "update_intraday_compact"
     update_scheduler_status(job_name, "Running")
     try:
-        run_compact_append(debug=debug_mode)
+        result = run_compact_append(debug=debug_mode)
+        
+        # Output concise summary for orchestrator logs (always shown)
+        if result and result.get('success', False):
+            print(f"📋 ORCHESTRATOR SUMMARY: Processed {result['successful_tickers']}/{result['total_tickers']} tickers | Storage: {result['storage_location']} | Manual tickers: {result['manual_tickers_total'] - result['manual_tickers_failed']}/{result['manual_tickers_total']} OK")
+        else:
+            print(f"📋 ORCHESTRATOR SUMMARY: Job failed or no tickers processed")
+        
         update_scheduler_status(job_name, "Success")
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
-        print(error_message)
+        logger.error(error_message)
+        print(f"❌ ORCHESTRATOR SUMMARY: Intraday update failed - {error_message}")
         update_scheduler_status(job_name, "Fail", error_message)

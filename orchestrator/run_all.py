@@ -43,6 +43,11 @@ def run_job(script_path, job_name):
         )
         logger.info(f"SUCCESS: {job_name} finished")
         if result.stdout:
+            # Show orchestrator summary line for intraday jobs
+            for line in result.stdout.strip().split('\n'):
+                if "ORCHESTRATOR SUMMARY:" in line:
+                    logger.info(f"  {line}")
+                    break
             logger.debug(f"STDOUT for {job_name}: {result.stdout}")
         update_scheduler_status(job_name, "Success")
         return True
