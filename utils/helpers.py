@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 import time
 import json
+import pytz
 from utils.config import (
     ALPHA_VANTAGE_API_KEY, 
     INTRADAY_DATA_DIR,
@@ -141,3 +142,61 @@ def save_to_local_filesystem(df, ticker, interval):
     else:
         logger.error(f"Fallback save failed for {ticker}")
     return file_path, success
+
+def update_scheduler_status(job_name, status, error_details=None):
+    """
+    Update the scheduler status for a job.
+    
+    Args:
+        job_name (str): Name of the job
+        status (str): Status of the job ('Running', 'Success', 'Fail')
+        error_details (str, optional): Error details if status is 'Fail'
+    """
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if status == "Running":
+        logger.info(f"[{timestamp}] Job '{job_name}' started")
+    elif status == "Success":
+        logger.info(f"[{timestamp}] Job '{job_name}' completed successfully")
+    elif status == "Fail":
+        error_msg = f"[{timestamp}] Job '{job_name}' failed"
+        if error_details:
+            error_msg += f" - {error_details}"
+        logger.error(error_msg)
+    else:
+        logger.warning(f"[{timestamp}] Job '{job_name}' status unknown: {status}")
+
+def detect_market_session():
+    """
+    Detect the current market session based on Eastern Time.
+    
+    Returns:
+        str: Market session ('PRE-MARKET', 'REGULAR', 'AFTER-HOURS', 'CLOSED')
+    """
+    ny_tz = pytz.timezone('America/New_York')
+    current_time = datetime.now(ny_tz)
+    current_weekday = current_time.weekday()  # 0=Monday, 6=Sunday
+    
+    # Check if it's weekend
+    if current_weekday >= 5:  # Saturday=5, Sunday=6
+        return 'CLOSED'
+    
+    # Get current time in minutes since midnight
+    current_minutes = current_time.hour * 60 + current_time.minute
+    
+    # Market session times (in minutes since midnight ET)
+    premarket_start = 4 * 60  # 4:00 AM
+    regular_start = 9 * 60 + 30  # 9:30 AM
+    regular_end = 16 * 60  # 4:00 PM
+    afterhours_end = 20 * 60  # 8:00 PM
+    
+    if current_minutes < premarket_start:
+        return 'CLOSED'
+    elif current_minutes < regular_start:
+        return 'PRE-MARKET'
+    elif current_minutes < regular_end:
+        return 'REGULAR'
+    elif current_minutes < afterhours_end:
+        return 'AFTER-HOURS'
+    else:
+        return 'CLOSED'
