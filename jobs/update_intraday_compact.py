@@ -741,6 +741,9 @@ def run_compact_append(debug=False):
     # Load tickers from master_tickerlist.csv (unified source)
     tickers = read_master_tickerlist()
     
+    # Load manual tickers for tracking manual ticker processing
+    manual_tickers = load_manual_tickers()
+    
     if not tickers:
         logger.error("No tickers to process. Exiting job.")
         return {
