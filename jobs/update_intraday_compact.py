@@ -745,8 +745,32 @@ def run_compact_append(debug=False):
     # Load tickers from master_tickerlist.csv (unified source)
     tickers = read_master_tickerlist()
     
+    # PRIORITY ISSUE 4 FIX: Enhanced master ticker diagnostic logging
+    logger.info(f"📊 MASTER TICKER DEBUG - Total tickers in master list: {len(tickers) if tickers else 0}")
+    if tickers:
+        logger.info(f"📊 MASTER TICKER LIST: {tickers}")
+        if len(tickers) != 13:
+            logger.warning(f"⚠️  Expected 13 master tickers but got {len(tickers)} - investigating source...")
+    else:
+        logger.error("❌ NO MASTER TICKERS LOADED - Critical error!")
+    
     # Load manual tickers for tracking manual ticker processing
     manual_tickers = load_manual_tickers()
+    
+    # PRIORITY ISSUE 1 FIX: Enhanced manual ticker logging
+    logger.info(f"🎯 MANUAL TICKER DEBUG - Total manual tickers loaded: {len(manual_tickers) if manual_tickers else 0}")
+    if manual_tickers:
+        logger.info(f"🎯 MANUAL TICKER LIST: {manual_tickers}")
+        # Check which manual tickers are also in master list
+        manual_in_master = [t for t in manual_tickers if t in tickers] if tickers else []
+        manual_not_in_master = [t for t in manual_tickers if t not in tickers] if tickers else manual_tickers
+        
+        if manual_in_master:
+            logger.info(f"✅ Manual tickers found in master list ({len(manual_in_master)}): {manual_in_master}")
+        if manual_not_in_master:
+            logger.warning(f"⚠️  Manual tickers NOT in master list ({len(manual_not_in_master)}): {manual_not_in_master}")
+    else:
+        logger.warning("⚠️  NO MANUAL TICKERS LOADED - This is the source of 0/7 manual ticker processing!")
     
     if not tickers:
         logger.error("No tickers to process. Exiting job.")
@@ -767,7 +791,16 @@ def run_compact_append(debug=False):
     manual_ticker_results = {}  # Track manual ticker processing specifically
     ticker_processing_summary = []  # Track per-ticker results for summary
     
+    # PRIORITY ISSUE 4 FIX: Track all ticker processing attempts for diagnostics
+    ticker_attempts = []  # Track which tickers we attempt to process
+    ticker_successes = []  # Track which tickers succeed
+    ticker_failures = []  # Track which tickers fail with reasons
+    
     for ticker in tickers:
+        # PRIORITY ISSUE 4 FIX: Log every ticker attempt
+        ticker_attempts.append(ticker)
+        logger.info(f"🔄 ATTEMPTING TICKER: {ticker} ({len(ticker_attempts)}/{len(tickers)})")
+        
         if debug:
             print(f"\n{'='*70}")
             print(f"🚀 STARTING TICKER PROCESSING: {ticker}")
@@ -803,6 +836,14 @@ def run_compact_append(debug=False):
         overall_success = success_1min and success_30min
         if overall_success:
             ticker_result['save_location'] = 'Cloud (Spaces) + Local' if spaces_configured else 'Local only'
+            ticker_successes.append(ticker)
+        else:
+            failure_reason = []
+            if not success_1min:
+                failure_reason.append("1min failed")
+            if not success_30min:
+                failure_reason.append("30min failed")
+            ticker_failures.append(f"{ticker}: {', '.join(failure_reason)}")
         
         ticker_processing_summary.append(ticker_result)
         
@@ -836,6 +877,20 @@ def run_compact_append(debug=False):
     # Job completion summary (always show in production)
     logger.info(f"🏁 Enhanced Intraday Data Update Job Completed")
     logger.info(f"📈 Success rate: {success_count}/{total_operations} operations")
+    
+    # PRIORITY ISSUE 4 FIX: Detailed ticker processing summary
+    logger.info(f"🎯 TICKER PROCESSING SUMMARY:")
+    logger.info(f"   📊 Total tickers attempted: {len(ticker_attempts)}")
+    logger.info(f"   ✅ Successful tickers: {len(ticker_successes)}")
+    logger.info(f"   ❌ Failed tickers: {len(ticker_failures)}")
+    
+    if ticker_successes:
+        logger.info(f"   ✅ Successfully processed: {ticker_successes}")
+    
+    if ticker_failures:
+        logger.warning(f"   ❌ Failed tickers with reasons:")
+        for failure in ticker_failures:
+            logger.warning(f"      {failure}")
     
     # Summary of where data was saved
     successful_tickers = [r for r in ticker_processing_summary if r['1min'] and r['30min']]

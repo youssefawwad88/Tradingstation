@@ -81,3 +81,61 @@ def upload_dataframe(df, object_name, file_format='csv'):
         if DEBUG_MODE:
             print(f"❌ Failed to upload to Spaces: {e}")
         return False
+
+def spaces_manager():
+    """
+    Initialize and return a spaces manager client for backwards compatibility.
+    This function is called by the dashboard and other components.
+    
+    Returns:
+        boto3 S3 client configured for DigitalOcean Spaces, or None if configuration fails
+    """
+    return get_spaces_client()
+
+class SpacesManager:
+    """
+    Spaces manager class to provide file listing and management functionality.
+    """
+    
+    def __init__(self):
+        self.client = get_spaces_client()
+    
+    def list_objects(self, prefix=''):
+        """
+        List objects in the Spaces bucket with the given prefix.
+        
+        Args:
+            prefix (str): Prefix to filter objects
+            
+        Returns:
+            list: List of object names, or empty list if error
+        """
+        if not self.client:
+            logger.error("No Spaces client available for listing objects")
+            return []
+            
+        try:
+            from utils.config import SPACES_BUCKET_NAME
+            if not SPACES_BUCKET_NAME:
+                logger.error("No bucket name configured")
+                return []
+                
+            response = self.client.list_objects_v2(
+                Bucket=SPACES_BUCKET_NAME,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                # Return just the filenames without the prefix path
+                return [obj['Key'].replace(prefix, '').lstrip('/') 
+                       for obj in response['Contents'] 
+                       if not obj['Key'].endswith('/')]
+            else:
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error listing objects with prefix '{prefix}': {e}")
+            return []
+
+# Create a global instance for compatibility
+spaces_manager = SpacesManager()
