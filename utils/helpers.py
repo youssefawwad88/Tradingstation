@@ -351,23 +351,36 @@ def read_df_from_s3(object_name):
 
 def load_manual_tickers():
     """
-    Load manual ticker list.
+    Load manual ticker list from tickerlist.txt (as per TICKER_MANAGEMENT.md documentation).
     
     Returns:
         list: List of manual tickers
     """
-    # Try to read from a manual tickers file, fallback to default
-    manual_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "manual_tickers.txt")
+    # Try to read from tickerlist.txt first (documented manual ticker source)
+    manual_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tickerlist.txt")
     if os.path.exists(manual_file):
         try:
             with open(manual_file, 'r') as f:
                 tickers = [line.strip() for line in f.readlines() if line.strip()]
-            logger.info(f"Loaded {len(tickers)} manual tickers")
+            logger.info(f"Loaded {len(tickers)} manual tickers from tickerlist.txt")
             return tickers
         except Exception as e:
-            logger.error(f"Error reading manual tickers: {e}")
+            logger.error(f"Error reading manual tickers from tickerlist.txt: {e}")
     
+    # Fallback: try manual_tickers.txt for backwards compatibility
+    manual_file_alt = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "manual_tickers.txt")
+    if os.path.exists(manual_file_alt):
+        try:
+            with open(manual_file_alt, 'r') as f:
+                tickers = [line.strip() for line in f.readlines() if line.strip()]
+            logger.info(f"Loaded {len(tickers)} manual tickers from manual_tickers.txt (fallback)")
+            return tickers
+        except Exception as e:
+            logger.error(f"Error reading manual tickers from manual_tickers.txt: {e}")
+    
+    # Final fallback to default tickers
     from utils.config import DEFAULT_TICKERS
+    logger.warning("No manual ticker file found, using DEFAULT_TICKERS")
     return DEFAULT_TICKERS
 
 def is_today_present(df):
