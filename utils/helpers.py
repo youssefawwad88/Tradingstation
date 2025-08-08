@@ -9,7 +9,12 @@ import pytz
 from utils.config import (
     ALPHA_VANTAGE_API_KEY, 
     INTRADAY_DATA_DIR,
-    DEBUG_MODE
+    DEBUG_MODE,
+    INTRADAY_TRIM_DAYS,
+    INTRADAY_EXCLUDE_TODAY,
+    INTRADAY_INCLUDE_PREMARKET,
+    INTRADAY_INCLUDE_AFTERHOURS,
+    TIMEZONE
 )
 from utils.spaces_manager import upload_dataframe
 
@@ -437,7 +442,8 @@ def is_today():
 
 def trim_to_rolling_window(df, window_days=30):
     """
-    Trim DataFrame to rolling window.
+    Trim DataFrame to rolling window with enhanced data retention logic.
+    KEEPS TODAY'S DATA by default.
     
     Args:
         df (pandas.DataFrame): DataFrame to trim
@@ -450,14 +456,213 @@ def trim_to_rolling_window(df, window_days=30):
         return df
     
     try:
-        cutoff_date = datetime.now() - pd.Timedelta(days=window_days)
-        if 'datetime' in df.columns:
-            df_filtered = df[pd.to_datetime(df['datetime']) >= cutoff_date]
-            return df_filtered
-        return df
+        # Use the new enhanced retention function
+        return apply_data_retention(df, window_days)
     except Exception as e:
         logger.error(f"Error trimming to rolling window: {e}")
         return df
+
+def apply_data_retention(df, trim_days=None):
+    """
+    Apply enhanced data retention rules based on environment configuration.
+    KEEPS TODAY'S DATA by default as per Phase 4 requirements.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame with date/datetime column
+        trim_days (int, optional): Override trim days from config
+        
+    Returns:
+        pandas.DataFrame: Filtered DataFrame
+    """
+    if df is None or df.empty:
+        return df
+    
+    try:
+        from utils.config import (
+            INTRADAY_TRIM_DAYS, INTRADAY_EXCLUDE_TODAY, 
+            INTRADAY_INCLUDE_PREMARKET, INTRADAY_INCLUDE_AFTERHOURS,
+            TIMEZONE, DEBUG_MODE
+        )
+        
+        # Log initial state
+        initial_count = len(df)
+        logger.info(f"🔄 RETENTION: Starting with {initial_count} rows")
+        
+        # Convert to Eastern Time and handle date column
+        combined_df = df.copy()
+        
+        # Find the date/datetime column
+        date_col = None
+        if 'Date' in combined_df.columns:
+            date_col = 'Date'
+        elif 'datetime' in combined_df.columns:
+            date_col = 'datetime'
+        elif 'timestamp' in combined_df.columns:
+            date_col = 'timestamp'
+        
+        if not date_col:
+            logger.warning("No date column found for retention filtering")
+            return df
+        
+        # Convert to datetime and timezone-aware
+        combined_df[date_col] = pd.to_datetime(combined_df[date_col])
+        combined_df = combined_df.set_index(date_col)
+        
+        # Handle timezone conversion
+        if combined_df.index.tz is None:
+            # Assume UTC if no timezone info
+            combined_df = combined_df.tz_localize('UTC')
+        
+        # Convert to Eastern Time
+        combined_df = combined_df.tz_convert(TIMEZONE)
+        combined_df = combined_df.reset_index()
+        
+        # Get current date in ET
+        ny_tz = pytz.timezone(TIMEZONE)
+        now_et = datetime.now(ny_tz)
+        today_et = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Apply retention rules
+        trim_days_to_use = trim_days if trim_days is not None else INTRADAY_TRIM_DAYS
+        exclude_today = INTRADAY_EXCLUDE_TODAY
+        
+        # Calculate start date for retention (N days back)
+        start_date = today_et - pd.Timedelta(days=trim_days_to_use)
+        
+        logger.info(f"📅 RETENTION CONFIG:")
+        logger.info(f"   Current time (ET): {now_et}")
+        logger.info(f"   Today (ET): {today_et}")
+        logger.info(f"   Start date: {start_date}")
+        logger.info(f"   Trim days: {trim_days_to_use}")
+        logger.info(f"   Exclude today: {exclude_today}")
+        
+        # Log data range before filtering
+        min_date = combined_df[date_col].min()
+        max_date = combined_df[date_col].max()
+        logger.info(f"📊 DATA RANGE BEFORE FILTERING:")
+        logger.info(f"   Minimum timestamp: {min_date}")
+        logger.info(f"   Maximum timestamp: {max_date}")
+        
+        # Filter data - KEEP TODAY'S DATA by default!
+        if exclude_today:
+            # Only if explicitly set to exclude today
+            combined_df = combined_df[(combined_df[date_col] >= start_date) & 
+                                    (combined_df[date_col] < today_et)]
+            logger.warning(f"⚠️ EXCLUDING TODAY'S DATA as requested by config")
+        else:
+            # DEFAULT: Keep everything from start_date forward INCLUDING TODAY
+            combined_df = combined_df[combined_df[date_col] >= start_date]
+            logger.info(f"✅ KEEPING TODAY'S DATA (default behavior)")
+        
+        after_date_filter_count = len(combined_df)
+        logger.info(f"📊 After date filtering: {after_date_filter_count} rows")
+        
+        # Apply market session filtering if needed
+        include_premarket = INTRADAY_INCLUDE_PREMARKET
+        include_afterhours = INTRADAY_INCLUDE_AFTERHOURS
+        
+        # Only apply session filtering if either is False
+        if not (include_premarket and include_afterhours):
+            logger.info(f"🕐 APPLYING SESSION FILTERING:")
+            logger.info(f"   Include pre-market: {include_premarket}")
+            logger.info(f"   Include after-hours: {include_afterhours}")
+            
+            # Extract time component
+            combined_df['time'] = combined_df[date_col].dt.time
+            
+            # Define market session times (Eastern Time)
+            pre_market_start = pd.Timestamp('04:00:00').time()
+            market_open = pd.Timestamp('09:30:00').time()
+            market_close = pd.Timestamp('16:00:00').time()
+            after_hours_end = pd.Timestamp('20:00:00').time()
+            
+            # Create mask for each session
+            if include_premarket and not include_afterhours:
+                # Keep pre-market and regular hours
+                combined_df = combined_df[
+                    (combined_df['time'] >= pre_market_start) & 
+                    (combined_df['time'] <= market_close)
+                ]
+                logger.info(f"   Keeping: Pre-market + Regular hours")
+            elif not include_premarket and include_afterhours:
+                # Keep regular hours and after hours
+                combined_df = combined_df[
+                    (combined_df['time'] >= market_open) & 
+                    (combined_df['time'] <= after_hours_end)
+                ]
+                logger.info(f"   Keeping: Regular hours + After-hours")
+            elif not include_premarket and not include_afterhours:
+                # Keep only regular hours
+                combined_df = combined_df[
+                    (combined_df['time'] >= market_open) & 
+                    (combined_df['time'] <= market_close)
+                ]
+                logger.info(f"   Keeping: Regular hours only")
+            
+            # Remove temporary time column
+            combined_df = combined_df.drop('time', axis=1)
+        else:
+            logger.info(f"✅ KEEPING ALL MARKET SESSIONS (pre-market, regular, after-hours)")
+        
+        final_count = len(combined_df)
+        logger.info(f"📊 RETENTION SUMMARY:")
+        logger.info(f"   Initial rows: {initial_count}")
+        logger.info(f"   After date filter: {after_date_filter_count}")
+        logger.info(f"   Final rows: {final_count}")
+        logger.info(f"   Rows removed: {initial_count - final_count}")
+        
+        # Log data range after filtering
+        if not combined_df.empty:
+            min_date_after = combined_df[date_col].min()
+            max_date_after = combined_df[date_col].max()
+            logger.info(f"📊 DATA RANGE AFTER FILTERING:")
+            logger.info(f"   Minimum timestamp: {min_date_after}")
+            logger.info(f"   Maximum timestamp: {max_date_after}")
+            
+            # ALWAYS confirm today's data is present after filtering
+            today_present = is_today_present_enhanced(combined_df, date_col)
+            if today_present:
+                logger.info(f"✅ TODAY'S DATA CONFIRMED PRESENT after filtering")
+            else:
+                logger.warning(f"⚠️ TODAY'S DATA MISSING after filtering - this may be an issue!")
+        else:
+            logger.warning(f"⚠️ NO DATA REMAINING after filtering")
+        
+        return combined_df
+        
+    except Exception as e:
+        logger.error(f"Error applying data retention: {e}")
+        return df
+
+def is_today_present_enhanced(df, date_col='Date'):
+    """
+    Enhanced version of is_today_present with better timezone handling.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame with datetime column
+        date_col (str): Name of the date column
+        
+    Returns:
+        bool: True if today's data is present
+    """
+    if df is None or df.empty:
+        return False
+    
+    try:
+        from utils.config import TIMEZONE
+        
+        ny_tz = pytz.timezone(TIMEZONE)
+        today = datetime.now(ny_tz).date()
+        
+        if date_col in df.columns:
+            # Convert to datetime and extract date
+            df_dates = pd.to_datetime(df[date_col]).dt.date
+            return today in df_dates.values
+        
+        return False
+    except Exception as e:
+        logger.error(f"Error checking if today is present: {e}")
+        return False
 
 def append_new_candles(existing_df, new_df):
     """
