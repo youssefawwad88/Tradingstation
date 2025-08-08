@@ -33,7 +33,7 @@ def run_breakout_screener():
     """
     logger.info("Starting Daily Breakout Screener")
     
-    tickers = read_tickerlist_from_s3()
+    tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
         print("No tickers in tickerlist.txt. Exiting screener.")
         return
