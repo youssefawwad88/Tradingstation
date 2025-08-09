@@ -1,0 +1,275 @@
+"""
+Data storage and retrieval operations.
+
+This module handles all data storage operations including:
+- Local filesystem operations
+- Cloud storage (DigitalOcean Spaces) operations
+- Data retention and cleanup
+- Path management
+"""
+
+import os
+import logging
+from typing import Tuple, Optional
+import pandas as pd
+
+from .config import INTRADAY_DATA_DIR, DAILY_DATA_DIR, INTRADAY_30MIN_DATA_DIR
+from .spaces_manager import upload_dataframe
+
+logger = logging.getLogger(__name__)
+
+
+def save_df_to_local(
+    df: pd.DataFrame, ticker: str, interval: str, directory: str = INTRADAY_DATA_DIR
+) -> Tuple[Optional[str], bool]:
+    """
+    Save DataFrame to local filesystem.
+
+    Args:
+        df: DataFrame to save
+        ticker: Stock ticker symbol
+        interval: Time interval of the data
+        directory: Directory to save the file
+
+    Returns:
+        Tuple of (file path or None, success boolean)
+    """
+    os.makedirs(directory, exist_ok=True)
+    file_path = os.path.join(directory, f"{ticker}_{interval}.csv")
+
+    try:
+        df.to_csv(file_path, index=False)
+        logger.info(f"Saved {ticker} data to {file_path}")
+        return file_path, True
+    except Exception as e:
+        logger.error(f"Error saving {ticker} data to {file_path}: {e}")
+        return None, False
+
+
+def save_df_to_s3(
+    df: pd.DataFrame,
+    object_name_or_ticker: str,
+    interval: Optional[str] = None,
+    s3_prefix: str = "intraday",
+) -> bool:
+    """
+    Save DataFrame to DigitalOcean Spaces with enhanced logging and path verification.
+    STANDARDIZES on data/ prefix for all storage and logs exact paths used.
+
+    Args:
+        df: DataFrame to save
+        object_name_or_ticker: Object name/path in S3 OR ticker symbol
+        interval: Time interval of the data (if ticker provided)
+        s3_prefix: Prefix/folder in the S3 bucket (if ticker provided)
+
+    Returns:
+        True if successful (either Spaces or local), False otherwise
+    """
+    # Determine if we got an object name or ticker
+    if interval is not None:
+        # Old-style call with ticker and interval
+        # STANDARDIZE on data/ prefix as specified in Phase 4
+        object_name = f"data/{s3_prefix}/{object_name_or_ticker}_{interval}.csv"
+        ticker = object_name_or_ticker
+        logger.info(
+            f"💾 SAVE_DF_TO_S3: Processing {object_name_or_ticker} {interval} data"
+        )
+    else:
+        # New-style call with direct object name - ensure data/ prefix
+        object_name = object_name_or_ticker
+        if not object_name.startswith("data/"):
+            object_name = f"data/{object_name}"
+        # Extract ticker from object name for local fallback
+        if "/" in object_name:
+            parts = object_name.split("/")
+            filename = parts[-1]  # Get filename from path
+            if "_" in filename:
+                ticker = filename.split("_")[0]
+                interval_part = filename.replace(f"{ticker}_", "").replace(".csv", "")
+            else:
+                ticker = filename.replace(".csv", "")
+                interval_part = "1min"  # default
+        else:
+            ticker = object_name.replace(".csv", "")
+            interval_part = "1min"  # default
+        logger.info(f"💾 SAVE_DF_TO_S3: Processing direct object name")
+
+    # LOG the exact path used for each save operation as required
+    logger.info(f"📂 Saving to Spaces path: {object_name}")
+    logger.info(f"   Data rows: {len(df)}")
+    if not df.empty:
+        date_col = (
+            "Date"
+            if "Date" in df.columns
+            else "datetime" if "datetime" in df.columns else "timestamp"
+        )
+        if date_col in df.columns:
+            min_date = pd.to_datetime(df[date_col]).min()
+            max_date = pd.to_datetime(df[date_col]).max()
+            logger.info(f"   Date range: {min_date} to {max_date}")
+
+    # Try Spaces upload first
+    success = upload_dataframe(df, object_name)
+    if success:
+        # CONFIRM the file exists after saving as required
+        logger.info(f"✅ File saved successfully to {object_name}")
+        logger.info(f"☁️ Spaces upload confirmed for {ticker}")
+        return True
+    else:
+        logger.warning(
+            f"⚠️ Failed to upload to Spaces at {object_name}. Trying local filesystem fallback..."
+        )
+
+        # Fallback to local filesystem with enhanced logging
+        try:
+            # Extract interval from object name if not provided
+            if interval is None:
+                interval = interval_part if "interval_part" in locals() else "1min"
+
+            # Determine directory based on data/ standardized paths
+            base_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
+            )
+
+            if "daily" in object_name or interval == "daily":
+                directory = os.path.join(base_dir, "daily")
+                local_filename = f"{ticker}_daily.csv"
+            elif "30min" in str(interval) or "30min" in object_name:
+                directory = os.path.join(base_dir, "intraday_30min")
+                local_filename = f"{ticker}_30min.csv"
+            else:
+                directory = os.path.join(base_dir, "intraday")
+                local_filename = f"{ticker}_1min.csv"
+
+            # Save to local filesystem
+            os.makedirs(directory, exist_ok=True)
+            local_path = os.path.join(directory, local_filename)
+
+            logger.info(f"💽 LOCAL FALLBACK: Saving to {local_path}")
+            df.to_csv(local_path, index=False)
+
+            # Verify file exists locally
+            if os.path.exists(local_path):
+                file_size = os.path.getsize(local_path)
+                logger.info(f"✅ File saved successfully to {local_path}")
+                logger.info(f"📁 Local file confirmed: {file_size} bytes")
+                return True
+            else:
+                logger.error(f"❌ Local file verification failed: {local_path}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Local filesystem fallback also failed: {e}")
+            return False
+
+
+def read_df_from_s3(object_name: str) -> pd.DataFrame:
+    """
+    Read DataFrame from S3/Spaces or local fallback.
+
+    Args:
+        object_name: Object name/path in S3
+
+    Returns:
+        DataFrame if successful, empty DataFrame otherwise
+    """
+    logger.info(f"Attempting to read DataFrame from {object_name}")
+
+    # Try to read from local file first
+    local_file = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), object_name
+    )
+    if os.path.exists(local_file):
+        try:
+            df = pd.read_csv(local_file)
+            logger.info(f"Successfully read {len(df)} rows from local file")
+            return df
+        except Exception as e:
+            logger.error(f"Error reading local file {local_file}: {e}")
+
+    # Return empty DataFrame if file doesn't exist or can't be read
+    logger.warning(
+        f"File not found or unreadable: {object_name} - returning empty DataFrame"
+    )
+    return pd.DataFrame()
+
+
+def get_data_directory(data_type: str) -> str:
+    """
+    Get the appropriate data directory for a given data type.
+
+    Args:
+        data_type: Type of data ('daily', '30min', '1min', 'intraday')
+
+    Returns:
+        Directory path
+    """
+    base_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
+    )
+
+    if data_type == "daily":
+        return os.path.join(base_dir, "daily")
+    elif data_type == "30min":
+        return os.path.join(base_dir, "intraday_30min")
+    else:  # '1min' or 'intraday'
+        return os.path.join(base_dir, "intraday")
+
+
+def ensure_directories_exist() -> None:
+    """Ensure all required data directories exist."""
+    directories = [INTRADAY_DATA_DIR, INTRADAY_30MIN_DATA_DIR, DAILY_DATA_DIR]
+
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        logger.debug(f"Ensured directory exists: {directory}")
+
+
+def cleanup_old_files(directory: str, max_files: int = 100) -> None:
+    """
+    Clean up old files in a directory, keeping only the most recent ones.
+
+    Args:
+        directory: Directory to clean up
+        max_files: Maximum number of files to keep
+    """
+    if not os.path.exists(directory):
+        return
+
+    try:
+        files = []
+        for filename in os.listdir(directory):
+            if filename.endswith(".csv"):
+                filepath = os.path.join(directory, filename)
+                files.append((filepath, os.path.getmtime(filepath)))
+
+        # Sort by modification time (newest first)
+        files.sort(key=lambda x: x[1], reverse=True)
+
+        # Remove excess files
+        for filepath, _ in files[max_files:]:
+            try:
+                os.remove(filepath)
+                logger.info(f"Removed old file: {filepath}")
+            except Exception as e:
+                logger.error(f"Error removing file {filepath}: {e}")
+
+    except Exception as e:
+        logger.error(f"Error cleaning up directory {directory}: {e}")
+
+
+def get_file_size(filepath: str) -> int:
+    """
+    Get the size of a file in bytes.
+
+    Args:
+        filepath: Path to the file
+
+    Returns:
+        File size in bytes, 0 if file doesn't exist
+    """
+    try:
+        return os.path.getsize(filepath) if os.path.exists(filepath) else 0
+    except Exception as e:
+        logger.error(f"Error getting file size for {filepath}: {e}")
+        return 0
