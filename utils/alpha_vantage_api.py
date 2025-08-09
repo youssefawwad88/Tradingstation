@@ -130,9 +130,9 @@ class AlphaVantageAPI:
         
         return fixture_dir / filename
     
-    def _load_fixture(self, function: str, symbol: str, **params) -> Optional[pd.DataFrame]:
+    def _load_fixture(self, function: str, symbol: str, **kwargs) -> Optional[pd.DataFrame]:
         """Load test fixture data."""
-        fixture_path = self._get_fixture_path(function, symbol, **params)
+        fixture_path = self._get_fixture_path(function, symbol, **kwargs)
         
         if not fixture_path.exists():
             logger.warning(f"Fixture not found: {fixture_path}")
@@ -166,7 +166,9 @@ class AlphaVantageAPI:
         
         # Check if we should use fixtures
         if not self._should_use_live_api(force_live):
-            fixture_df = self._load_fixture(function, symbol, **params)
+            # Remove function and symbol from params to avoid duplicate keyword arguments
+            fixture_params = {k: v for k, v in params.items() if k not in ['function', 'symbol']}
+            fixture_df = self._load_fixture(function, symbol, **fixture_params)
             if fixture_df is not None:
                 return {'data': fixture_df, 'from_fixture': True}
             else:
