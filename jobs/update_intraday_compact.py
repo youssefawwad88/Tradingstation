@@ -18,7 +18,8 @@ from utils.config import (
 from utils.helpers import (
     read_master_tickerlist, save_df_to_s3, read_df_from_s3, update_scheduler_status,
     is_today_present, get_last_market_day, trim_to_rolling_window, detect_market_session,
-    load_manual_tickers, is_today, append_new_candles, save_to_local_filesystem
+    load_manual_tickers, is_today, append_new_candles, save_to_local_filesystem,
+    apply_data_retention, is_today_present_enhanced
 )
 from utils.alpha_vantage_api import get_intraday_data
 
@@ -552,10 +553,15 @@ def process_ticker_interval(ticker, interval, debug=False):
                 ticker_status['new_candles_found'] = False
                 logger.info(f"📊 USING EXISTING: No new data to process, using existing {len(combined_df)} rows for {ticker}")
         
-        # Apply rolling window trimming (keep last 5 days + current day) only if we have data
+        # Apply enhanced data retention with new configuration (Phase 4)
         if not combined_df.empty:
-            logger.info(f"🔄 PROCESSING: Applying rolling window trimming for {ticker}...")
-            combined_df = trim_to_rolling_window(combined_df, window_days=5)
+            logger.info(f"🔄 PROCESSING: Applying enhanced data retention for {ticker}...")
+            
+            # Import the new config values
+            from utils.config import INTRADAY_TRIM_DAYS
+            
+            # Use the new apply_data_retention function instead of trim_to_rolling_window
+            combined_df = apply_data_retention(combined_df, INTRADAY_TRIM_DAYS)
             
             # Sort by timestamp (chronological order - oldest to newest, which matches existing format)
             timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
@@ -618,8 +624,9 @@ def process_ticker_interval(ticker, interval, debug=False):
             print(f"☁️  Spaces Upload: {'✅ SUCCESS' if ticker_status['spaces_upload_success'] else '❌ FAILED/DISABLED'}")
             print(f"📈 Total Rows: {ticker_status['total_rows']}")
         
-        # Check if today's data is now present
-        if not is_today_present(combined_df):
+        # Check if today's data is now present using enhanced verification
+        timestamp_col = 'Date' if 'Date' in combined_df.columns else 'timestamp'
+        if not is_today_present_enhanced(combined_df, timestamp_col):
             logger.warning(f"⚠️  WARNING: Today's data still missing for {ticker} after update")
         else:
             logger.info(f"✅ Today's data confirmed present for {ticker}")
