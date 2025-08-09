@@ -33,6 +33,12 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"  # Default to tru
 TEST_MODE = os.getenv("TEST_MODE", "auto").lower()  # auto, enabled, disabled
 WEEKEND_TEST_MODE_ENABLED = os.getenv("WEEKEND_TEST_MODE_ENABLED", "true").lower() == "true"
 
+# Master Orchestrator Mode Configuration
+# MODE environment variable takes priority over automatic weekend detection
+# Valid values: "test", "production" (case insensitive)
+# If not set, falls back to TEST_MODE and weekend detection logic
+MODE = os.getenv("MODE", "").lower() if os.getenv("MODE") else None
+
 # File Paths
 BASE_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 INTRADAY_DATA_DIR = f"{BASE_DATA_DIR}/intraday"

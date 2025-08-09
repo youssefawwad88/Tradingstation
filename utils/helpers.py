@@ -743,19 +743,79 @@ def is_weekend():
 
 def should_use_test_mode():
     """
-    Determine if test mode should be used based on configuration and weekend status.
+    Determine if test mode should be used based on configuration, MODE environment variable, and weekend status.
+    
+    Priority:
+    1. MODE environment variable ("test" or "production")
+    2. TEST_MODE configuration ("enabled", "disabled", or "auto")
+    3. Automatic weekend detection (if TEST_MODE="auto")
     
     Returns:
         bool: True if test mode should be active
     """
+    import os
     from utils.config import TEST_MODE, WEEKEND_TEST_MODE_ENABLED
     
+    # Get MODE from environment dynamically (not from config cache)
+    mode = os.getenv("MODE", "").lower() if os.getenv("MODE") else None
+    
+    # Priority 1: MODE environment variable takes precedence
+    if mode:
+        if mode == "test":
+            return True
+        elif mode == "production":
+            return False
+        # If MODE is set but invalid, log warning and fall through to other logic
+        logger.warning(f"Invalid MODE value '{mode}'. Expected 'test' or 'production'. Falling back to TEST_MODE logic.")
+    
+    # Priority 2: TEST_MODE configuration
     if TEST_MODE == "enabled":
         return True
     elif TEST_MODE == "disabled":
         return False
     else:  # TEST_MODE == "auto"
+        # Priority 3: Automatic weekend detection
         return WEEKEND_TEST_MODE_ENABLED and is_weekend()
+
+def get_test_mode_reason():
+    """
+    Get the reason why test mode is active (for logging purposes).
+    
+    Returns:
+        tuple: (is_test_mode, reason_string)
+    """
+    import os
+    from utils.config import TEST_MODE, WEEKEND_TEST_MODE_ENABLED
+    import datetime
+    import pytz
+    
+    # Get MODE from environment dynamically (not from config cache)
+    mode = os.getenv("MODE", "").lower() if os.getenv("MODE") else None
+    
+    ny_tz = pytz.timezone('America/New_York')
+    current_time = datetime.datetime.now(ny_tz)
+    current_weekday = current_time.weekday()
+    weekday_name = current_time.strftime('%A')
+    
+    # Check MODE environment variable first
+    if mode:
+        if mode == "test":
+            return True, f"Environment variable MODE=test – running in TEST MODE"
+        elif mode == "production":
+            return False, f"Environment variable MODE=production – running in LIVE MODE"
+        else:
+            logger.warning(f"Invalid MODE value '{mode}'. Expected 'test' or 'production'. Falling back to TEST_MODE logic.")
+    
+    # Check TEST_MODE configuration
+    if TEST_MODE == "enabled":
+        return True, f"Configuration TEST_MODE=enabled – running in TEST MODE"
+    elif TEST_MODE == "disabled":
+        return False, f"Configuration TEST_MODE=disabled – running in LIVE MODE"
+    else:  # TEST_MODE == "auto"
+        if WEEKEND_TEST_MODE_ENABLED and is_weekend():
+            return True, f"Weekend detected ({weekday_name}) – running in TEST MODE"
+        else:
+            return False, f"Weekday detected ({weekday_name}) – running in LIVE MODE"
 
 def log_detailed_operation(ticker, operation, start_time=None, row_count_before=None, row_count_after=None, details=None):
     """
@@ -853,9 +913,9 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
     # Log detailed cleanup results
     log_detailed_operation(
         ticker, 
-        "Data Cleanup", 
+        "Cleanup applied", 
         start_time,
-        details=f"Daily: {daily_before}→{daily_after}, 30min: {intraday_30min_before}→{intraday_30min_after}, 1min: {intraday_1min_before}→{intraday_1min_after}"
+        details=f"retained {daily_after} daily, {intraday_30min_after} 30-min, {intraday_1min_after} intraday"
     )
     
     return cleaned_daily, cleaned_30min, cleaned_1min
