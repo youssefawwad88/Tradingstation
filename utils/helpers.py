@@ -830,11 +830,20 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
         # Ensure timestamp column exists and is datetime
         if 'timestamp' in intraday_1min_df.columns:
             cleaned_1min = intraday_1min_df.copy()
-            cleaned_1min['timestamp'] = pd.to_datetime(cleaned_1min['timestamp'])
-            
-            # Keep last 7 calendar days
-            seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
-            cleaned_1min = cleaned_1min[cleaned_1min['timestamp'] >= seven_days_ago]
+            try:
+                cleaned_1min['timestamp'] = pd.to_datetime(cleaned_1min['timestamp'])
+                
+                # Keep last 7 calendar days
+                seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+                mask = cleaned_1min['timestamp'] >= seven_days_ago
+                cleaned_1min = cleaned_1min[mask]
+                
+                # If filtering resulted in empty data, fallback to row-based limit
+                if cleaned_1min.empty:
+                    cleaned_1min = intraday_1min_df.head(10080)  # ~7 days worth
+            except Exception as e:
+                # If timestamp parsing fails, use row-based limit
+                cleaned_1min = intraday_1min_df.head(10080)  # ~7 days worth
         else:
             # If no timestamp column, just keep first 7*24*60 = 10080 rows (roughly 7 days of 1-min data)
             cleaned_1min = intraday_1min_df.head(10080)

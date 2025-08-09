@@ -211,6 +211,11 @@ __marimo__/
 data/intraday/TEST_*.csv
 data/intraday_30min/TEST_*.csv
 
+# Large simulated data files from weekend test mode (keep for demo but exclude from repo)
+data/intraday/*_1min.csv
+data/intraday/*_daily.csv  
+data/intraday_30min/*_30min.csv
+
 # Local data backups (keep in local environment only)
 # data/intraday/
 # data/intraday_30min/
