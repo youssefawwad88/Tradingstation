@@ -69,13 +69,11 @@ def run_daily_data_jobs():
     """Run daily data fetching and processing jobs."""
     logger.info("Starting daily data jobs")
     
-    # Stage 1: Universe Building
-    if not run_job("jobs/run_weekly_universe_scan.py", "weekly_universe_scan"): 
-        return False
-    if not run_job("ticker_selectors/opportunity_ticker_finder.py", "opportunity_ticker_finder"): 
+    # Stage 1: Generate master ticker list (manual sources only)
+    if not run_job("generate_master_tickerlist.py", "generate_master_tickerlist"): 
         return False
     
-    # Stage 2: Data Fetching
+    # Stage 2: Data Fetching 
     if not run_job("jobs/update_all_data.py", "update_all_data"): 
         return False
     if not run_job("jobs/find_avwap_anchors.py", "find_avwap_anchors"): 

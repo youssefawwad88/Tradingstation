@@ -724,3 +724,138 @@ def calculate_avg_daily_volume(ticker):
     """Calculate average daily volume - stub implementation."""
     logger.warning(f"calculate_avg_daily_volume not implemented for {ticker}")
     return None
+
+def is_weekend():
+    """
+    Check if current day is weekend (Saturday or Sunday).
+    
+    Returns:
+        bool: True if it's weekend (Saturday=5, Sunday=6)
+    """
+    import datetime
+    import pytz
+    
+    ny_tz = pytz.timezone('America/New_York')
+    current_time = datetime.datetime.now(ny_tz)
+    current_weekday = current_time.weekday()  # 0=Monday, 6=Sunday
+    
+    return current_weekday >= 5  # Saturday=5, Sunday=6
+
+def should_use_test_mode():
+    """
+    Determine if test mode should be used based on configuration and weekend status.
+    
+    Returns:
+        bool: True if test mode should be active
+    """
+    from utils.config import TEST_MODE, WEEKEND_TEST_MODE_ENABLED
+    
+    if TEST_MODE == "enabled":
+        return True
+    elif TEST_MODE == "disabled":
+        return False
+    else:  # TEST_MODE == "auto"
+        return WEEKEND_TEST_MODE_ENABLED and is_weekend()
+
+def log_detailed_operation(ticker, operation, start_time=None, row_count_before=None, row_count_after=None, details=None):
+    """
+    Log detailed operation information for test mode visibility.
+    
+    Args:
+        ticker (str): Ticker symbol
+        operation (str): Operation being performed
+        start_time (datetime, optional): When operation started
+        row_count_before (int, optional): Row count before operation
+        row_count_after (int, optional): Row count after operation
+        details (str, optional): Additional details
+    """
+    import datetime
+    
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if start_time:
+        duration = (datetime.datetime.now() - start_time).total_seconds()
+        duration_str = f" ({duration:.2f}s)"
+    else:
+        duration_str = ""
+    
+    log_parts = [f"[{timestamp}] {ticker}: {operation}{duration_str}"]
+    
+    if row_count_before is not None and row_count_after is not None:
+        log_parts.append(f" | Rows: {row_count_before} → {row_count_after}")
+    elif row_count_after is not None:
+        log_parts.append(f" | Rows: {row_count_after}")
+    
+    if details:
+        log_parts.append(f" | {details}")
+    
+    logger.info("".join(log_parts))
+
+def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df):
+    """
+    Apply data retention limits after full fetch:
+    - Daily: Keep only last 200 rows
+    - 30-min: Keep only last 500 rows  
+    - 1-min: Keep only last 7 days, preserving early volume data and today's feed
+    
+    Args:
+        ticker (str): Ticker symbol
+        daily_df (DataFrame): Daily data
+        intraday_30min_df (DataFrame): 30-min intraday data
+        intraday_1min_df (DataFrame): 1-min intraday data
+        
+    Returns:
+        tuple: (cleaned_daily_df, cleaned_30min_df, cleaned_1min_df)
+    """
+    import datetime
+    import pandas as pd
+    
+    start_time = datetime.datetime.now()
+    
+    # Daily data cleanup - keep last 200 rows
+    daily_before = len(daily_df) if not daily_df.empty else 0
+    cleaned_daily = daily_df.head(200) if not daily_df.empty else daily_df
+    daily_after = len(cleaned_daily)
+    
+    # 30-min data cleanup - keep last 500 rows
+    intraday_30min_before = len(intraday_30min_df) if not intraday_30min_df.empty else 0
+    cleaned_30min = intraday_30min_df.head(500) if not intraday_30min_df.empty else intraday_30min_df
+    intraday_30min_after = len(cleaned_30min)
+    
+    # 1-min data cleanup - keep last 7 days but preserve early volume and today's data
+    intraday_1min_before = len(intraday_1min_df) if not intraday_1min_df.empty else 0
+    cleaned_1min = intraday_1min_df
+    
+    if not intraday_1min_df.empty:
+        # Ensure timestamp column exists and is datetime
+        if 'timestamp' in intraday_1min_df.columns:
+            cleaned_1min = intraday_1min_df.copy()
+            try:
+                cleaned_1min['timestamp'] = pd.to_datetime(cleaned_1min['timestamp'])
+                
+                # Keep last 7 calendar days
+                seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+                mask = cleaned_1min['timestamp'] >= seven_days_ago
+                cleaned_1min = cleaned_1min[mask]
+                
+                # If filtering resulted in empty data, fallback to row-based limit
+                if cleaned_1min.empty:
+                    cleaned_1min = intraday_1min_df.head(10080)  # ~7 days worth
+            except Exception as e:
+                # If timestamp parsing fails, use row-based limit
+                cleaned_1min = intraday_1min_df.head(10080)  # ~7 days worth
+        else:
+            # If no timestamp column, just keep first 7*24*60 = 10080 rows (roughly 7 days of 1-min data)
+            cleaned_1min = intraday_1min_df.head(10080)
+    
+    intraday_1min_after = len(cleaned_1min)
+    
+    # Log detailed cleanup results
+    log_detailed_operation(
+        ticker, 
+        "Data Cleanup", 
+        start_time,
+        details=f"Daily: {daily_before}→{daily_after}, 30min: {intraday_30min_before}→{intraday_30min_after}, 1min: {intraday_1min_before}→{intraday_1min_after}"
+    )
+    
+    return cleaned_daily, cleaned_30min, cleaned_1min
