@@ -1,0 +1,103 @@
+---
+# Trading Station Scheduler Configuration
+# Times are in ET (America/New_York)
+
+premarket:
+  # Run before market open (6:30-7:00 ET)
+  jobs:
+    - name: "opportunity_ticker_finder"
+      time: "06:30"
+      module: "ticker_selectors.opportunity_ticker_finder"
+      enabled: true
+    
+    - name: "find_avwap_anchors"
+      time: "06:45"
+      module: "jobs.find_avwap_anchors"
+      enabled: true
+    
+    - name: "update_daily"
+      time: "07:00"
+      module: "jobs.update_daily"
+      enabled: true
+
+regular_session:
+  # Market hours (9:30-16:00 ET)
+  jobs:
+    - name: "update_intraday"
+      interval: "1min"
+      module: "jobs.update_intraday"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+    
+    - name: "update_intraday_30min"
+      interval: "10min"
+      module: "jobs.update_intraday_30min"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+
+screeners:
+  # High-frequency screeners (first hour)
+  high_freq:
+    - name: "gapgo"
+      interval: "1min"
+      module: "screeners.gapgo"
+      enabled: true
+      start_time: "09:30"
+      end_time: "10:30"
+    
+    - name: "orb"
+      time: "09:40"
+      module: "screeners.orb"
+      enabled: true
+  
+  # Swing screeners (every 15 min)
+  swing:
+    - name: "avwap"
+      interval: "15min"
+      module: "screeners.avwap"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+    
+    - name: "breakout"
+      interval: "15min"
+      module: "screeners.breakout"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+    
+    - name: "ema_pullback"
+      interval: "15min"
+      module: "screeners.ema_pullback"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+    
+    - name: "exhaustion"
+      interval: "15min"
+      module: "screeners.exhaustion"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+
+dashboard:
+  # Master dashboard consolidation
+  jobs:
+    - name: "master_dashboard"
+      interval: "5min"  # First hour
+      interval_after: "15min"  # Rest of session
+      module: "dashboard.master_dashboard"
+      enabled: true
+      start_time: "09:30"
+      end_time: "16:00"
+      switch_time: "10:30"
+
+postmarket:
+  # After market close
+  jobs:
+    - name: "update_all_data"
+      time: "17:00"
+      module: "jobs.update_all_data"
+      enabled: false  # Only for backfills
