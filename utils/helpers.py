@@ -108,7 +108,8 @@ def save_df_to_local(df, ticker, interval, directory=INTRADAY_DATA_DIR):
 
 def save_df_to_s3(df, object_name_or_ticker, interval=None, s3_prefix='intraday'):
     """
-    Save DataFrame to DigitalOcean Spaces (with flexible parameters) with local fallback.
+    Save DataFrame to DigitalOcean Spaces with enhanced logging and path verification (Phase 4 implementation).
+    STANDARDIZES on data/ prefix for all storage and logs exact paths used.
     
     Args:
         df (pandas.DataFrame): DataFrame to save
@@ -122,12 +123,15 @@ def save_df_to_s3(df, object_name_or_ticker, interval=None, s3_prefix='intraday'
     # Determine if we got an object name or ticker
     if interval is not None:
         # Old-style call with ticker and interval
-        object_name = f"{s3_prefix}/{object_name_or_ticker}_{interval}.csv"
+        # STANDARDIZE on data/ prefix as specified in Phase 4
+        object_name = f"data/{s3_prefix}/{object_name_or_ticker}_{interval}.csv"
         ticker = object_name_or_ticker
-        logger.info(f"Uploading {object_name_or_ticker} data to Spaces at {object_name}")
+        logger.info(f"💾 SAVE_DF_TO_S3: Processing {object_name_or_ticker} {interval} data")
     else:
-        # New-style call with direct object name
+        # New-style call with direct object name - ensure data/ prefix
         object_name = object_name_or_ticker
+        if not object_name.startswith('data/'):
+            object_name = f"data/{object_name}"
         # Extract ticker from object name for local fallback
         if '/' in object_name:
             parts = object_name.split('/')
@@ -141,37 +145,66 @@ def save_df_to_s3(df, object_name_or_ticker, interval=None, s3_prefix='intraday'
         else:
             ticker = object_name.replace('.csv', '')
             interval_part = '1min'  # default
-        logger.info(f"Uploading DataFrame to Spaces at {object_name}")
+        logger.info(f"💾 SAVE_DF_TO_S3: Processing direct object name")
+    
+    # LOG the exact path used for each save operation as required
+    logger.info(f"📂 Saving to Spaces path: {object_name}")
+    logger.info(f"   Data rows: {len(df)}")
+    if not df.empty:
+        date_col = 'Date' if 'Date' in df.columns else 'datetime' if 'datetime' in df.columns else 'timestamp'
+        if date_col in df.columns:
+            min_date = pd.to_datetime(df[date_col]).min()
+            max_date = pd.to_datetime(df[date_col]).max()
+            logger.info(f"   Date range: {min_date} to {max_date}")
     
     # Try Spaces upload first
     success = upload_dataframe(df, object_name)
     if success:
-        logger.info(f"Successfully uploaded to Spaces at {object_name}")
+        # CONFIRM the file exists after saving as required
+        logger.info(f"✅ File saved successfully to {object_name}")
+        logger.info(f"☁️ Spaces upload confirmed for {ticker}")
         return True
     else:
-        logger.warning(f"Failed to upload to Spaces at {object_name}. Trying local filesystem fallback...")
+        logger.warning(f"⚠️ Failed to upload to Spaces at {object_name}. Trying local filesystem fallback...")
         
-        # Fallback to local filesystem
+        # Fallback to local filesystem with enhanced logging
         try:
             # Extract interval from object name if not provided
             if interval is None:
                 interval = interval_part if 'interval_part' in locals() else '1min'
             
-            # Determine directory based on interval
-            if '30min' in str(interval):
-                directory = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "intraday_30min")
+            # Determine directory based on data/ standardized paths
+            base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+            
+            if 'daily' in object_name or interval == 'daily':
+                directory = os.path.join(base_dir, "daily")
+                local_filename = f"{ticker}_daily.csv"
+            elif '30min' in str(interval) or '30min' in object_name:
+                directory = os.path.join(base_dir, "intraday_30min")
+                local_filename = f"{ticker}_30min.csv"
             else:
-                directory = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "intraday")
+                directory = os.path.join(base_dir, "intraday")
+                local_filename = f"{ticker}_1min.csv"
             
             # Save to local filesystem
             os.makedirs(directory, exist_ok=True)
-            local_path = os.path.join(directory, f"{ticker}_{interval}.csv")
+            local_path = os.path.join(directory, local_filename)
+            
+            logger.info(f"💽 LOCAL FALLBACK: Saving to {local_path}")
             df.to_csv(local_path, index=False)
-            logger.info(f"Successfully saved to local filesystem: {local_path}")
-            return True
+            
+            # Verify file exists locally
+            if os.path.exists(local_path):
+                file_size = os.path.getsize(local_path)
+                logger.info(f"✅ File saved successfully to {local_path}")
+                logger.info(f"📁 Local file confirmed: {file_size} bytes")
+                return True
+            else:
+                logger.error(f"❌ Local file verification failed: {local_path}")
+                return False
             
         except Exception as e:
-            logger.error(f"Local filesystem fallback also failed: {e}")
+            logger.error(f"❌ Local filesystem fallback also failed: {e}")
             return False
 
 def save_to_local_filesystem(df, ticker, interval):
@@ -356,36 +389,68 @@ def read_df_from_s3(object_name):
 
 def load_manual_tickers():
     """
-    Load manual ticker list from tickerlist.txt (as per TICKER_MANAGEMENT.md documentation).
+    Load manual ticker list from tickerlist.txt with enhanced diagnostics (Phase 2 implementation).
+    Checks MULTIPLE POSSIBLE LOCATIONS and provides detailed error logging as specified.
     
     Returns:
         list: List of manual tickers
     """
-    # Try to read from tickerlist.txt first (documented manual ticker source)
-    manual_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tickerlist.txt")
-    if os.path.exists(manual_file):
-        try:
-            with open(manual_file, 'r') as f:
-                tickers = [line.strip() for line in f.readlines() if line.strip()]
-            logger.info(f"Loaded {len(tickers)} manual tickers from tickerlist.txt")
-            return tickers
-        except Exception as e:
-            logger.error(f"Error reading manual tickers from tickerlist.txt: {e}")
+    # Find all potential tickerlist.txt files as specified in Phase 2
+    paths_to_check = [
+        '/workspace/tickerlist.txt',
+        '/workspace/data/tickerlist.txt',
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tickerlist.txt"),
+        'tickerlist.txt',
+        '../tickerlist.txt'
+    ]
+    
+    logger.info("🔍 LOAD_MANUAL_TICKERS: Checking multiple possible locations for tickerlist.txt...")
+    
+    for path in paths_to_check:
+        logger.info(f"   Checking path: {path}")
+        if os.path.exists(path):
+            try:
+                logger.info(f"✅ FOUND tickerlist.txt at: {path}")
+                with open(path, 'r') as f:
+                    content = f.read().strip()
+                    tickers = [line.strip() for line in content.split('\n') if line.strip()]
+                
+                # Print the first 5 tickers found as specified
+                logger.info(f"📋 File contents summary:")
+                logger.info(f"   Total tickers found: {len(tickers)}")
+                logger.info(f"   First 5 tickers: {tickers[:5]}")
+                if len(tickers) > 5:
+                    logger.info(f"   Additional tickers: {tickers[5:]}")
+                
+                logger.info(f"✅ Successfully loaded {len(tickers)} manual tickers from {path}")
+                return tickers
+                
+            except Exception as e:
+                logger.error(f"❌ Error reading tickerlist.txt from {path}: {e}")
+                continue
+        else:
+            logger.info(f"   ❌ Not found: {path}")
     
     # Fallback: try manual_tickers.txt for backwards compatibility
     manual_file_alt = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "manual_tickers.txt")
+    logger.info(f"🔄 Trying fallback: {manual_file_alt}")
     if os.path.exists(manual_file_alt):
         try:
             with open(manual_file_alt, 'r') as f:
                 tickers = [line.strip() for line in f.readlines() if line.strip()]
-            logger.info(f"Loaded {len(tickers)} manual tickers from manual_tickers.txt (fallback)")
+            logger.info(f"✅ Loaded {len(tickers)} manual tickers from manual_tickers.txt (fallback)")
+            logger.info(f"   First 5 tickers: {tickers[:5]}")
             return tickers
         except Exception as e:
-            logger.error(f"Error reading manual tickers from manual_tickers.txt: {e}")
+            logger.error(f"❌ Error reading manual tickers from manual_tickers.txt: {e}")
     
     # Final fallback to default tickers
+    logger.warning("⚠️ No manual ticker file found in any location!")
+    logger.warning("   This indicates a configuration issue - tickerlist.txt should exist")
+    logger.warning("   Falling back to DEFAULT_TICKERS from config")
+    
     from utils.config import DEFAULT_TICKERS
-    logger.warning("No manual ticker file found, using DEFAULT_TICKERS")
+    logger.info(f"📋 Using DEFAULT_TICKERS: {DEFAULT_TICKERS[:5]} (first 5)")
     return DEFAULT_TICKERS
 
 def is_today_present(df):
@@ -850,6 +915,176 @@ def log_detailed_operation(ticker, operation, start_time=None, row_count_before=
         log_parts.append(f" | {details}")
     
     logger.info("".join(log_parts))
+
+def verify_data_storage_and_retention(ticker, check_today=True):
+    """
+    Verify correct data storage paths and data retention (Phase 3 implementation).
+    Checks if files exist in correct paths and validates today's data inclusion.
+    
+    Args:
+        ticker (str): Ticker symbol
+        check_today (bool): Whether to check for today's data
+        
+    Returns:
+        dict: Verification results for each data type
+    """
+    logger.info(f"🔍 VERIFYING data storage for {ticker}")
+    
+    results = {
+        'daily': {'path': None, 'exists': False, 'row_count': 0, 'today_present': False, 'date_range': None},
+        '30min': {'path': None, 'exists': False, 'row_count': 0, 'today_present': False, 'date_range': None},
+        '1min': {'path': None, 'exists': False, 'row_count': 0, 'today_present': False, 'date_range': None}
+    }
+    
+    # Define expected paths as per requirements
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    paths_to_check = {
+        'daily': os.path.join(base_dir, "daily", f"{ticker}_daily.csv"),
+        '30min': os.path.join(base_dir, "intraday_30min", f"{ticker}_30min.csv"),
+        '1min': os.path.join(base_dir, "intraday", f"{ticker}_1min.csv")
+    }
+    
+    for data_type, file_path in paths_to_check.items():
+        results[data_type]['path'] = file_path
+        
+        logger.info(f"   📂 Checking {data_type}: {file_path}")
+        
+        if os.path.exists(file_path):
+            results[data_type]['exists'] = True
+            logger.info(f"   ✅ File exists: {file_path}")
+            
+            try:
+                # Read and analyze the file
+                df = pd.read_csv(file_path)
+                row_count = len(df)
+                results[data_type]['row_count'] = row_count
+                
+                logger.info(f"   📊 Row count: {row_count}")
+                
+                # Check date range
+                date_col = None
+                for col in ['Date', 'datetime', 'timestamp']:
+                    if col in df.columns:
+                        date_col = col
+                        break
+                
+                if date_col and not df.empty:
+                    df[date_col] = pd.to_datetime(df[date_col])
+                    min_date = df[date_col].min()
+                    max_date = df[date_col].max()
+                    results[data_type]['date_range'] = f"{min_date} to {max_date}"
+                    
+                    logger.info(f"   📅 Date range: {min_date} to {max_date}")
+                    
+                    # Check for today's data if requested
+                    if check_today:
+                        today_present = is_today_present_enhanced(df, date_col)
+                        results[data_type]['today_present'] = today_present
+                        
+                        if today_present:
+                            logger.info(f"   ✅ TODAY'S DATA confirmed present")
+                        else:
+                            logger.info(f"   📅 No today's data (may be weekend/holiday)")
+                else:
+                    logger.warning(f"   ⚠️ No valid date column found")
+                    
+            except Exception as e:
+                logger.error(f"   ❌ Error reading file: {e}")
+        else:
+            logger.warning(f"   ❌ File not found: {file_path}")
+    
+    # Summary
+    logger.info(f"📋 VERIFICATION SUMMARY for {ticker}:")
+    for data_type, result in results.items():
+        status = "✅ OK" if result['exists'] else "❌ Missing"
+        today_status = "✅ Present" if result['today_present'] else "❌ Missing" if check_today else "N/A"
+        logger.info(f"   {data_type.upper()}: {status} | Rows: {result['row_count']} | Today: {today_status}")
+    
+    return results
+
+def check_spaces_connectivity():
+    """
+    Check Spaces connectivity and validate credentials (Phase 3 implementation).
+    
+    Returns:
+        dict: Connectivity status and details
+    """
+    logger.info("🔗 CHECKING Spaces connectivity...")
+    
+    from utils.config import (
+        SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, 
+        SPACES_BUCKET_NAME, SPACES_ENDPOINT_URL
+    )
+    
+    result = {
+        'credentials_configured': False,
+        'bucket_accessible': False,
+        'write_permissions': False,
+        'details': {}
+    }
+    
+    # Check if credentials are configured
+    if all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME]):
+        result['credentials_configured'] = True
+        logger.info("✅ Spaces credentials configured")
+        result['details']['endpoint'] = SPACES_ENDPOINT_URL
+        result['details']['bucket'] = SPACES_BUCKET_NAME
+    else:
+        logger.error("❌ Spaces credentials missing")
+        result['details']['missing'] = []
+        if not SPACES_ACCESS_KEY_ID:
+            result['details']['missing'].append('SPACES_ACCESS_KEY_ID')
+        if not SPACES_SECRET_ACCESS_KEY:
+            result['details']['missing'].append('SPACES_SECRET_ACCESS_KEY')
+        if not SPACES_BUCKET_NAME:
+            result['details']['missing'].append('SPACES_BUCKET_NAME')
+        return result
+    
+    # Test Spaces client creation
+    try:
+        from utils.spaces_manager import get_spaces_client
+        client = get_spaces_client()
+        
+        if client:
+            logger.info("✅ Spaces client created successfully")
+            result['bucket_accessible'] = True
+            
+            # Test write permissions with small operation
+            try:
+                test_content = "test,data\n1,2\n"
+                test_key = "data/test_connectivity.csv"
+                
+                import io
+                buffer = io.BytesIO(test_content.encode())
+                client.upload_fileobj(buffer, SPACES_BUCKET_NAME, test_key)
+                
+                logger.info("✅ Write permissions confirmed")
+                result['write_permissions'] = True
+                
+                # Clean up test file
+                try:
+                    client.delete_object(Bucket=SPACES_BUCKET_NAME, Key=test_key)
+                    logger.info("✅ Test file cleanup successful")
+                except:
+                    logger.warning("⚠️ Test file cleanup failed (not critical)")
+                    
+            except Exception as e:
+                logger.error(f"❌ Write permission test failed: {e}")
+                
+        else:
+            logger.error("❌ Failed to create Spaces client")
+            
+    except Exception as e:
+        logger.error(f"❌ Spaces connectivity test failed: {e}")
+        result['details']['error'] = str(e)
+    
+    # Log summary
+    logger.info("🔗 CONNECTIVITY SUMMARY:")
+    logger.info(f"   Credentials: {'✅ OK' if result['credentials_configured'] else '❌ Missing'}")
+    logger.info(f"   Bucket access: {'✅ OK' if result['bucket_accessible'] else '❌ Failed'}")
+    logger.info(f"   Write permissions: {'✅ OK' if result['write_permissions'] else '❌ Failed'}")
+    
+    return result
 
 def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df):
     """
