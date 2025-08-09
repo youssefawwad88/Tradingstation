@@ -29,6 +29,10 @@ MARKET_HOURS_ONLY = os.getenv("MARKET_HOURS_ONLY", "false").lower() == "true"
 SKIP_IF_FRESH_MINUTES = int(os.getenv("SKIP_IF_FRESH_MINUTES", "0"))
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"  # Default to true for debugging
 
+# Weekend Test Mode Configuration
+TEST_MODE = os.getenv("TEST_MODE", "auto").lower()  # auto, enabled, disabled
+WEEKEND_TEST_MODE_ENABLED = os.getenv("WEEKEND_TEST_MODE_ENABLED", "true").lower() == "true"
+
 # File Paths
 BASE_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 INTRADAY_DATA_DIR = f"{BASE_DATA_DIR}/intraday"
