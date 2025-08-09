@@ -1,9 +1,0 @@
-Ticker,Anchor 1 Date,Manual Override,Anchor 1 Gap %,Anchor 1 Body %,Anchor 1 Vol %,Anchor 1 Confirmed?,Anchor 2 Date,Anchor 2 Gap %,Anchor 2 Body %,Anchor 2 Vol %,Anchor 2 Confirmed?,Data Status
-NVDA,2025-05-29,FALSE,5.52,54.75,172.76,Yes,N/A,N/A,N/A,N/A,No,Auto-Detected
-AAPL,N/A,FALSE,N/A,N/A,N/A,No,N/A,N/A,N/A,N/A,No,Auto-Detected
-TSLA,2025-06-23,FALSE,1.67,70.33,161.08,Yes,2025-06-05,-2.88,73.61,280.10,Yes,Auto-Detected
-AMD,2025-06-25,FALSE,1.81,52.12,153.80,Yes,2025-06-24,2.97,85.32,170.35,Yes,Auto-Detected
-GOOGL,2025-07-24,FALSE,3.57,69.93,182.43,Yes,N/A,N/A,N/A,N/A,No,Auto-Detected
-MSFT,N/A,FALSE,N/A,N/A,N/A,No,N/A,N/A,N/A,N/A,No,Auto-Detected
-AMZN,N/A,FALSE,N/A,N/A,N/A,No,N/A,N/A,N/A,N/A,No,Auto-Detected
-NFLX,2025-07-18,FALSE,-2.53,71.93,321.42,Yes,N/A,N/A,N/A,N/A,No,Auto-Detected
