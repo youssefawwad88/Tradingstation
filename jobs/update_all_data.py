@@ -144,8 +144,8 @@ def run_full_rebuild():
     logger.info(f"Starting Daily Full Data Rebuild Job ({mode_str})")
     
     if test_mode:
-        logger.info("🧪 Weekend Test Mode Active - Using simulated data without API calls")
-        logger.info("📋 Detailed logging enabled for all operations")
+        logger.info("[TEST MODE] Weekend Test Mode Active - Using simulated data without API calls")
+        logger.info("[TEST MODE] Detailed logging enabled for all operations")
     
     # Load tickers from master_tickerlist.csv (unified source)
     tickers = read_master_tickerlist()
@@ -165,10 +165,12 @@ def run_full_rebuild():
         try:
             if test_mode:
                 daily_df = simulate_data_fetch(ticker, "daily", 200)
+                logger.info(f"[TEST MODE] Fetching DAILY data for {ticker} – 200 rows (test data)")
             else:
                 daily_df = get_daily_data(ticker, outputsize='full')
                 if not daily_df.empty:
                     daily_df = daily_df.head(200)  # Exactly 200 rows as specified
+                logger.info(f"Fetching DAILY data for {ticker} – {len(daily_df)} rows")
             
             if not daily_df.empty:
                 log_detailed_operation(ticker, "Daily Fetch Complete", daily_start_time, row_count_after=len(daily_df))
@@ -184,10 +186,12 @@ def run_full_rebuild():
         try:
             if test_mode:
                 intraday_30min_df = simulate_data_fetch(ticker, "30min", 500)
+                logger.info(f"[TEST MODE] Fetching 30-MINUTE data for {ticker} – 500 rows (test data)")
             else:
                 intraday_30min_df = get_intraday_data(ticker, interval='30min', outputsize='full')
                 if not intraday_30min_df.empty:
                     intraday_30min_df = intraday_30min_df.head(500)  # Exactly 500 rows as specified
+                logger.info(f"Fetching 30-MINUTE data for {ticker} – {len(intraday_30min_df)} rows")
             
             if not intraday_30min_df.empty:
                 log_detailed_operation(ticker, "30min Fetch Complete", intraday_30min_start_time, row_count_after=len(intraday_30min_df))
@@ -204,6 +208,7 @@ def run_full_rebuild():
             if test_mode:
                 # For test mode, simulate 7 days of 1-min data (roughly 7*24*60 = 10080 rows max)
                 intraday_1min_df = simulate_data_fetch(ticker, "1min", 7*24*60)
+                logger.info(f"[TEST MODE] Fetching 1-MINUTE intraday data for {ticker} – 7 days (test data)")
             else:
                 intraday_1min_df = get_intraday_data(ticker, interval='1min', outputsize='full')
                 
@@ -218,6 +223,8 @@ def run_full_rebuild():
                     # Calculate early volume average from past 5 sessions
                     early_volume_avg = calculate_early_volume_average(ticker, intraday_1min_df, num_sessions=5)
                     log_detailed_operation(ticker, "Early Volume Calculated", details=f"Avg early volume: {early_volume_avg:,.0f}")
+                
+                logger.info(f"Fetching 1-MINUTE intraday data for {ticker} – 7 days")
             
             if not intraday_1min_df.empty:
                 log_detailed_operation(ticker, "1min Fetch Complete", intraday_1min_start_time, row_count_after=len(intraday_1min_df))
@@ -234,6 +241,8 @@ def run_full_rebuild():
             cleaned_daily, cleaned_30min, cleaned_1min = cleanup_data_retention(
                 ticker, daily_df, intraday_30min_df, intraday_1min_df
             )
+            if test_mode:
+                logger.info(f"[TEST MODE] Cleanup applied for {ticker}: retained {len(cleaned_daily)} daily, {len(cleaned_30min)} 30-min, 7 days intraday")
         except Exception as e:
             logger.error(f"Error during cleanup for {ticker}: {e}")
             cleaned_daily, cleaned_30min, cleaned_1min = daily_df, intraday_30min_df, intraday_1min_df
@@ -275,7 +284,8 @@ def run_full_rebuild():
     logger.info(f"Daily Full Data Rebuild Job Finished ({completion_mode})")
     
     if test_mode:
-        logger.info("🧪 Test mode completed successfully - review logs to verify data flow before live mode")
+        logger.info("[TEST MODE] Test mode complete – all operations simulated successfully")
+        logger.info("[TEST MODE] Review logs to verify data flow before live mode")
 
 if __name__ == "__main__":
     job_name = "update_all_data"
