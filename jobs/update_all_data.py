@@ -130,16 +130,30 @@ def simulate_data_fetch(ticker, data_type, target_rows):
     
     return df
 
-def run_full_rebuild():
+def run_full_rebuild(force_live=False):
     """
     Runs the full data rebuild process once per day.
     - Fetches a clean, extended history for daily, 30-min, and 1-min data.
     - Implements new requirements: Daily (200 rows), 30min (500 rows), 1min (7 days + early volume + today)
     - Runs cleanup procedure after full fetch
     - Supports weekend test mode for safe testing
+    - Can override test mode with force_live parameter
+    
+    Args:
+        force_live (bool): Force live API calls even if test mode would normally be active
     """
-    test_mode = should_use_test_mode()
-    mode_str = "TEST MODE" if test_mode else "LIVE MODE"
+    # Check for environment override first
+    env_force_live = os.getenv('FORCE_LIVE_API', '').lower() == 'true'
+    
+    # Override test mode if force_live is True or environment variable is set
+    if force_live or env_force_live:
+        test_mode = False
+        mode_str = "FORCED LIVE MODE"
+        logger.info("🔥 FORCE LIVE MODE ACTIVATED - Overriding test mode detection")
+        logger.info("🌐 Will make LIVE API calls regardless of day/time")
+    else:
+        test_mode = should_use_test_mode()
+        mode_str = "TEST MODE" if test_mode else "LIVE MODE"
     
     logger.info(f"Starting Daily Full Data Rebuild Job ({mode_str})")
     
@@ -163,6 +177,9 @@ def run_full_rebuild():
         # 1. Daily Data (exactly 200 rows as specified)
         daily_start_time = datetime.now()
         try:
+            # Detailed logging for each ticker processing as specified
+            logger.info(f"⬇️ DOWNLOADING {ticker}: daily candles")
+            
             if test_mode:
                 daily_df = simulate_data_fetch(ticker, "daily", 200)
                 logger.info(f"[TEST MODE] Fetching DAILY data for {ticker} – 200 rows (test data)")
@@ -173,17 +190,28 @@ def run_full_rebuild():
                 logger.info(f"Fetching DAILY data for {ticker} – {len(daily_df)} rows")
             
             if not daily_df.empty:
+                # Enhanced logging after successful fetch
+                date_col = 'Date' if 'Date' in daily_df.columns else 'datetime' if 'datetime' in daily_df.columns else 'timestamp'
+                if date_col in daily_df.columns:
+                    min_date = pd.to_datetime(daily_df[date_col]).min().strftime('%Y-%m-%d')
+                    max_date = pd.to_datetime(daily_df[date_col]).max().strftime('%Y-%m-%d')
+                    logger.info(f"✅ FETCHED {ticker} daily: {daily_df.shape[0]} rows from {min_date} to {max_date}")
+                else:
+                    logger.info(f"✅ FETCHED {ticker} daily: {daily_df.shape[0]} rows")
                 log_detailed_operation(ticker, "Daily Fetch Complete", daily_start_time, row_count_after=len(daily_df))
             else:
-                logger.warning(f"No daily data returned for {ticker}")
+                logger.warning(f"❌ No daily data returned for {ticker}")
                 
         except Exception as e:
-            logger.error(f"Error fetching daily data for {ticker}: {e}")
+            logger.error(f"❌ Error fetching daily data for {ticker}: {e}")
             daily_df = pd.DataFrame()
 
         # 2. 30-Minute Intraday Data (exactly 500 rows as specified)
         intraday_30min_start_time = datetime.now()
         try:
+            # Detailed logging for each ticker processing as specified
+            logger.info(f"⬇️ DOWNLOADING {ticker}: 30min candles")
+            
             if test_mode:
                 intraday_30min_df = simulate_data_fetch(ticker, "30min", 500)
                 logger.info(f"[TEST MODE] Fetching 30-MINUTE data for {ticker} – 500 rows (test data)")
@@ -194,17 +222,28 @@ def run_full_rebuild():
                 logger.info(f"Fetching 30-MINUTE data for {ticker} – {len(intraday_30min_df)} rows")
             
             if not intraday_30min_df.empty:
+                # Enhanced logging after successful fetch
+                date_col = 'Date' if 'Date' in intraday_30min_df.columns else 'datetime' if 'datetime' in intraday_30min_df.columns else 'timestamp'
+                if date_col in intraday_30min_df.columns:
+                    min_date = pd.to_datetime(intraday_30min_df[date_col]).min().strftime('%Y-%m-%d %H:%M')
+                    max_date = pd.to_datetime(intraday_30min_df[date_col]).max().strftime('%Y-%m-%d %H:%M')
+                    logger.info(f"✅ FETCHED {ticker} 30min: {intraday_30min_df.shape[0]} rows from {min_date} to {max_date}")
+                else:
+                    logger.info(f"✅ FETCHED {ticker} 30min: {intraday_30min_df.shape[0]} rows")
                 log_detailed_operation(ticker, "30min Fetch Complete", intraday_30min_start_time, row_count_after=len(intraday_30min_df))
             else:
-                logger.warning(f"No 30-min data returned for {ticker}")
+                logger.warning(f"❌ No 30-min data returned for {ticker}")
                 
         except Exception as e:
-            logger.error(f"Error fetching 30-min data for {ticker}: {e}")
+            logger.error(f"❌ Error fetching 30-min data for {ticker}: {e}")
             intraday_30min_df = pd.DataFrame()
 
         # 3. 1-Minute Intraday Data (full 7 calendar days + early volume calculation + today's complete feed)
         intraday_1min_start_time = datetime.now()
         try:
+            # Detailed logging for each ticker processing as specified
+            logger.info(f"⬇️ DOWNLOADING {ticker}: 1min candles")
+            
             if test_mode:
                 # For test mode, simulate 7 days of 1-min data (roughly 7*24*60 = 10080 rows max)
                 intraday_1min_df = simulate_data_fetch(ticker, "1min", 7*24*60)
@@ -227,12 +266,20 @@ def run_full_rebuild():
                 logger.info(f"Fetching 1-MINUTE intraday data for {ticker} – 7 days")
             
             if not intraday_1min_df.empty:
+                # Enhanced logging after successful fetch
+                date_col = 'Date' if 'Date' in intraday_1min_df.columns else 'datetime' if 'datetime' in intraday_1min_df.columns else 'timestamp'
+                if date_col in intraday_1min_df.columns:
+                    min_date = pd.to_datetime(intraday_1min_df[date_col]).min().strftime('%Y-%m-%d %H:%M')
+                    max_date = pd.to_datetime(intraday_1min_df[date_col]).max().strftime('%Y-%m-%d %H:%M')
+                    logger.info(f"✅ FETCHED {ticker} 1min: {intraday_1min_df.shape[0]} rows from {min_date} to {max_date}")
+                else:
+                    logger.info(f"✅ FETCHED {ticker} 1min: {intraday_1min_df.shape[0]} rows")
                 log_detailed_operation(ticker, "1min Fetch Complete", intraday_1min_start_time, row_count_after=len(intraday_1min_df))
             else:
-                logger.warning(f"No 1-min data returned for {ticker}")
+                logger.warning(f"❌ No 1-min data returned for {ticker}")
                 
         except Exception as e:
-            logger.error(f"Error fetching 1-min data for {ticker}: {e}")
+            logger.error(f"❌ Error fetching 1-min data for {ticker}: {e}")
             intraday_1min_df = pd.DataFrame()
 
         # 4. Apply Cleanup Procedure (run immediately after fetching full data)
@@ -247,31 +294,61 @@ def run_full_rebuild():
             logger.error(f"Error during cleanup for {ticker}: {e}")
             cleaned_daily, cleaned_30min, cleaned_1min = daily_df, intraday_30min_df, intraday_1min_df
 
-        # 5. Save cleaned data
+        # 5. Save cleaned data with enhanced verification logging
         save_start_time = datetime.now()
         try:
             # Save daily data
             if not cleaned_daily.empty:
-                upload_success = save_df_to_s3(cleaned_daily, f'data/daily/{ticker}_daily.csv')
-                if not upload_success:
+                daily_path = f'data/daily/{ticker}_daily.csv'
+                upload_success = save_df_to_s3(cleaned_daily, daily_path)
+                if upload_success:
+                    # Verify the save with detailed logging
+                    date_col = 'Date' if 'Date' in cleaned_daily.columns else 'datetime' if 'datetime' in cleaned_daily.columns else 'timestamp'
+                    if date_col in cleaned_daily.columns:
+                        min_date = pd.to_datetime(cleaned_daily[date_col]).min().strftime('%Y-%m-%d')
+                        max_date = pd.to_datetime(cleaned_daily[date_col]).max().strftime('%Y-%m-%d')
+                        logger.info(f"✅ SAVED {ticker} daily: {cleaned_daily.shape[0]} rows from {min_date} to {max_date}")
+                    else:
+                        logger.info(f"✅ SAVED {ticker} daily: {cleaned_daily.shape[0]} rows")
+                else:
                     logger.error(f"❌ FAILED to save daily data for {ticker}!")
             
             # Save 30-min data  
             if not cleaned_30min.empty:
-                upload_success = save_df_to_s3(cleaned_30min, f'data/intraday_30min/{ticker}_30min.csv')
-                if not upload_success:
+                thirty_min_path = f'data/intraday_30min/{ticker}_30min.csv'
+                upload_success = save_df_to_s3(cleaned_30min, thirty_min_path)
+                if upload_success:
+                    # Verify the save with detailed logging
+                    date_col = 'Date' if 'Date' in cleaned_30min.columns else 'datetime' if 'datetime' in cleaned_30min.columns else 'timestamp'
+                    if date_col in cleaned_30min.columns:
+                        min_date = pd.to_datetime(cleaned_30min[date_col]).min().strftime('%Y-%m-%d %H:%M')
+                        max_date = pd.to_datetime(cleaned_30min[date_col]).max().strftime('%Y-%m-%d %H:%M')
+                        logger.info(f"✅ SAVED {ticker} 30min: {cleaned_30min.shape[0]} rows from {min_date} to {max_date}")
+                    else:
+                        logger.info(f"✅ SAVED {ticker} 30min: {cleaned_30min.shape[0]} rows")
+                else:
                     logger.error(f"❌ FAILED to save 30-min data for {ticker}!")
             
             # Save 1-min data
             if not cleaned_1min.empty:
-                upload_success = save_df_to_s3(cleaned_1min, f'data/intraday/{ticker}_1min.csv')
-                if not upload_success:
+                intraday_path = f'data/intraday/{ticker}_1min.csv'
+                upload_success = save_df_to_s3(cleaned_1min, intraday_path)
+                if upload_success:
+                    # Verify the save with detailed logging
+                    date_col = 'Date' if 'Date' in cleaned_1min.columns else 'datetime' if 'datetime' in cleaned_1min.columns else 'timestamp'
+                    if date_col in cleaned_1min.columns:
+                        min_date = pd.to_datetime(cleaned_1min[date_col]).min().strftime('%Y-%m-%d %H:%M')
+                        max_date = pd.to_datetime(cleaned_1min[date_col]).max().strftime('%Y-%m-%d %H:%M')
+                        logger.info(f"✅ SAVED {ticker} 1min: {cleaned_1min.shape[0]} rows from {min_date} to {max_date}")
+                    else:
+                        logger.info(f"✅ SAVED {ticker} 1min: {cleaned_1min.shape[0]} rows")
+                else:
                     logger.error(f"❌ FAILED to save 1-min data for {ticker}!")
             
             log_detailed_operation(ticker, "Data Saved", save_start_time)
             
         except Exception as e:
-            logger.error(f"Error saving data for {ticker}: {e}")
+            logger.error(f"❌ Error saving data for {ticker}: {e}")
 
         # Log ticker completion
         log_detailed_operation(ticker, "Full Rebuild Complete", ticker_start_time)
@@ -290,8 +367,12 @@ def run_full_rebuild():
 if __name__ == "__main__":
     job_name = "update_all_data"
     update_scheduler_status(job_name, "Running")
+    
+    # Check if we should force live mode
+    force_live = len(sys.argv) > 1 and sys.argv[1] == "--force-live"
+    
     try:
-        run_full_rebuild()
+        run_full_rebuild(force_live=force_live)
         update_scheduler_status(job_name, "Success")
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
