@@ -3,12 +3,18 @@ import requests
 import pandas as pd
 from io import StringIO
 import time
+import logging
 
 # Load the API key from environment variables
 API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 BASE_URL = "https://www.alphavantage.co/query"
 # A short, aggressive timeout for every single API call to prevent hangs.
 REQUEST_TIMEOUT = 15
+
+# Import timestamp standardization module
+from utils.timestamp_standardizer import apply_timestamp_standardization_to_api_data
+
+logger = logging.getLogger(__name__)
 
 
 def _make_api_request(params):
@@ -39,7 +45,14 @@ def _make_api_request(params):
 
 
 def get_daily_data(symbol, outputsize="compact"):
-    """Fetches daily adjusted time series data for a given symbol."""
+    """
+    Fetches daily adjusted time series data for a given symbol with proper timestamp standardization.
+    
+    Implements the rigorous timestamp standardization process:
+    1. Parse Timestamps: Read the raw timestamp string from the API
+    2. Localize to New York Time: Convert to timezone-aware object using 'America/New_York' timezone
+    3. Standardize to UTC for Storage: Save the final timestamp in UTC format
+    """
     params = {
         "function": "TIME_SERIES_DAILY_ADJUSTED",
         "symbol": symbol,
@@ -53,6 +66,21 @@ def get_daily_data(symbol, outputsize="compact"):
             df = pd.read_csv(StringIO(response.text))
             if "Error Message" in df.columns or df.empty:
                 return pd.DataFrame()
+            
+            # Rename the date column to timestamp for consistent processing
+            if 'timestamp' in df.columns:
+                pass  # Already correctly named
+            elif 'Date' in df.columns:
+                df = df.rename(columns={'Date': 'timestamp'})
+            elif 'date' in df.columns:
+                df = df.rename(columns={'date': 'timestamp'})
+            
+            logger.info(f"📊 Raw daily data fetched for {symbol}: {len(df)} rows")
+            
+            # Apply rigorous timestamp standardization
+            df = apply_timestamp_standardization_to_api_data(df, data_type='daily')
+            
+            logger.info(f"✅ Daily data standardized for {symbol}: {len(df)} rows with UTC timestamps")
             return df
         except Exception as e:
             print(f"ERROR: Failed to process daily CSV data for {symbol}: {e}")
@@ -60,7 +88,14 @@ def get_daily_data(symbol, outputsize="compact"):
 
 
 def get_intraday_data(symbol, interval="1min", outputsize="compact"):
-    """Fetches intraday time series data for a given symbol."""
+    """
+    Fetches intraday time series data for a given symbol with proper timestamp standardization.
+    
+    Implements the rigorous timestamp standardization process:
+    1. Parse Timestamps: Read the raw timestamp string from the API
+    2. Localize to New York Time: Convert to timezone-aware object using 'America/New_York' timezone
+    3. Standardize to UTC for Storage: Save the final timestamp in UTC format
+    """
     params = {
         "function": "TIME_SERIES_INTRADAY",
         "symbol": symbol,
@@ -75,6 +110,23 @@ def get_intraday_data(symbol, interval="1min", outputsize="compact"):
             df = pd.read_csv(StringIO(response.text))
             if "Error Message" in df.columns or df.empty:
                 return pd.DataFrame()
+            
+            # Rename the timestamp column for consistent processing
+            if 'timestamp' in df.columns:
+                pass  # Already correctly named
+            elif 'datetime' in df.columns:
+                df = df.rename(columns={'datetime': 'timestamp'})
+            elif 'Date' in df.columns:
+                df = df.rename(columns={'Date': 'timestamp'})
+            elif 'time' in df.columns:
+                df = df.rename(columns={'time': 'timestamp'})
+            
+            logger.info(f"📊 Raw intraday data fetched for {symbol} ({interval}): {len(df)} rows")
+            
+            # Apply rigorous timestamp standardization
+            df = apply_timestamp_standardization_to_api_data(df, data_type='intraday')
+            
+            logger.info(f"✅ Intraday data standardized for {symbol} ({interval}): {len(df)} rows with UTC timestamps")
             return df
         except Exception as e:
             print(f"ERROR: Failed to process intraday CSV data for {symbol}: {e}")

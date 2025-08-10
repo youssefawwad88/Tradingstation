@@ -5,6 +5,7 @@ This module handles all data fetching operations including:
 - Alpha Vantage API interactions
 - Data validation and processing
 - API rate limiting and error handling
+- Timestamp standardization per requirements
 """
 
 import logging
@@ -16,6 +17,7 @@ import pandas as pd
 import requests
 
 from .config import ALPHA_VANTAGE_API_KEY
+from .timestamp_standardizer import apply_timestamp_standardization_to_api_data
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +86,16 @@ def fetch_intraday_data(
         # Add date and ticker columns
         df.index = pd.to_datetime(df.index)
         df = df.reset_index()
-        df.rename(columns={"index": "datetime"}, inplace=True)
+        df.rename(columns={"index": "timestamp"}, inplace=True)
         df["ticker"] = ticker
 
+        logger.info(f"📊 Raw intraday data fetched for {ticker} ({interval}): {len(df)} rows")
+        
+        # Apply rigorous timestamp standardization
+        df = apply_timestamp_standardization_to_api_data(df, data_type='intraday')
+
         logger.info(
-            f"Successfully fetched intraday data for {ticker} ({interval}): {len(df)} records"
+            f"✅ Intraday data standardized for {ticker} ({interval}): {len(df)} records with UTC timestamps"
         )
         return df, True
 
@@ -165,10 +172,15 @@ def fetch_daily_data(
         # Add date and ticker columns
         df.index = pd.to_datetime(df.index)
         df = df.reset_index()
-        df.rename(columns={"index": "Date"}, inplace=True)
+        df.rename(columns={"index": "timestamp"}, inplace=True)
         df["ticker"] = ticker
 
-        logger.info(f"Successfully fetched daily data for {ticker}: {len(df)} records")
+        logger.info(f"📊 Raw daily data fetched for {ticker}: {len(df)} rows")
+        
+        # Apply rigorous timestamp standardization  
+        df = apply_timestamp_standardization_to_api_data(df, data_type='daily')
+
+        logger.info(f"✅ Daily data standardized for {ticker}: {len(df)} records with UTC timestamps")
         return df, True
 
     except requests.RequestException as e:
