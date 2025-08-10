@@ -27,11 +27,24 @@ VOLUME_SPIKE_RATIO = 1.3 # 130%
 MIN_BODY_PCT = 65.0
 MIN_RED_DAYS_IN_PREVIOUS_5 = 3
 
+def calculate_atr(df, period=14):
+    """Calculate Average True Range"""
+    df = df.copy()
+    df['prev_close'] = df['close'].shift(1)
+    df['tr1'] = df['high'] - df['low']
+    df['tr2'] = abs(df['high'] - df['prev_close'])
+    df['tr3'] = abs(df['low'] - df['prev_close'])
+    df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+    return df['tr'].rolling(window=period).mean()
+
 def run_exhaustion_screener():
-    """Main function to execute the cloud-aware Exhaustion Reversal screening logic."""
-    logger.info("Running Exhaustion Reversal Screener (Cloud-Aware)")
+    """
+    Exhaustion Reversal Screener per specification:
+    Daily reversal after an exhaustion move and large wick indicating capitulation and reversal intent.
+    """
+    logger.info("Running Exhaustion Reversal Screener")
     
-    # --- 1. Load Prerequisite Data from Cloud Storage ---
+    # --- 1. Load tickers ---
     tickers = read_tickerlist_from_s3('tickerlist.txt')
     if not tickers:
         logger.warning("Ticker list from cloud is empty")
@@ -43,66 +56,101 @@ def run_exhaustion_screener():
         try:
             # --- 2. Load Data and Calculate Indicators ---
             df = read_df_from_s3(f"data/daily/{ticker}_daily.csv")
-            if len(df) < 21: # Need at least 21 days for 20-day avg volume
+            if df is None or len(df) < 21: # Need at least 21 days for indicators
                 continue
 
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.set_index('timestamp')
+            df = df.sort_values('timestamp')
+
+            # Calculate ATR for gauging large moves
+            df['ATR_14'] = calculate_atr(df, 14)
+            
+            # Volume metrics (avoid lookahead)
+            df['Avg_Vol_20D'] = df['volume'].shift(1).rolling(window=20).mean()
+            df['Volume_vs_Avg_Pct'] = (df['volume'] / df['Avg_Vol_20D']) * 100
 
             latest = df.iloc[-1]
-            previous = df.iloc[-2]
-            last_5_candles = df.iloc[-6:-1]
-
-            # --- 3. Evaluate Core Daily Conditions ---
-            highest_close_in_5d = last_5_candles['close'].max()
-            drop_percent = ((latest['close'] - highest_close_in_5d) / highest_close_in_5d) * 100
-            is_significant_drop = drop_percent <= MIN_DROP_PCT
-
-            gap_percent = ((latest['open'] - previous['close']) / previous['close']) * 100
-            is_gap_down = gap_percent <= MIN_GAP_DOWN_PCT
-
-            avg_20d_volume = df['volume'].iloc[-21:-1].mean()
-            is_volume_spike = latest['volume'] >= (avg_20d_volume * VOLUME_SPIKE_RATIO)
+            previous = df.iloc[-2] if len(df) >= 2 else None
             
-            is_reclaimed = latest['close'] > previous['low']
-            
+            # --- 3. Candle body and wick calculations ---
             candle_range = latest['high'] - latest['low']
-            body_pct = (abs(latest['close'] - latest['open']) / candle_range * 100) if candle_range > 0 else 0
-            is_strong_green_candle = latest['close'] > latest['open'] and body_pct >= MIN_BODY_PCT
+            body_size = abs(latest['close'] - latest['open'])
+            upper_wick = latest['high'] - max(latest['open'], latest['close'])
+            lower_wick = min(latest['open'], latest['close']) - latest['low']
+            
+            body_percent = (body_size / candle_range * 100) if candle_range > 0 else 0
+            upper_wick_percent = (upper_wick / candle_range * 100) if candle_range > 0 else 0
+            lower_wick_percent = (lower_wick / candle_range * 100) if candle_range > 0 else 0
 
-            red_days_count = (last_5_candles['close'] < last_5_candles['open']).sum()
-            has_prior_weakness = red_days_count >= MIN_RED_DAYS_IN_PREVIOUS_5
+            # --- 4. Direction determination ---
+            direction = "None"
+            large_move_vs_atr = "No"
+            reversal_into_range = "No"
+            
+            # Check for large move vs ATR
+            if pd.notna(latest['ATR_14']) and latest['ATR_14'] > 0:
+                price_move = abs(latest['close'] - latest['open'])
+                if price_move >= 1.5 * latest['ATR_14']:
+                    large_move_vs_atr = "Yes"
 
-            # --- 4. Final Validation ---
-            conditions = {
-                "Significant Drop": is_significant_drop,
-                "Gap Down": is_gap_down,
-                "Volume Spike": is_volume_spike,
-                "Reclaimed Support": is_reclaimed,
-                "Strong Green Candle": is_strong_green_candle,
-                "Prior Weakness": has_prior_weakness
-            }
-            setup_valid = all(conditions.values())
+            # Long exhaustion candidate: Large down move, large lower wick, close back inside range
+            if latest['close'] < latest['open']:  # Down day
+                if lower_wick_percent >= 150:  # Lower wick >= 1.5x body (converted to percentage)
+                    if previous is not None and latest['close'] > previous['low']:  # Close back inside prior range
+                        direction = "Long"
+                        reversal_into_range = "Yes"
+                        
+            # Short exhaustion candidate: Large up move, large upper wick, close back inside range  
+            elif latest['close'] > latest['open']:  # Up day
+                if upper_wick_percent >= 150:  # Upper wick >= 1.5x body (converted to percentage)
+                    if previous is not None and latest['close'] < previous['high']:  # Close back inside prior range
+                        direction = "Short"
+                        reversal_into_range = "Yes"
 
-            # --- 5. Populate Core Results ---
+            # --- 5. Validation conditions ---
+            volume_condition = latest['Volume_vs_Avg_Pct'] >= 130
+            
+            setup_valid = False
+            reasons = []
+            
+            if direction != "None":
+                if not volume_condition:
+                    reasons.append("Volume vs Avg % < 130")
+                if large_move_vs_atr != "Yes":
+                    reasons.append("Move not large vs ATR")
+                if reversal_into_range != "Yes":
+                    reasons.append("No reversal into range")
+                    
+                setup_valid = len(reasons) == 0
+            else:
+                reasons.append("No valid exhaustion pattern")
+
+            # --- 6. Populate result ---
             result = {
-                "Date": latest.name.strftime('%Y-%m-%d'),
+                "Date": latest['timestamp'].strftime('%Y-%m-%d') if hasattr(latest['timestamp'], 'strftime') else str(latest['timestamp']),
                 "Ticker": ticker,
+                "Direction": direction,
                 "Close": format_to_two_decimal(latest['close']),
-                "Drop %": format_to_two_decimal(drop_percent),
-                "Gap %": format_to_two_decimal(gap_percent),
-                "Volume Spike?": "Yes" if is_volume_spike else "No",
-                "Reclaimed Support?": "Yes" if is_reclaimed else "No",
-                "Strong Green Candle?": "Yes" if is_strong_green_candle else "No",
-                "Prior Weakness?": "Yes" if has_prior_weakness else "No",
-                "Setup Valid?": "TRUE" if setup_valid else "FALSE"
+                "High": format_to_two_decimal(latest['high']),
+                "Low": format_to_two_decimal(latest['low']),
+                "Open": format_to_two_decimal(latest['open']),
+                "Volume": f"{int(latest['volume']):,}",
+                "Avg 20D Volume": f"{int(latest['Avg_Vol_20D']):,}" if pd.notna(latest['Avg_Vol_20D']) else "N/A",
+                "Volume vs Avg %": format_to_two_decimal(latest['Volume_vs_Avg_Pct']),
+                "Body % of Candle": format_to_two_decimal(body_percent),
+                "Upper Wick %": format_to_two_decimal(upper_wick_percent),
+                "Lower Wick %": format_to_two_decimal(lower_wick_percent),
+                "Large Move vs ATR?": large_move_vs_atr,
+                "Reversal Into Range?": reversal_into_range,
+                "Setup Valid?": "TRUE" if setup_valid else "FALSE",
+                "Notes": "; ".join(reasons) if reasons else "N/A"
             }
             all_results.append(result)
 
         except Exception as e:
             logger.error(f"Error processing {ticker}: {e}")
 
-    # --- 6. Final Processing & Save to Cloud ---
+    # --- 7. Final Processing & Save to Cloud ---
     if not all_results:
         logger.info("No Exhaustion Reversal signals were generated.")
         return
