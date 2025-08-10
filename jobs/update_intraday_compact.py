@@ -785,8 +785,10 @@ def run_compact_append(debug=False):
             'success': False,
             'total_tickers': 0,
             'successful_tickers': 0,
+            'failed_tickers': 0,
             'storage_location': 'N/A',
-            'manual_tickers_status': 'N/A'
+            'manual_tickers_total': 0,
+            'manual_tickers_failed': 0
         }
 
     logger.info(f"🚀 Processing {len(tickers)} tickers from master_tickerlist.csv for intraday updates: {tickers}")
@@ -1005,7 +1007,15 @@ if __name__ == "__main__":
         
         # Output concise summary for orchestrator logs (always shown)
         if result and result.get('success', False):
-            print(f"📋 ORCHESTRATOR SUMMARY: Processed {result['successful_tickers']}/{result['total_tickers']} tickers | Storage: {result['storage_location']} | Manual tickers: {result['manual_tickers_total'] - result['manual_tickers_failed']}/{result['manual_tickers_total']} OK")
+            # Ensure all required fields are present with defaults
+            successful = result.get('successful_tickers', 0)
+            total = result.get('total_tickers', 0)
+            storage = result.get('storage_location', 'Unknown')
+            manual_total = result.get('manual_tickers_total', 0)
+            manual_failed = result.get('manual_tickers_failed', 0)
+            manual_ok = manual_total - manual_failed
+            
+            print(f"📋 ORCHESTRATOR SUMMARY: Processed {successful}/{total} tickers | Storage: {storage} | Manual tickers: {manual_ok}/{manual_total} OK")
         else:
             print(f"📋 ORCHESTRATOR SUMMARY: Job failed or no tickers processed")
         
