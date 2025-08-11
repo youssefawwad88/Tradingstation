@@ -170,6 +170,13 @@ def run_gapgo_screener():
             elif direction != "Flat" and is_pre_vol_spike:
                 status = "Watch"
             
+            # --- 8.5. Calculate Breakout Time Valid for Master Dashboard ---
+            breakout_time_valid = "N/A"
+            if direction == "Long" and time_valid and first_breakout_time is not None:
+                breakout_time_valid = first_breakout_time.strftime('%H:%M')
+            elif direction == "Short" and time_valid_short and first_breakdown_time is not None:
+                breakout_time_valid = first_breakdown_time.strftime('%H:%M')
+            
             # --- 9. Populate Full Result Dictionary ---
             result = {
                 "Date": ny_time.strftime('%Y-%m-%d'), "US Time": ny_time.strftime('%H:%M:%S'),
@@ -195,7 +202,8 @@ def run_gapgo_screener():
                 "Setup Score %": setup_score,
                 "Opening Range %": format_to_two_decimal(opening_range_pct),
                 "Breakout Candle Body %": format_to_two_decimal(breakout_body_pct),
-                "Breakout Volume Spike %": format_to_two_decimal(breakout_vol_spike_pct)
+                "Breakout Volume Spike %": format_to_two_decimal(breakout_vol_spike_pct),
+                "Breakout Time Valid?": breakout_time_valid
             }
             all_results.append(result)
 

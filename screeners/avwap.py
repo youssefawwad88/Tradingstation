@@ -42,87 +42,131 @@ def get_reclaim_quality(candle: pd.Series) -> str:
         return "Weak"
 
 def run_avwap_screener():
-    """Main function to execute the cloud-aware AVWAP screening logic."""
-    logger.info("Running Anchored VWAP (AVWAP) Screener (Cloud-Aware)")
+    """
+    AVWAP Reclaim Screener per specification:
+    Detects reclaim or rejection of 1-2 anchored VWAPs and produces fields needed by trade planning.
+    """
+    logger.info("Running Anchored VWAP (AVWAP) Screener")
     
-    # --- 1. Load Prerequisite Data from Cloud Storage ---
+    # --- 1. Load AVWAP anchors ---
     anchor_df = read_df_from_s3("data/avwap_anchors.csv")
     if anchor_df.empty:
         logger.error("Anchor file not found in cloud storage. Please run the find_avwap_anchors.py job first.")
         return
         
-    anchor_df = anchor_df.set_index('Ticker')
-    tickers = anchor_df.index.tolist()
+    # Handle different possible column names
+    ticker_col = None
+    for col in ['Ticker', 'ticker', 'TICKER']:
+        if col in anchor_df.columns:
+            ticker_col = col
+            break
+    
+    if ticker_col is None:
+        logger.error("No ticker column found in AVWAP anchors file")
+        return
+        
+    anchor_dict = {}
+    for _, row in anchor_df.iterrows():
+        ticker = row[ticker_col]
+        anchor_1_date = row.get('Anchor 1 Date')
+        anchor_2_date = row.get('Anchor 2 Date') 
+        
+        anchor_dict[ticker] = {
+            'anchor_1': pd.to_datetime(anchor_1_date) if pd.notna(anchor_1_date) else None,
+            'anchor_2': pd.to_datetime(anchor_2_date) if pd.notna(anchor_2_date) else None
+        }
+    
     all_results = []
-    ny_timezone = pytz.timezone('America/New_York')
 
     # --- 2. Process Each Ticker ---
-    for ticker in tickers:
+    for ticker, anchors in anchor_dict.items():
         try:
-            # Load 30-minute intraday and daily data from cloud storage
-            intraday_df = read_df_from_s3(f"data/intraday_30min/{ticker}_30min.csv")
+            # Load daily data (or intraday if preferred)
             daily_df = read_df_from_s3(f"data/daily/{ticker}_daily.csv")
-
-            if intraday_df.empty or daily_df.empty:
+            if daily_df is None or daily_df.empty:
                 continue
             
-            # Convert timestamps to datetime objects and set index
-            intraday_df['timestamp'] = pd.to_datetime(intraday_df['timestamp'])
-            intraday_df = intraday_df.set_index('timestamp')
             daily_df['timestamp'] = pd.to_datetime(daily_df['timestamp'])
-            daily_df = daily_df.set_index('timestamp')
+            daily_df = daily_df.sort_values('timestamp')
 
-            # --- 3. Get Live Data & Base Metrics ---
-            latest_candle = intraday_df.iloc[-1]
-            current_price = latest_candle['close']
-            today_volume = intraday_df[intraday_df.index.date == datetime.now(ny_timezone).date()]['volume'].sum()
-            avg_20d_volume = daily_df.tail(20)['volume'].mean()
-            volume_vs_avg_pct = (today_volume / avg_20d_volume) * 100 if avg_20d_volume > 0 else 0
-
-            avwap_results = {}
-
-            # --- 4. Calculate AVWAP for each confirmed anchor ---
-            ticker_anchors = anchor_df.loc[ticker]
-            for i in [1, 2]:
-                if ticker_anchors.get(f'Anchor {i} Confirmed?') != 'Yes':
-                    continue
-
-                anchor_date = pd.to_datetime(ticker_anchors[f'Anchor {i} Date'])
-                avwap_df = intraday_df[intraday_df.index.date >= anchor_date.date()].copy()
-                
-                if avwap_df.empty: continue
-                
-                avwap_value = calculate_vwap(avwap_df)
-                if avwap_value is None: continue
-                
-                avwap_results[i] = {
-                    "value": avwap_value,
-                    "reclaimed": current_price > avwap_value,
-                }
-
-            # --- 5. Determine Overall Setup & Signal ---
-            reclaim_count = sum(1 for r in avwap_results.values() if r['reclaimed'])
+            # --- 3. Core logic - Calculate AVWAPs ---
+            latest = daily_df.iloc[-1]
+            current_price = latest['close']
             
-            signal_direction = "None"
-            if reclaim_count > 0:
-                signal_direction = "Long"
-            # Note: Short logic (rejection) can be added here if needed
-
-            # --- 6. Final Validation & Scoring ---
-            reclaim_quality = get_reclaim_quality(latest_candle)
-            is_volume_ok = volume_vs_avg_pct >= (VOLUME_SPIKE_THRESHOLD * 100)
+            avwap_1 = np.nan
+            avwap_2 = np.nan
             
-            setup_valid = (signal_direction == "Long" and is_volume_ok and reclaim_quality == "Strong")
+            # Calculate AVWAP 1
+            if anchors['anchor_1'] is not None:
+                anchor_1_df = daily_df[daily_df['timestamp'] >= anchors['anchor_1']].copy()
+                if not anchor_1_df.empty:
+                    anchor_1_df['vwap'] = calculate_vwap(anchor_1_df)
+                    avwap_1 = anchor_1_df['vwap'].iloc[-1]
+            
+            # Calculate AVWAP 2  
+            if anchors['anchor_2'] is not None:
+                anchor_2_df = daily_df[daily_df['timestamp'] >= anchors['anchor_2']].copy()
+                if not anchor_2_df.empty:
+                    anchor_2_df['vwap'] = calculate_vwap(anchor_2_df)
+                    avwap_2 = anchor_2_df['vwap'].iloc[-1]
 
-            # --- 7. Populate Core Result Dictionary ---
+            # --- 4. Direction determination ---
+            direction = "None"
+            reclaim_reject = "N/A"
+            nearest_avwap = None
+            distance_to_nearest = np.nan
+            
+            # Find nearest AVWAP
+            valid_avwaps = []
+            if not np.isnan(avwap_1):
+                valid_avwaps.append(avwap_1)
+            if not np.isnan(avwap_2):
+                valid_avwaps.append(avwap_2)
+                
+            if valid_avwaps:
+                # Find nearest AVWAP to current price
+                distances = [abs(current_price - avwap) for avwap in valid_avwaps]
+                nearest_avwap = valid_avwaps[distances.index(min(distances))]
+                distance_to_nearest = abs(current_price - nearest_avwap) / nearest_avwap * 100
+                
+                # Determine reclaim/reject (simplified logic - could be enhanced with crossing detection)
+                if current_price > nearest_avwap:
+                    direction = "Long"
+                    reclaim_reject = "Reclaim"
+                elif current_price < nearest_avwap:
+                    direction = "Short" 
+                    reclaim_reject = "Reject"
+
+            # --- 5. Volume metrics ---
+            # Volume vs Avg % calculation (avoid lookahead)
+            avg_vol_20d = daily_df['volume'].shift(1).rolling(window=20).mean().iloc[-1]
+            volume_vs_avg_pct = (latest['volume'] / avg_vol_20d) * 100 if pd.notna(avg_vol_20d) and avg_vol_20d > 0 else 0
+
+            # --- 6. Setup validation ---
+            setup_valid = False
+            conditions = []
+            
+            if direction != "None":
+                # Basic conditions per spec
+                volume_condition = volume_vs_avg_pct >= 115
+                proximity_condition = distance_to_nearest <= 1.5 if not np.isnan(distance_to_nearest) else False
+                
+                conditions = [volume_condition, proximity_condition]
+                setup_valid = all(conditions)
+
+            # --- 7. Populate result ---
             result = {
-                "Date": latest_candle.name.strftime('%Y-%m-%d'),
+                "Date": latest['timestamp'].strftime('%Y-%m-%d') if hasattr(latest['timestamp'], 'strftime') else str(latest['timestamp']),
                 "Ticker": ticker,
-                "Signal Direction": signal_direction,
+                "Direction": direction,
                 "Current Price": format_to_two_decimal(current_price),
+                "AVWAP 1": format_to_two_decimal(avwap_1) if not np.isnan(avwap_1) else "N/A",
+                "AVWAP 2": format_to_two_decimal(avwap_2) if not np.isnan(avwap_2) else "N/A",
                 "Volume vs Avg %": format_to_two_decimal(volume_vs_avg_pct),
-                "Reclaim Quality": reclaim_quality,
-                "Setup Valid?": "TRUE" if setup_valid else "FALSE"
+                "Distance to Nearest AVWAP %": format_to_two_decimal(distance_to_nearest) if not np.isnan(distance_to_nearest) else "N/A",
+                "Reclaim/Reject?": reclaim_reject,
+                "Setup Valid?": "TRUE" if setup_valid else "FALSE",
+                "Notes": f"Nearest AVWAP: {format_to_two_decimal(nearest_avwap)}" if nearest_avwap else "No valid AVWAP"
             }
             all_results.append(result)
 
