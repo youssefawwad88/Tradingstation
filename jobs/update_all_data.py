@@ -1,380 +1,341 @@
-import pandas as pd
-import sys
+#!/usr/bin/env python3
+"""
+Full Rebuild Engine - Daily Data Refresh
+========================================
+
+This script performs a complete daily data refresh for all tickers in the watchlist.
+Implements the two-layer data management model as specified:
+
+1. Reads master watchlist from tickerlist.txt
+2. Performs full historical data fetch for all three timeframes (daily, 30-min, 1-min)
+3. Applies rigorous cleanup and trimming rules:
+   - Daily Data: 200 rows (most recent)
+   - 30-Minute Data: 500 rows (most recent) 
+   - 1-Minute Data: 7 days (most recent)
+4. Performs timestamp standardization (America/New_York -> UTC)
+5. Saves clean datasets to DigitalOcean Spaces
+
+This is the foundational data layer that runs once per day.
+"""
+
 import os
+import sys
+import pandas as pd
+import logging
 from datetime import datetime, timedelta
 import time
-import logging
+import pytz
 
-# Add project root to the Python path
+# Add project root to Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import (
-    read_master_tickerlist, save_df_to_s3, update_scheduler_status, 
-    should_use_test_mode, log_detailed_operation, cleanup_data_retention
-)
+# Import core utilities
+from utils.config import ALPHA_VANTAGE_API_KEY, SPACES_BUCKET_NAME, TIMEZONE
 from utils.alpha_vantage_api import get_daily_data, get_intraday_data
+from utils.helpers import read_master_tickerlist, save_df_to_s3, update_scheduler_status
+from utils.timestamp_standardizer import apply_timestamp_standardization_to_api_data
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def calculate_early_volume_average(ticker, intraday_1min_df, num_sessions=5):
+
+def standardize_timestamps(df, data_type):
     """
-    Calculate average early volume from 9:30-9:45 AM using past N sessions.
+    Apply rigorous timestamp standardization to dataframe.
+    
+    Process:
+    1. Parse timestamps from API data
+    2. Localize to America/New_York timezone
+    3. Convert to UTC for storage
     
     Args:
-        ticker (str): Ticker symbol
-        intraday_1min_df (DataFrame): 1-minute intraday data
-        num_sessions (int): Number of past sessions to average (default 5)
+        df (DataFrame): Input dataframe with timestamp column
+        data_type (str): Type of data ('daily', '30min', '1min')
         
     Returns:
-        float: Average early volume for the time window
+        DataFrame: Dataframe with standardized UTC timestamps
     """
+    if df.empty:
+        return df
+    
     try:
-        if intraday_1min_df.empty:
-            return 0.0
+        # Apply the centralized timestamp standardization
+        standardized_df = apply_timestamp_standardization_to_api_data(df, data_type=data_type)
+        logger.debug(f"Timestamp standardization applied for {data_type} data: {len(standardized_df)} rows")
+        return standardized_df
+    except Exception as e:
+        logger.error(f"Error in timestamp standardization for {data_type}: {e}")
+        return df
+
+
+def trim_data_to_requirements(df, data_type):
+    """
+    Trim datasets according to specified requirements.
+    
+    Args:
+        df (DataFrame): Input dataframe
+        data_type (str): 'daily' (200 rows), '30min' (500 rows), '1min' (7 days)
         
-        # Ensure timestamp column
-        df = intraday_1min_df.copy()
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+    Returns:
+        DataFrame: Trimmed dataframe
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # Sort by timestamp descending (newest first) for proper trimming
+        timestamp_col = 'timestamp' if 'timestamp' in df.columns else 'Date'
+        df_sorted = df.sort_values(by=timestamp_col, ascending=False)
         
-        # Get unique dates (excluding today)
-        today = datetime.now().date()
-        df['date'] = df['timestamp'].dt.date
-        unique_dates = [d for d in df['date'].unique() if d != today]
-        
-        # Take last N sessions
-        recent_dates = sorted(unique_dates)[-num_sessions:] if len(unique_dates) >= num_sessions else unique_dates
-        
-        if not recent_dates:
-            return 0.0
-        
-        early_volumes = []
-        for date in recent_dates:
-            # Filter for this date and 9:30-9:45 window
-            date_start = pd.Timestamp.combine(date, pd.Timestamp('09:30:00').time())
-            date_end = pd.Timestamp.combine(date, pd.Timestamp('09:45:00').time())
+        if data_type == 'daily':
+            # Keep most recent 200 rows
+            trimmed_df = df_sorted.head(200)
+            logger.debug(f"Daily data trimmed to {len(trimmed_df)} rows (target: 200)")
             
-            early_data = df[
-                (df['timestamp'] >= date_start) & 
-                (df['timestamp'] <= date_end)
-            ]
+        elif data_type == '30min':
+            # Keep most recent 500 rows
+            trimmed_df = df_sorted.head(500)
+            logger.debug(f"30-minute data trimmed to {len(trimmed_df)} rows (target: 500)")
             
-            if not early_data.empty:
-                early_volumes.append(early_data['volume'].sum())
-        
-        if early_volumes:
-            avg_volume = sum(early_volumes) / len(early_volumes)
-            logger.debug(f"{ticker}: Early volume average from {len(early_volumes)} sessions: {avg_volume:,.0f}")
-            return avg_volume
-        
-        return 0.0
+        elif data_type == '1min':
+            # Keep most recent 7 days
+            cutoff_date = datetime.now(pytz.timezone(TIMEZONE)) - timedelta(days=7)
+            df_sorted[timestamp_col] = pd.to_datetime(df_sorted[timestamp_col])
+            trimmed_df = df_sorted[df_sorted[timestamp_col] >= cutoff_date]
+            logger.debug(f"1-minute data trimmed to {len(trimmed_df)} rows (last 7 days)")
+            
+        else:
+            trimmed_df = df_sorted
+            
+        # Sort back to chronological order (oldest first) for storage
+        return trimmed_df.sort_values(by=timestamp_col, ascending=True)
         
     except Exception as e:
-        logger.error(f"Error calculating early volume average for {ticker}: {e}")
-        return 0.0
+        logger.error(f"Error trimming {data_type} data: {e}")
+        return df
 
-def simulate_data_fetch(ticker, data_type, target_rows):
+
+def fetch_and_process_ticker(ticker):
     """
-    Simulate data fetch for test mode (weekend testing).
+    Fetch and process all timeframes for a single ticker.
     
     Args:
-        ticker (str): Ticker symbol
-        data_type (str): Type of data (daily, 30min, 1min)
-        target_rows (int): Target number of rows
+        ticker (str): Stock ticker symbol
         
     Returns:
-        DataFrame: Simulated data with appropriate structure
+        dict: Results for each timeframe
     """
-    import pandas as pd
-    import numpy as np
+    results = {'daily': None, '30min': None, '1min': None}
     
-    logger.info(f"[TEST MODE] Simulating {data_type} data fetch for {ticker} ({target_rows} rows)")
+    logger.info(f"🔄 Processing ticker: {ticker}")
     
-    # Create timestamps based on data type
-    end_time = datetime.now()
+    # 1. Daily Data
+    try:
+        logger.info(f"📈 Fetching daily data for {ticker}...")
+        daily_df = get_daily_data(ticker, outputsize='full')
+        
+        if not daily_df.empty:
+            # Apply timestamp standardization
+            daily_df = standardize_timestamps(daily_df, 'daily')
+            
+            # Trim to 200 rows
+            daily_df = trim_data_to_requirements(daily_df, 'daily')
+            
+            results['daily'] = daily_df
+            logger.info(f"✅ Daily data processed: {len(daily_df)} rows")
+        else:
+            logger.warning(f"⚠️ No daily data received for {ticker}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching daily data for {ticker}: {e}")
     
-    if data_type == "daily":
-        # Create 200 daily timestamps going back
-        dates = pd.date_range(end=end_time.date(), periods=target_rows, freq='D')
-        timestamps = dates
-    elif data_type == "30min":
-        # Create 30-min intervals going back
-        timestamps = pd.date_range(end=end_time, periods=target_rows, freq='30min')
-    else:  # 1min
-        # Create 1-min intervals for last 7 days
-        start_time = end_time - timedelta(days=7)
-        timestamps = pd.date_range(start=start_time, end=end_time, freq='1min')
-        timestamps = timestamps[:target_rows]  # Limit if too many
+    # 2. 30-Minute Data
+    try:
+        logger.info(f"📊 Fetching 30-minute data for {ticker}...")
+        min_30_df = get_intraday_data(ticker, interval='30min', outputsize='full')
+        
+        if not min_30_df.empty:
+            # Apply timestamp standardization
+            min_30_df = standardize_timestamps(min_30_df, '30min')
+            
+            # Trim to 500 rows
+            min_30_df = trim_data_to_requirements(min_30_df, '30min')
+            
+            results['30min'] = min_30_df
+            logger.info(f"✅ 30-minute data processed: {len(min_30_df)} rows")
+        else:
+            logger.warning(f"⚠️ No 30-minute data received for {ticker}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching 30-minute data for {ticker}: {e}")
     
-    # Create simulated OHLCV data
-    num_rows = len(timestamps)
-    base_price = 100.0  # Simulated base price
+    # 3. 1-Minute Data
+    try:
+        logger.info(f"⏱️ Fetching 1-minute data for {ticker}...")
+        min_1_df = get_intraday_data(ticker, interval='1min', outputsize='full')
+        
+        if not min_1_df.empty:
+            # Apply timestamp standardization
+            min_1_df = standardize_timestamps(min_1_df, '1min')
+            
+            # Trim to 7 days
+            min_1_df = trim_data_to_requirements(min_1_df, '1min')
+            
+            results['1min'] = min_1_df
+            logger.info(f"✅ 1-minute data processed: {len(min_1_df)} rows")
+        else:
+            logger.warning(f"⚠️ No 1-minute data received for {ticker}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching 1-minute data for {ticker}: {e}")
     
-    # Generate realistic-looking price data
-    price_changes = np.random.normal(0, 0.02, num_rows).cumsum()
-    close_prices = base_price + price_changes
-    
-    df = pd.DataFrame({
-        'timestamp': timestamps,
-        'open': close_prices + np.random.normal(0, 0.01, num_rows),
-        'high': close_prices + np.abs(np.random.normal(0, 0.02, num_rows)),
-        'low': close_prices - np.abs(np.random.normal(0, 0.02, num_rows)),
-        'close': close_prices,
-        'volume': np.random.randint(100000, 1000000, num_rows)
-    })
-    
-    # Ensure high >= max(open, close) and low <= min(open, close)
-    df['high'] = np.maximum(df['high'], np.maximum(df['open'], df['close']))
-    df['low'] = np.minimum(df['low'], np.minimum(df['open'], df['close']))
-    
-    return df
+    return results
 
-def run_full_rebuild(force_live=False):
+
+def save_ticker_data(ticker, results):
     """
-    Runs the full data rebuild process once per day.
-    - Fetches a clean, extended history for daily, 30-min, and 1-min data.
-    - Implements new requirements: Daily (200 rows), 30min (500 rows), 1min (7 days + early volume + today)
-    - Runs cleanup procedure after full fetch
-    - Supports weekend test mode for safe testing
-    - Can override test mode with force_live parameter
+    Save processed data to DigitalOcean Spaces.
     
     Args:
-        force_live (bool): Force live API calls even if test mode would normally be active
-    """
-    # Check for environment override first
-    env_force_live = os.getenv('FORCE_LIVE_API', '').lower() == 'true'
-    
-    # Override test mode if force_live is True or environment variable is set
-    if force_live or env_force_live:
-        test_mode = False
-        mode_str = "FORCED LIVE MODE"
-        logger.info("🔥 FORCE LIVE MODE ACTIVATED - Overriding test mode detection")
-        logger.info("🌐 Will make LIVE API calls regardless of day/time")
-    else:
-        test_mode = should_use_test_mode()
-        mode_str = "TEST MODE" if test_mode else "LIVE MODE"
-    
-    logger.info(f"Starting Daily Full Data Rebuild Job ({mode_str})")
-    
-    if test_mode:
-        logger.info("[TEST MODE] Weekend Test Mode Active - Using simulated data without API calls")
-        logger.info("[TEST MODE] Detailed logging enabled for all operations")
-    
-    # Load tickers from master_tickerlist.csv (unified source)
-    tickers = read_master_tickerlist()
-    
-    if not tickers:
-        logger.error("No tickers to process. Exiting.")
-        return
-
-    logger.info(f"Processing {len(tickers)} tickers from master_tickerlist.csv for full rebuild")
-
-    for ticker in tickers:
-        ticker_start_time = datetime.now()
-        log_detailed_operation(ticker, "Start Full Rebuild", ticker_start_time)
-
-        # 1. Daily Data (exactly 200 rows as specified)
-        daily_start_time = datetime.now()
-        try:
-            # Detailed logging for each ticker processing as specified
-            logger.info(f"⬇️ DOWNLOADING {ticker}: daily candles")
-            
-            if test_mode:
-                daily_df = simulate_data_fetch(ticker, "daily", 200)
-                logger.info(f"[TEST MODE] Fetching DAILY data for {ticker} – 200 rows (test data)")
-            else:
-                daily_df = get_daily_data(ticker, outputsize='full')
-                if not daily_df.empty:
-                    daily_df = daily_df.head(200)  # Exactly 200 rows as specified
-                logger.info(f"Fetching DAILY data for {ticker} – {len(daily_df)} rows")
-            
-            if not daily_df.empty:
-                # Enhanced logging after successful fetch
-                date_col = 'Date' if 'Date' in daily_df.columns else 'datetime' if 'datetime' in daily_df.columns else 'timestamp'
-                if date_col in daily_df.columns:
-                    min_date = pd.to_datetime(daily_df[date_col]).min().strftime('%Y-%m-%d')
-                    max_date = pd.to_datetime(daily_df[date_col]).max().strftime('%Y-%m-%d')
-                    logger.info(f"✅ FETCHED {ticker} daily: {daily_df.shape[0]} rows from {min_date} to {max_date}")
-                else:
-                    logger.info(f"✅ FETCHED {ticker} daily: {daily_df.shape[0]} rows")
-                log_detailed_operation(ticker, "Daily Fetch Complete", daily_start_time, row_count_after=len(daily_df))
-            else:
-                logger.warning(f"❌ No daily data returned for {ticker}")
-                
-        except Exception as e:
-            logger.error(f"❌ Error fetching daily data for {ticker}: {e}")
-            daily_df = pd.DataFrame()
-
-        # 2. 30-Minute Intraday Data (exactly 500 rows as specified)
-        intraday_30min_start_time = datetime.now()
-        try:
-            # Detailed logging for each ticker processing as specified
-            logger.info(f"⬇️ DOWNLOADING {ticker}: 30min candles")
-            
-            if test_mode:
-                intraday_30min_df = simulate_data_fetch(ticker, "30min", 500)
-                logger.info(f"[TEST MODE] Fetching 30-MINUTE data for {ticker} – 500 rows (test data)")
-            else:
-                intraday_30min_df = get_intraday_data(ticker, interval='30min', outputsize='full')
-                if not intraday_30min_df.empty:
-                    intraday_30min_df = intraday_30min_df.head(500)  # Exactly 500 rows as specified
-                logger.info(f"Fetching 30-MINUTE data for {ticker} – {len(intraday_30min_df)} rows")
-            
-            if not intraday_30min_df.empty:
-                # Enhanced logging after successful fetch
-                date_col = 'Date' if 'Date' in intraday_30min_df.columns else 'datetime' if 'datetime' in intraday_30min_df.columns else 'timestamp'
-                if date_col in intraday_30min_df.columns:
-                    min_date = pd.to_datetime(intraday_30min_df[date_col]).min().strftime('%Y-%m-%d %H:%M')
-                    max_date = pd.to_datetime(intraday_30min_df[date_col]).max().strftime('%Y-%m-%d %H:%M')
-                    logger.info(f"✅ FETCHED {ticker} 30min: {intraday_30min_df.shape[0]} rows from {min_date} to {max_date}")
-                else:
-                    logger.info(f"✅ FETCHED {ticker} 30min: {intraday_30min_df.shape[0]} rows")
-                log_detailed_operation(ticker, "30min Fetch Complete", intraday_30min_start_time, row_count_after=len(intraday_30min_df))
-            else:
-                logger.warning(f"❌ No 30-min data returned for {ticker}")
-                
-        except Exception as e:
-            logger.error(f"❌ Error fetching 30-min data for {ticker}: {e}")
-            intraday_30min_df = pd.DataFrame()
-
-        # 3. 1-Minute Intraday Data (full 7 calendar days + early volume calculation + today's complete feed)
-        intraday_1min_start_time = datetime.now()
-        try:
-            # Detailed logging for each ticker processing as specified
-            logger.info(f"⬇️ DOWNLOADING {ticker}: 1min candles")
-            
-            if test_mode:
-                # For test mode, simulate 7 days of 1-min data (roughly 7*24*60 = 10080 rows max)
-                intraday_1min_df = simulate_data_fetch(ticker, "1min", 7*24*60)
-                logger.info(f"[TEST MODE] Fetching 1-MINUTE intraday data for {ticker} – 7 days (test data)")
-            else:
-                intraday_1min_df = get_intraday_data(ticker, interval='1min', outputsize='full')
-                
-                if not intraday_1min_df.empty:
-                    # Ensure timestamp column
-                    intraday_1min_df['timestamp'] = pd.to_datetime(intraday_1min_df['timestamp'])
-                    
-                    # Keep full 7 calendar days (no exclusions during full fetch)
-                    seven_days_ago = datetime.now() - timedelta(days=7)
-                    intraday_1min_df = intraday_1min_df[intraday_1min_df['timestamp'] >= seven_days_ago]
-                    
-                    # Calculate early volume average from past 5 sessions
-                    early_volume_avg = calculate_early_volume_average(ticker, intraday_1min_df, num_sessions=5)
-                    log_detailed_operation(ticker, "Early Volume Calculated", details=f"Avg early volume: {early_volume_avg:,.0f}")
-                
-                logger.info(f"Fetching 1-MINUTE intraday data for {ticker} – 7 days")
-            
-            if not intraday_1min_df.empty:
-                # Enhanced logging after successful fetch
-                date_col = 'Date' if 'Date' in intraday_1min_df.columns else 'datetime' if 'datetime' in intraday_1min_df.columns else 'timestamp'
-                if date_col in intraday_1min_df.columns:
-                    min_date = pd.to_datetime(intraday_1min_df[date_col]).min().strftime('%Y-%m-%d %H:%M')
-                    max_date = pd.to_datetime(intraday_1min_df[date_col]).max().strftime('%Y-%m-%d %H:%M')
-                    logger.info(f"✅ FETCHED {ticker} 1min: {intraday_1min_df.shape[0]} rows from {min_date} to {max_date}")
-                else:
-                    logger.info(f"✅ FETCHED {ticker} 1min: {intraday_1min_df.shape[0]} rows")
-                log_detailed_operation(ticker, "1min Fetch Complete", intraday_1min_start_time, row_count_after=len(intraday_1min_df))
-            else:
-                logger.warning(f"❌ No 1-min data returned for {ticker}")
-                
-        except Exception as e:
-            logger.error(f"❌ Error fetching 1-min data for {ticker}: {e}")
-            intraday_1min_df = pd.DataFrame()
-
-        # 4. Apply Cleanup Procedure (run immediately after fetching full data)
-        cleanup_start_time = datetime.now()
-        try:
-            cleaned_daily, cleaned_30min, cleaned_1min = cleanup_data_retention(
-                ticker, daily_df, intraday_30min_df, intraday_1min_df
-            )
-            if test_mode:
-                logger.info(f"[TEST MODE] Cleanup applied for {ticker}: retained {len(cleaned_daily)} daily, {len(cleaned_30min)} 30-min, 7 days intraday")
-        except Exception as e:
-            logger.error(f"Error during cleanup for {ticker}: {e}")
-            cleaned_daily, cleaned_30min, cleaned_1min = daily_df, intraday_30min_df, intraday_1min_df
-
-        # 5. Save cleaned data with enhanced verification logging
-        save_start_time = datetime.now()
-        try:
-            # Save daily data
-            if not cleaned_daily.empty:
-                daily_path = f'data/daily/{ticker}_daily.csv'
-                upload_success = save_df_to_s3(cleaned_daily, daily_path)
-                if upload_success:
-                    # Verify the save with detailed logging
-                    date_col = 'Date' if 'Date' in cleaned_daily.columns else 'datetime' if 'datetime' in cleaned_daily.columns else 'timestamp'
-                    if date_col in cleaned_daily.columns:
-                        min_date = pd.to_datetime(cleaned_daily[date_col]).min().strftime('%Y-%m-%d')
-                        max_date = pd.to_datetime(cleaned_daily[date_col]).max().strftime('%Y-%m-%d')
-                        logger.info(f"✅ SAVED {ticker} daily: {cleaned_daily.shape[0]} rows from {min_date} to {max_date}")
-                    else:
-                        logger.info(f"✅ SAVED {ticker} daily: {cleaned_daily.shape[0]} rows")
-                else:
-                    logger.error(f"❌ FAILED to save daily data for {ticker}!")
-            
-            # Save 30-min data  
-            if not cleaned_30min.empty:
-                thirty_min_path = f'data/intraday_30min/{ticker}_30min.csv'
-                upload_success = save_df_to_s3(cleaned_30min, thirty_min_path)
-                if upload_success:
-                    # Verify the save with detailed logging
-                    date_col = 'Date' if 'Date' in cleaned_30min.columns else 'datetime' if 'datetime' in cleaned_30min.columns else 'timestamp'
-                    if date_col in cleaned_30min.columns:
-                        min_date = pd.to_datetime(cleaned_30min[date_col]).min().strftime('%Y-%m-%d %H:%M')
-                        max_date = pd.to_datetime(cleaned_30min[date_col]).max().strftime('%Y-%m-%d %H:%M')
-                        logger.info(f"✅ SAVED {ticker} 30min: {cleaned_30min.shape[0]} rows from {min_date} to {max_date}")
-                    else:
-                        logger.info(f"✅ SAVED {ticker} 30min: {cleaned_30min.shape[0]} rows")
-                else:
-                    logger.error(f"❌ FAILED to save 30-min data for {ticker}!")
-            
-            # Save 1-min data
-            if not cleaned_1min.empty:
-                intraday_path = f'data/intraday/{ticker}_1min.csv'
-                upload_success = save_df_to_s3(cleaned_1min, intraday_path)
-                if upload_success:
-                    # Verify the save with detailed logging
-                    date_col = 'Date' if 'Date' in cleaned_1min.columns else 'datetime' if 'datetime' in cleaned_1min.columns else 'timestamp'
-                    if date_col in cleaned_1min.columns:
-                        min_date = pd.to_datetime(cleaned_1min[date_col]).min().strftime('%Y-%m-%d %H:%M')
-                        max_date = pd.to_datetime(cleaned_1min[date_col]).max().strftime('%Y-%m-%d %H:%M')
-                        logger.info(f"✅ SAVED {ticker} 1min: {cleaned_1min.shape[0]} rows from {min_date} to {max_date}")
-                    else:
-                        logger.info(f"✅ SAVED {ticker} 1min: {cleaned_1min.shape[0]} rows")
-                else:
-                    logger.error(f"❌ FAILED to save 1-min data for {ticker}!")
-            
-            log_detailed_operation(ticker, "Data Saved", save_start_time)
-            
-        except Exception as e:
-            logger.error(f"❌ Error saving data for {ticker}: {e}")
-
-        # Log ticker completion
-        log_detailed_operation(ticker, "Full Rebuild Complete", ticker_start_time)
+        ticker (str): Stock ticker symbol
+        results (dict): Processed data for each timeframe
         
-        # Respect API rate limits (only in live mode)
-        if not test_mode:
-            time.sleep(1)
-
-    completion_mode = "TEST MODE COMPLETE" if test_mode else "LIVE MODE COMPLETE"
-    logger.info(f"Daily Full Data Rebuild Job Finished ({completion_mode})")
+    Returns:
+        bool: True if all saves successful
+    """
+    save_success = True
     
-    if test_mode:
-        logger.info("[TEST MODE] Test mode complete – all operations simulated successfully")
-        logger.info("[TEST MODE] Review logs to verify data flow before live mode")
+    # Save daily data
+    if results['daily'] is not None and not results['daily'].empty:
+        daily_path = f'data/daily/{ticker}_daily.csv'
+        if save_df_to_s3(results['daily'], daily_path):
+            logger.info(f"✅ Saved daily data: {daily_path}")
+        else:
+            logger.error(f"❌ Failed to save daily data for {ticker}")
+            save_success = False
+    
+    # Save 30-minute data
+    if results['30min'] is not None and not results['30min'].empty:
+        min_30_path = f'data/intraday_30min/{ticker}_30min.csv'
+        if save_df_to_s3(results['30min'], min_30_path):
+            logger.info(f"✅ Saved 30-minute data: {min_30_path}")
+        else:
+            logger.error(f"❌ Failed to save 30-minute data for {ticker}")
+            save_success = False
+    
+    # Save 1-minute data
+    if results['1min'] is not None and not results['1min'].empty:
+        min_1_path = f'data/intraday/{ticker}_1min.csv'
+        if save_df_to_s3(results['1min'], min_1_path):
+            logger.info(f"✅ Saved 1-minute data: {min_1_path}")
+        else:
+            logger.error(f"❌ Failed to save 1-minute data for {ticker}")
+            save_success = False
+    
+    return save_success
+
+
+def run_full_rebuild():
+    """
+    Execute the full rebuild process.
+    
+    This is the main function that orchestrates the complete daily data refresh:
+    1. Read master watchlist
+    2. Fetch full historical data for all timeframes
+    3. Apply cleanup and trimming rules
+    4. Standardize timestamps
+    5. Save to DigitalOcean Spaces
+    """
+    logger.info("=" * 60)
+    logger.info("🚀 STARTING FULL REBUILD ENGINE")
+    logger.info("=" * 60)
+    
+    # Check environment setup
+    if not ALPHA_VANTAGE_API_KEY:
+        logger.error("❌ ALPHA_VANTAGE_API_KEY not configured")
+        return False
+    
+    if not SPACES_BUCKET_NAME:
+        logger.warning("⚠️ DigitalOcean Spaces not configured - using local storage only")
+    
+    # Read master watchlist
+    tickers = read_master_tickerlist()
+    if not tickers:
+        logger.error("❌ No tickers found in master watchlist")
+        return False
+    
+    logger.info(f"📋 Processing {len(tickers)} tickers: {tickers}")
+    
+    # Track progress
+    processed_count = 0
+    success_count = 0
+    failed_tickers = []
+    
+    for i, ticker in enumerate(tickers, 1):
+        logger.info(f"\n📍 Processing ticker {i}/{len(tickers)}: {ticker}")
+        
+        try:
+            # Fetch and process all timeframes
+            results = fetch_and_process_ticker(ticker)
+            
+            # Save processed data
+            if save_ticker_data(ticker, results):
+                success_count += 1
+                logger.info(f"✅ Successfully processed {ticker}")
+            else:
+                failed_tickers.append(ticker)
+                logger.error(f"❌ Failed to save data for {ticker}")
+            
+            processed_count += 1
+            
+            # Rate limiting - respect API limits
+            if i < len(tickers):  # Don't sleep after last ticker
+                time.sleep(1)
+                
+        except Exception as e:
+            logger.error(f"❌ Critical error processing {ticker}: {e}")
+            failed_tickers.append(ticker)
+            processed_count += 1
+    
+    # Final summary
+    logger.info("\n" + "=" * 60)
+    logger.info("📊 FULL REBUILD SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"📋 Total tickers: {len(tickers)}")
+    logger.info(f"✅ Successfully processed: {success_count}")
+    logger.info(f"❌ Failed: {len(failed_tickers)}")
+    
+    if failed_tickers:
+        logger.warning(f"⚠️ Failed tickers: {failed_tickers}")
+    
+    success_rate = (success_count / len(tickers)) * 100 if tickers else 0
+    logger.info(f"📈 Success rate: {success_rate:.1f}%")
+    
+    if success_rate >= 80:
+        logger.info("🎉 Full rebuild completed successfully!")
+        return True
+    else:
+        logger.error("💥 Full rebuild failed - too many errors")
+        return False
+
 
 if __name__ == "__main__":
     job_name = "update_all_data"
     update_scheduler_status(job_name, "Running")
     
-    # Check if we should force live mode
-    force_live = len(sys.argv) > 1 and sys.argv[1] == "--force-live"
-    
     try:
-        run_full_rebuild(force_live=force_live)
-        update_scheduler_status(job_name, "Success")
+        success = run_full_rebuild()
+        
+        if success:
+            update_scheduler_status(job_name, "Success")
+            logger.info("✅ Full rebuild job completed successfully")
+        else:
+            update_scheduler_status(job_name, "Fail", "Too many ticker processing failures")
+            logger.error("❌ Full rebuild job failed")
+            
     except Exception as e:
-        error_message = f"An unexpected error occurred: {e}"
-        print(error_message)
+        error_message = f"Critical error in full rebuild: {e}"
+        logger.error(error_message)
         update_scheduler_status(job_name, "Fail", error_message)
+        sys.exit(1)
