@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-Live Update Engine - Real-time Intraday Updates
-===============================================
+Compact Update Engine - Real-time Intraday Updates
+==================================================
 
 This script keeps intraday data up-to-date in real-time during market hours.
-Implements the two-layer data management model as specified:
+Implements the requirements specified in the problem statement:
 
-1. Reads master watchlist from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
-2. Fetches compact data (latest 100 candles) for 1-min and 30-min timeframes
-3. Reads existing data from DigitalOcean Spaces
-4. Intelligently appends only new, unique candles (no duplicates)
-5. Performs timestamp standardization (America/New_York -> UTC)
-6. Saves updated datasets back to Spaces
+1. Reads entire ticker column from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
+2. Loops through EVERY single ticker (fixes incomplete ticker processing)
+3. Fetches compact data (latest 100 candles) for 1-min and 30-min timeframes
+4. Reads existing data from DigitalOcean Spaces
+5. Intelligently merges new data with existing files, appending only new, unique candles
+6. Performs mandatory timestamp standardization (America/New_York -> UTC)
+7. Saves updated datasets back to Spaces
 
-This is the live update layer that runs frequently during market hours.
+This is the live update layer that runs frequently during market hours AFTER full fetch completes.
 """
 
 import os
@@ -72,6 +73,7 @@ def merge_new_candles(existing_df, new_df):
     Intelligently merge new candles with existing data.
     
     Ensures no duplicates by comparing timestamps and only adding truly new candles.
+    This is critical for correctly updating the current day's files.
     
     Args:
         existing_df (DataFrame): Current data from storage
@@ -220,19 +222,19 @@ def process_ticker_interval(ticker, interval):
         return False
 
 
-def run_live_updates():
+def run_compact_update():
     """
-    Execute the live update process.
+    Execute the compact update process.
     
     This is the main function that orchestrates real-time intraday updates:
-    1. Read master watchlist
+    1. Read master watchlist (ALL tickers)
     2. For each ticker, fetch compact data for 1min and 30min
     3. Merge with existing data (intelligent deduplication)  
     4. Standardize timestamps
     5. Save back to DigitalOcean Spaces
     """
     logger.info("=" * 60)
-    logger.info("⚡ STARTING LIVE UPDATE ENGINE")
+    logger.info("⚡ STARTING COMPACT UPDATE ENGINE")
     logger.info("=" * 60)
     
     # Check environment setup
@@ -243,13 +245,14 @@ def run_live_updates():
     if not SPACES_BUCKET_NAME:
         logger.warning("⚠️ DigitalOcean Spaces not configured - using local storage only")
     
-    # Read master watchlist
+    # Read master watchlist - CRITICAL: Read entire ticker column
     tickers = read_master_tickerlist()
     if not tickers:
         logger.error("❌ No tickers found in master watchlist")
         return False
     
-    logger.info(f"📋 Processing {len(tickers)} tickers: {tickers}")
+    logger.info(f"📋 Processing {len(tickers)} tickers from master_tickerlist.csv: {tickers}")
+    logger.info("🔄 This engine will process EVERY single ticker to fix incomplete processing")
     
     # Track progress
     total_operations = len(tickers) * 2  # 1min + 30min for each ticker
@@ -257,6 +260,7 @@ def run_live_updates():
     failed_operations = []
     ticker_summaries = []
     
+    # CRITICAL: Loop through EVERY ticker (fixes incomplete ticker processing)
     for i, ticker in enumerate(tickers, 1):
         logger.info(f"\n📍 Processing ticker {i}/{len(tickers)}: {ticker}")
         
@@ -301,19 +305,14 @@ def run_live_updates():
     
     # Final summary
     logger.info("\n" + "=" * 60)
-    logger.info("📊 LIVE UPDATE SUMMARY")
+    logger.info("📊 COMPACT UPDATE ENGINE SUMMARY")
     logger.info("=" * 60)
     logger.info(f"📋 Total tickers processed: {len(tickers)}")
     logger.info(f"🔢 Total operations: {total_operations}")
     logger.info(f"✅ Successful operations: {success_count}")
     logger.info(f"❌ Failed operations: {len(failed_operations)}")
     
-    # Count ticker-level results
-    complete_success = ticker_summaries.count(lambda x: "✅" in x)
-    partial_success = ticker_summaries.count(lambda x: "⚠️" in x)
-    complete_failures = ticker_summaries.count(lambda x: "❌" in x)
-    
-    # Calculate success by tickers
+    # Calculate ticker-level results
     complete_success = sum(1 for summary in ticker_summaries if "✅" in summary)
     partial_success = sum(1 for summary in ticker_summaries if "⚠️" in summary)
     complete_failures = sum(1 for summary in ticker_summaries if "❌" in summary)
@@ -336,32 +335,32 @@ def run_live_updates():
     
     # Determine overall success
     if complete_success == len(tickers):
-        logger.info("🌟 PERFECT LIVE UPDATE - All tickers updated completely!")
+        logger.info("🌟 PERFECT COMPACT UPDATE - All tickers updated completely!")
         return True
     elif ticker_success_rate >= 80:
-        logger.info("🎉 SUCCESSFUL LIVE UPDATE - Most tickers updated!")
+        logger.info("🎉 SUCCESSFUL COMPACT UPDATE - Most tickers updated!")
         return True
     else:
-        logger.error("💥 FAILED LIVE UPDATE - Too many ticker failures")
+        logger.error("💥 FAILED COMPACT UPDATE - Too many ticker failures")
         return False
 
 
 if __name__ == "__main__":
-    job_name = "update_intraday_compact"
+    job_name = "compact_update"
     update_scheduler_status(job_name, "Running")
     
     try:
-        success = run_live_updates()
+        success = run_compact_update()
         
         if success:
             update_scheduler_status(job_name, "Success")
-            logger.info("✅ Live update job completed successfully")
+            logger.info("✅ Compact update job completed successfully")
         else:
             update_scheduler_status(job_name, "Fail", "Too many operation failures")
-            logger.error("❌ Live update job failed")
+            logger.error("❌ Compact update job failed")
             
     except Exception as e:
-        error_message = f"Critical error in live updates: {e}"
+        error_message = f"Critical error in compact updates: {e}"
         logger.error(error_message)
         update_scheduler_status(job_name, "Fail", error_message)
         sys.exit(1)

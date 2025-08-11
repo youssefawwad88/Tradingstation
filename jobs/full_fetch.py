@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-Full Rebuild Engine - Daily Data Refresh
-========================================
+Full Fetch Engine - Complete Historical Data Rebuild
+====================================================
 
 This script performs a complete daily data refresh for all tickers in the watchlist.
-Implements the two-layer data management model as specified:
+Implements the requirements specified in the problem statement:
 
-1. Reads master watchlist from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
-2. Performs full historical data fetch for all three timeframes (daily, 30-min, 1-min)
-3. Applies rigorous cleanup and trimming rules:
+1. Reads entire ticker column from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
+2. Loops through EVERY single ticker (fixes incomplete ticker processing)
+3. Performs full historical data fetch for all three timeframes (daily, 30-min, 1-min)
+4. Applies strict cleanup rules:
    - Daily Data: 200 rows (most recent)
    - 30-Minute Data: 500 rows (most recent) 
    - 1-Minute Data: 7 days (most recent)
-4. Performs timestamp standardization (America/New_York -> UTC)
-5. Saves clean datasets to DigitalOcean Spaces
+5. Performs mandatory timestamp standardization (America/New_York -> UTC)
+6. Saves clean datasets to DigitalOcean Spaces
 
-This is the foundational data layer that runs once per day.
+This is the foundational data layer that runs once per day BEFORE live updates begin.
 """
 
 import os
@@ -290,19 +291,19 @@ def save_ticker_data(ticker, results):
         return False
 
 
-def run_full_rebuild():
+def run_full_fetch():
     """
-    Execute the full rebuild process.
+    Execute the full fetch process.
     
     This is the main function that orchestrates the complete daily data refresh:
-    1. Read master watchlist
+    1. Read master watchlist (ALL tickers)
     2. Fetch full historical data for all timeframes
     3. Apply cleanup and trimming rules
     4. Standardize timestamps
     5. Save to DigitalOcean Spaces
     """
     logger.info("=" * 60)
-    logger.info("🚀 STARTING FULL REBUILD ENGINE")
+    logger.info("🚀 STARTING FULL FETCH ENGINE")
     logger.info("=" * 60)
     
     # Check environment setup
@@ -313,13 +314,14 @@ def run_full_rebuild():
     if not SPACES_BUCKET_NAME:
         logger.warning("⚠️ DigitalOcean Spaces not configured - using local storage only")
     
-    # Read master watchlist
+    # Read master watchlist - CRITICAL: Read entire ticker column
     tickers = read_master_tickerlist()
     if not tickers:
         logger.error("❌ No tickers found in master watchlist")
         return False
     
-    logger.info(f"📋 Processing {len(tickers)} tickers: {tickers}")
+    logger.info(f"📋 Processing {len(tickers)} tickers from master_tickerlist.csv: {tickers}")
+    logger.info("🔄 This engine will process EVERY single ticker to fix incomplete processing")
     
     # Track progress
     processed_count = 0
@@ -327,6 +329,7 @@ def run_full_rebuild():
     partial_success_count = 0
     failed_tickers = []
     
+    # CRITICAL: Loop through EVERY ticker (fixes incomplete ticker processing)
     for i, ticker in enumerate(tickers, 1):
         logger.info(f"\n📍 Processing ticker {i}/{len(tickers)}: {ticker}")
         
@@ -364,9 +367,9 @@ def run_full_rebuild():
     
     # Final summary
     logger.info("\n" + "=" * 60)
-    logger.info("📊 FULL REBUILD SUMMARY")
+    logger.info("📊 FULL FETCH ENGINE SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"📋 Total tickers: {len(tickers)}")
+    logger.info(f"📋 Total tickers processed: {len(tickers)}")
     logger.info(f"🎉 Complete success: {success_count}")
     logger.info(f"⚠️ Partial success: {partial_success_count}")
     logger.info(f"❌ Complete failures: {len(failed_tickers)}")
@@ -383,32 +386,32 @@ def run_full_rebuild():
     
     # Detailed analysis
     if success_count == len(tickers):
-        logger.info("🌟 PERFECT REBUILD - All tickers processed completely!")
+        logger.info("🌟 PERFECT FULL FETCH - All tickers processed completely!")
         return True
     elif total_success >= len(tickers) * 0.8:  # 80% threshold
-        logger.info("🎉 SUCCESSFUL REBUILD - Most tickers processed!")
+        logger.info("🎉 SUCCESSFUL FULL FETCH - Most tickers processed!")
         return True
     else:
-        logger.error("💥 FAILED REBUILD - Too many ticker failures")
+        logger.error("💥 FAILED FULL FETCH - Too many ticker failures")
         return False
 
 
 if __name__ == "__main__":
-    job_name = "update_all_data"
+    job_name = "full_fetch"
     update_scheduler_status(job_name, "Running")
     
     try:
-        success = run_full_rebuild()
+        success = run_full_fetch()
         
         if success:
             update_scheduler_status(job_name, "Success")
-            logger.info("✅ Full rebuild job completed successfully")
+            logger.info("✅ Full fetch job completed successfully")
         else:
             update_scheduler_status(job_name, "Fail", "Too many ticker processing failures")
-            logger.error("❌ Full rebuild job failed")
+            logger.error("❌ Full fetch job failed")
             
     except Exception as e:
-        error_message = f"Critical error in full rebuild: {e}"
+        error_message = f"Critical error in full fetch: {e}"
         logger.error(error_message)
         update_scheduler_status(job_name, "Fail", error_message)
         sys.exit(1)

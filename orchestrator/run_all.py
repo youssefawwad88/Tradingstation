@@ -112,7 +112,7 @@ def run_job(script_path, job_name):
         return False
 
 def run_daily_data_jobs():
-    """Run daily data fetching and processing jobs."""
+    """Run daily data fetching and processing jobs with new two-engine architecture."""
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
     logger.info(f"{mode_prefix} Starting daily data jobs")
     
@@ -120,24 +120,29 @@ def run_daily_data_jobs():
     if not run_job("generate_master_tickerlist.py", "generate_master_tickerlist"): 
         return False
     
-    # Stage 2: Data Fetching 
-    if not run_job("jobs/update_all_data.py", "update_all_data"): 
+    # Stage 2: Full Fetch Engine - MUST complete before live updates begin
+    logger.info(f"{mode_prefix} Running Full Fetch Engine (complete historical rebuild)")
+    if not run_job("jobs/full_fetch.py", "full_fetch"): 
+        logger.error(f"{mode_prefix} Full Fetch Engine failed - cannot proceed with live updates")
         return False
+    
+    # Stage 3: Additional analysis jobs
     if not run_job("jobs/find_avwap_anchors.py", "find_avwap_anchors"): 
         return False
     
     logger.info(f"{mode_prefix} Daily data jobs completed successfully")
+    logger.info(f"{mode_prefix} Full Fetch Engine completed - live updates can now begin")
     if TEST_MODE_ACTIVE:
         logger.info("[TEST MODE] All daily operations simulated successfully - no live API calls made")
     return True
 
 def run_intraday_updates():
-    """Run intraday data updates (1min and 30min)."""
+    """Run intraday data updates using new Compact Update Engine."""
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
-    logger.info(f"{mode_prefix} Starting intraday updates")
-    result = run_job("jobs/update_intraday_compact.py", "update_intraday_compact")
+    logger.info(f"{mode_prefix} Starting intraday updates (Compact Update Engine)")
+    result = run_job("jobs/compact_update.py", "compact_update")
     if TEST_MODE_ACTIVE and result:
-        logger.info("[TEST MODE] Intraday update simulation completed successfully")
+        logger.info("[TEST MODE] Compact Update Engine simulation completed successfully")
     return result
 
 def run_screener(screener_name, script_path):
