@@ -81,9 +81,11 @@ def merge_new_candles(existing_df, new_df):
         DataFrame: Merged dataframe with new unique candles appended
     """
     if existing_df.empty:
+        logger.debug("No existing data - returning all new data")
         return new_df
     
     if new_df.empty:
+        logger.debug("No new data - returning existing data unchanged")
         return existing_df
     
     try:
@@ -93,8 +95,18 @@ def merge_new_candles(existing_df, new_df):
         # Normalize column names if needed
         if 'Date' in existing_df.columns and 'timestamp' not in existing_df.columns:
             existing_df = existing_df.rename(columns={'Date': 'timestamp'})
+            logger.debug("Normalized existing data: renamed 'Date' to 'timestamp'")
         if 'Date' in new_df.columns and 'timestamp' not in new_df.columns:
             new_df = new_df.rename(columns={'Date': 'timestamp'})
+            logger.debug("Normalized new data: renamed 'Date' to 'timestamp'")
+        
+        # Validate timestamp column exists
+        if timestamp_col not in existing_df.columns:
+            logger.error(f"Timestamp column '{timestamp_col}' not found in existing data")
+            return existing_df  # Return existing data as fallback
+        if timestamp_col not in new_df.columns:
+            logger.error(f"Timestamp column '{timestamp_col}' not found in new data")
+            return existing_df  # Return existing data as fallback
         
         # Convert timestamps to datetime for comparison
         existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
@@ -104,6 +116,8 @@ def merge_new_candles(existing_df, new_df):
         existing_timestamps = set(existing_df[timestamp_col])
         new_candles = new_df[~new_df[timestamp_col].isin(existing_timestamps)]
         
+        logger.debug(f"Merge analysis: {len(existing_df)} existing, {len(new_df)} new, {len(new_candles)} unique new candles")
+        
         if not new_candles.empty:
             # Append new candles to existing data
             merged_df = pd.concat([existing_df, new_candles], ignore_index=True)
@@ -112,16 +126,22 @@ def merge_new_candles(existing_df, new_df):
             merged_df = merged_df.sort_values(by=timestamp_col, ascending=True)
             
             # Remove any potential duplicates (safety check)
+            original_count = len(merged_df)
             merged_df = merged_df.drop_duplicates(subset=[timestamp_col], keep='last')
+            deduplicated_count = len(merged_df)
             
-            logger.debug(f"Added {len(new_candles)} new candles, total: {len(merged_df)}")
+            if original_count != deduplicated_count:
+                logger.warning(f"Removed {original_count - deduplicated_count} duplicate timestamps during merge")
+            
+            logger.info(f"✅ Merge successful: added {len(new_candles)} new candles, total: {len(merged_df)}")
             return merged_df
         else:
-            logger.debug("No new candles found to append")
+            logger.debug("No new candles found to append - data is up to date")
             return existing_df
             
     except Exception as e:
-        logger.error(f"Error merging candles: {e}")
+        logger.error(f"❌ Error merging candles: {e}")
+        logger.warning("🔄 Returning existing data as fallback to avoid data loss")
         # On error, return existing data to avoid data loss
         return existing_df
 
@@ -152,40 +172,51 @@ def process_ticker_interval(ticker, interval):
         # Read existing data from Spaces
         logger.debug(f"📂 Reading existing data: {file_path}")
         existing_df = read_df_from_s3(file_path)
+        existing_count = len(existing_df) if not existing_df.empty else 0
+        logger.debug(f"📊 Existing data for {ticker} ({interval}): {existing_count} rows")
         
         # Fetch latest compact data (100 candles)
-        logger.debug(f"🔄 Fetching compact {interval} data for {ticker}")
+        logger.debug(f"🔄 Fetching compact {interval} data for {ticker}...")
         new_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
         
         if new_df.empty:
-            logger.warning(f"⚠️ No new data received for {ticker} ({interval})")
-            # Not necessarily an error - market might be closed
-            return True
+            logger.warning(f"⚠️ No new data received for {ticker} ({interval}) - API may have failed or market closed")
+            # Not necessarily an error - market might be closed or no new data available
+            return True  # Consider this a success since it's not a processing failure
+        
+        new_count = len(new_df)
+        logger.info(f"📥 Received {new_count} new candles for {ticker} ({interval})")
         
         # Standardize timestamps for new data
+        logger.debug(f"🕐 Standardizing timestamps for {ticker} ({interval})...")
         new_df = standardize_timestamps(new_df, interval)
+        logger.debug(f"✅ Timestamps standardized for {ticker} ({interval})")
         
         # Merge with existing data (intelligent deduplication)
+        logger.debug(f"🔀 Merging new data with existing for {ticker} ({interval})...")
         merged_df = merge_new_candles(existing_df, new_df)
         
         # Calculate new candles added
-        new_candles_count = len(merged_df) - len(existing_df) if not existing_df.empty else len(merged_df)
+        final_count = len(merged_df)
+        new_candles_count = final_count - existing_count
         
         if new_candles_count > 0:
-            logger.info(f"✅ Added {new_candles_count} new candles for {ticker} ({interval})")
+            logger.info(f"✅ Added {new_candles_count} new candles for {ticker} ({interval}) (total: {final_count})")
         else:
-            logger.debug(f"📊 No new candles for {ticker} ({interval}) - data up to date")
+            logger.debug(f"📊 No new candles for {ticker} ({interval}) - data up to date (total: {final_count})")
         
         # Save updated data back to Spaces
+        logger.debug(f"💾 Saving updated data for {ticker} ({interval})...")
         if save_df_to_s3(merged_df, file_path):
-            logger.debug(f"💾 Saved updated data: {file_path} ({len(merged_df)} total rows)")
+            logger.info(f"✅ Saved updated data: {file_path} ({final_count} total rows)")
             return True
         else:
             logger.error(f"❌ Failed to save data for {ticker} ({interval})")
             return False
             
     except Exception as e:
-        logger.error(f"❌ Error processing {ticker} ({interval}): {e}")
+        logger.error(f"❌ Critical error processing {ticker} ({interval}): {e}")
+        logger.error(f"❌ Ticker {ticker} ({interval}) processing failed - continuing with next")
         return False
 
 
@@ -224,52 +255,94 @@ def run_live_updates():
     total_operations = len(tickers) * 2  # 1min + 30min for each ticker
     success_count = 0
     failed_operations = []
+    ticker_summaries = []
     
     for i, ticker in enumerate(tickers, 1):
         logger.info(f"\n📍 Processing ticker {i}/{len(tickers)}: {ticker}")
         
         # Process 1-minute interval
+        logger.debug(f"🔄 Starting 1min processing for {ticker}...")
         success_1min = process_ticker_interval(ticker, '1min')
         if success_1min:
             success_count += 1
+            logger.debug(f"✅ 1min processing successful for {ticker}")
         else:
             failed_operations.append(f"{ticker}:1min")
+            logger.warning(f"❌ 1min processing failed for {ticker}")
         
         # Process 30-minute interval
+        logger.debug(f"🔄 Starting 30min processing for {ticker}...")
         success_30min = process_ticker_interval(ticker, '30min')
         if success_30min:
             success_count += 1
+            logger.debug(f"✅ 30min processing successful for {ticker}")
         else:
             failed_operations.append(f"{ticker}:30min")
+            logger.warning(f"❌ 30min processing failed for {ticker}")
         
         # Log ticker completion
         overall_success = success_1min and success_30min
-        status = "✅ SUCCESS" if overall_success else "⚠️ PARTIAL/FAILED"
+        if overall_success:
+            status = "🎉 COMPLETE SUCCESS"
+            ticker_summaries.append(f"{ticker}: ✅")
+        elif success_1min or success_30min:
+            status = "⚠️ PARTIAL SUCCESS"
+            ticker_summaries.append(f"{ticker}: ⚠️")
+        else:
+            status = "💥 COMPLETE FAILURE"
+            ticker_summaries.append(f"{ticker}: ❌")
+            
         logger.info(f"📊 {ticker}: {status} (1min: {'✅' if success_1min else '❌'}, 30min: {'✅' if success_30min else '❌'})")
         
         # Rate limiting - respect API limits
         if i < len(tickers):  # Don't sleep after last ticker
+            logger.debug(f"⏳ Rate limiting: sleeping 0.5 seconds before next ticker...")
             time.sleep(0.5)  # Lighter sleep for live updates
     
     # Final summary
     logger.info("\n" + "=" * 60)
     logger.info("📊 LIVE UPDATE SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"📋 Total operations: {total_operations}")
+    logger.info(f"📋 Total tickers processed: {len(tickers)}")
+    logger.info(f"🔢 Total operations: {total_operations}")
     logger.info(f"✅ Successful operations: {success_count}")
     logger.info(f"❌ Failed operations: {len(failed_operations)}")
+    
+    # Count ticker-level results
+    complete_success = ticker_summaries.count(lambda x: "✅" in x)
+    partial_success = ticker_summaries.count(lambda x: "⚠️" in x)
+    complete_failures = ticker_summaries.count(lambda x: "❌" in x)
+    
+    # Calculate success by tickers
+    complete_success = sum(1 for summary in ticker_summaries if "✅" in summary)
+    partial_success = sum(1 for summary in ticker_summaries if "⚠️" in summary)
+    complete_failures = sum(1 for summary in ticker_summaries if "❌" in summary)
+    
+    logger.info(f"🎉 Complete ticker success: {complete_success}")
+    logger.info(f"⚠️ Partial ticker success: {partial_success}")
+    logger.info(f"💥 Complete ticker failures: {complete_failures}")
     
     if failed_operations:
         logger.warning(f"⚠️ Failed operations: {failed_operations}")
     
-    success_rate = (success_count / total_operations) * 100 if total_operations else 0
-    logger.info(f"📈 Success rate: {success_rate:.1f}%")
+    # Show ticker summary
+    logger.info(f"📊 Ticker results: {' '.join(ticker_summaries)}")
     
-    if success_rate >= 80:
-        logger.info("🎉 Live updates completed successfully!")
+    operation_success_rate = (success_count / total_operations) * 100 if total_operations else 0
+    ticker_success_rate = ((complete_success + partial_success) / len(tickers)) * 100 if tickers else 0
+    
+    logger.info(f"📈 Operation success rate: {operation_success_rate:.1f}% ({success_count}/{total_operations})")
+    logger.info(f"🎯 Ticker success rate: {ticker_success_rate:.1f}% ({complete_success + partial_success}/{len(tickers)})")
+    
+    # Determine overall success
+    if complete_success == len(tickers):
+        logger.info("🌟 PERFECT LIVE UPDATE - All tickers updated completely!")
+        return True
+    elif ticker_success_rate >= 80:
+        logger.info("🎉 SUCCESSFUL LIVE UPDATE - Most tickers updated!")
         return True
     else:
-        logger.error("💥 Live updates failed - too many errors")
+        logger.error("💥 FAILED LIVE UPDATE - Too many ticker failures")
         return False
 
 
