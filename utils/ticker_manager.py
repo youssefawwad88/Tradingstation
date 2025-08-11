@@ -135,12 +135,12 @@ def read_tickerlist_from_s3(filename: str) -> List[str]:
 def read_master_tickerlist() -> List[str]:
     """
     Read master ticker list from master_tickerlist.csv (local or Spaces).
-    This is the unified function used by all fetchers.
+    This is the SINGLE SOURCE OF TRUTH for all fetchers as per unified instructions.
 
     Returns:
         List of ticker symbols from master list
     """
-    logger.info("Reading master ticker list from master_tickerlist.csv")
+    logger.info("Reading master ticker list from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)")
 
     try:
         # Try local file first
@@ -153,7 +153,7 @@ def read_master_tickerlist() -> List[str]:
             if "ticker" in df.columns:
                 tickers = df["ticker"].tolist()
                 logger.info(
-                    f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv"
+                    f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv (LOCAL)"
                 )
                 return tickers
 
@@ -162,30 +162,31 @@ def read_master_tickerlist() -> List[str]:
         if not df.empty and "ticker" in df.columns:
             tickers = df["ticker"].tolist()
             logger.info(
-                f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv (Spaces)"
+                f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv (SPACES)"
             )
             return tickers
 
-        # Fallback: generate master list if it doesn't exist
+        # If master_tickerlist.csv doesn't exist, create it from defaults
         logger.warning(
-            "⚠️ master_tickerlist.csv not found, falling back to manual tickers"
+            "⚠️ master_tickerlist.csv not found - creating from DEFAULT_TICKERS"
         )
-        manual_tickers = load_manual_tickers()
-        if manual_tickers:
-            logger.info(f"Using {len(manual_tickers)} manual tickers as fallback")
-            return manual_tickers
-
-        # Final fallback to default tickers
-        logger.warning(f"Using default tickers as last resort: {DEFAULT_TICKERS}")
+        
+        # Create master tickerlist from defaults
+        default_df = pd.DataFrame({
+            'ticker': DEFAULT_TICKERS,
+            'source': ['default'] * len(DEFAULT_TICKERS),
+            'generated_at': [pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')] * len(DEFAULT_TICKERS)
+        })
+        
+        # Save to local file
+        default_df.to_csv(local_file, index=False)
+        logger.info(f"✅ Created master_tickerlist.csv with {len(DEFAULT_TICKERS)} default tickers")
+        
         return DEFAULT_TICKERS
 
     except Exception as e:
-        logger.error(f"Error reading master ticker list: {e}")
-        # Fallback to manual tickers
-        manual_tickers = load_manual_tickers()
-        if manual_tickers:
-            return manual_tickers
-
+        logger.error(f"❌ Error reading master ticker list: {e}")
+        logger.warning(f"🔄 Using DEFAULT_TICKERS as emergency fallback: {DEFAULT_TICKERS}")
         return DEFAULT_TICKERS
 
 

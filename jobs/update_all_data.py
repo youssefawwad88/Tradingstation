@@ -6,7 +6,7 @@ Full Rebuild Engine - Daily Data Refresh
 This script performs a complete daily data refresh for all tickers in the watchlist.
 Implements the two-layer data management model as specified:
 
-1. Reads master watchlist from tickerlist.txt
+1. Reads master watchlist from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
 2. Performs full historical data fetch for all three timeframes (daily, 30-min, 1-min)
 3. Applies rigorous cleanup and trimming rules:
    - Daily Data: 200 rows (most recent)

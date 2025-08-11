@@ -1,0 +1,6 @@
+{
+  "risk_per_trade": 100.0,
+  "enable_shorts": true,
+  "volume_spike_multiplier": 2.5,
+  "avwap_anchor_keywords": "earnings,guidance,fda,approval,contract,acquisition"
+}

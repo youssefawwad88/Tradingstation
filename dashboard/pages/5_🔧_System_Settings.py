@@ -10,9 +10,9 @@ import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 try:
-    # We will add the config helpers in the next step
+    # Import unified ticker and config management functions
     from utils.helpers import (
-        read_tickerlist_from_s3, 
+        read_master_tickerlist, 
         save_list_to_s3, 
         read_df_from_s3,
         read_config_from_s3,
@@ -47,19 +47,19 @@ if not config:
 
 # --- Page Title ---
 st.title("🔧 System Settings Panel")
-st.write("Manage the core configuration of your trading engine. All changes are saved to `config.json` in the cloud.")
+st.write("Manage the core configuration of your trading engine. All changes are saved to `master_tickerlist.csv` and `config.json` in the cloud.")
 
 # --- Ticker List & Engine Config in one form ---
 with st.expander("Master Configuration", expanded=True):
     
     # --- Ticker List Management ---
     st.subheader("Master Ticker List")
-    st.write("Manage the `tickerlist.txt` file. This is the master source for all data fetching jobs and screeners.")
+    st.write("Manage the `master_tickerlist.csv` file. This is the **single source of truth** for all data fetching jobs and screeners.")
     try:
-        current_tickers = read_tickerlist_from_s3('tickerlist.txt')
+        current_tickers = read_master_tickerlist()
         current_tickers_str = "\n".join(current_tickers)
     except Exception as e:
-        st.error(f"Could not load ticker list from cloud storage: {e}")
+        st.error(f"Could not load ticker list from master_tickerlist.csv: {e}")
         current_tickers = []
         current_tickers_str = "Error loading ticker list."
 
@@ -110,9 +110,9 @@ with st.expander("Master Configuration", expanded=True):
 
     # --- Save Button ---
     if st.button("💾 Save Full Configuration", use_container_width=True, type="primary"):
-        # 1. Save the Ticker List
+        # 1. Save the Ticker List to master_tickerlist.csv
         new_tickers_list = sorted(list(set([t.strip().upper() for t in st.session_state.ticker_list_input.split('\n') if t.strip()])))
-        list_saved = save_list_to_s3(new_tickers_list, 'tickerlist.txt')
+        list_saved = save_list_to_s3(new_tickers_list, 'master_tickerlist.csv')
 
         # 2. Save the Engine Configuration
         new_config = {
@@ -124,7 +124,7 @@ with st.expander("Master Configuration", expanded=True):
         config_saved = save_config_to_s3(new_config, CONFIG_FILE_PATH)
 
         if list_saved and config_saved:
-            st.success("Successfully saved all configurations!")
+            st.success(f"Successfully saved ticker list ({len(new_tickers_list)} tickers) and configuration!")
             with st.spinner('Refreshing...'):
                 time.sleep(1)
             st.rerun()
