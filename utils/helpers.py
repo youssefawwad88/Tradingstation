@@ -1309,3 +1309,129 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
     )
 
     return cleaned_daily, cleaned_30min, cleaned_1min
+
+
+def save_list_to_s3(ticker_list, filename):
+    """
+    Save a list of tickers to S3/Spaces and local file.
+    
+    Args:
+        ticker_list (list): List of ticker symbols
+        filename (str): Filename to save to
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        # Create DataFrame for CSV format if the filename suggests CSV
+        if filename.endswith('.csv'):
+            # For master_tickerlist.csv format
+            if 'master_tickerlist' in filename:
+                df = pd.DataFrame({
+                    'ticker': ticker_list,
+                    'source': ['manual'] * len(ticker_list),
+                    'generated_at': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')] * len(ticker_list)
+                })
+                # Save to local file
+                local_file = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                    filename
+                )
+                df.to_csv(local_file, index=False)
+                logger.info(f"✅ Saved {len(ticker_list)} tickers to {local_file}")
+                
+                # Try to save to S3/Spaces as well
+                try:
+                    save_df_to_s3(df, filename)
+                    logger.info(f"✅ Also saved to S3/Spaces: {filename}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to save to S3/Spaces: {e}")
+                
+                return True
+            else:
+                # For other CSV files, simple format
+                df = pd.DataFrame({'ticker': ticker_list})
+                local_file = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                    filename
+                )
+                df.to_csv(local_file, index=False)
+                logger.info(f"✅ Saved {len(ticker_list)} tickers to {local_file}")
+                return True
+        else:
+            # For .txt files, save as plain text
+            local_file = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                filename
+            )
+            with open(local_file, 'w') as f:
+                for ticker in ticker_list:
+                    f.write(f"{ticker}\n")
+            logger.info(f"✅ Saved {len(ticker_list)} tickers to {local_file}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"❌ Error saving ticker list to {filename}: {e}")
+        return False
+
+
+def read_config_from_s3(config_filename):
+    """
+    Read configuration from S3/Spaces or local file.
+    
+    Args:
+        config_filename (str): Configuration filename
+        
+    Returns:
+        dict: Configuration dictionary or None if not found
+    """
+    try:
+        # Try local file first
+        local_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            config_filename
+        )
+        
+        if os.path.exists(local_file):
+            with open(local_file, 'r') as f:
+                import json
+                config = json.load(f)
+                logger.info(f"✅ Read configuration from local file: {local_file}")
+                return config
+        
+        logger.info(f"⚠️ Configuration file not found: {config_filename}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Error reading configuration from {config_filename}: {e}")
+        return None
+
+
+def save_config_to_s3(config_dict, config_filename):
+    """
+    Save configuration to S3/Spaces and local file.
+    
+    Args:
+        config_dict (dict): Configuration dictionary
+        config_filename (str): Configuration filename
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        # Save to local file
+        local_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            config_filename
+        )
+        
+        with open(local_file, 'w') as f:
+            import json
+            json.dump(config_dict, f, indent=2)
+        
+        logger.info(f"✅ Saved configuration to local file: {local_file}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error saving configuration to {config_filename}: {e}")
+        return False

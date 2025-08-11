@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 """
 Generate Master Ticker List
+=============================
 
-This script implements the simplified ticker strategy using only manual sources:
-1. Manual tickers from tickerlist.txt (always included, no filters)
+LEGACY SCRIPT - Use System Settings Dashboard Instead
+=====================================================
 
-The resulting master_tickerlist.csv powers all fetchers (both full and compact).
-Note: Automated ticker sources (S&P 500 loader and opportunity finder) have been removed.
+This script is now LEGACY. The recommended way to manage the master ticker list
+is through the System Settings page in the Streamlit dashboard.
+
+The dashboard directly manages master_tickerlist.csv as the SINGLE SOURCE OF TRUTH.
+
+For backwards compatibility, this script can still create master_tickerlist.csv
+from tickerlist.txt if the CSV doesn't exist, but the primary workflow is now:
+
+RECOMMENDED: Dashboard System Settings -> master_tickerlist.csv -> All Data Pipeline Scripts
+LEGACY: tickerlist.txt -> This Script -> master_tickerlist.csv -> All Data Pipeline Scripts
+
+Note: All data fetchers now read directly from master_tickerlist.csv.
 """
 
 import sys

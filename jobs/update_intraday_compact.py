@@ -6,7 +6,7 @@ Live Update Engine - Real-time Intraday Updates
 This script keeps intraday data up-to-date in real-time during market hours.
 Implements the two-layer data management model as specified:
 
-1. Reads master watchlist from tickerlist.txt
+1. Reads master watchlist from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
 2. Fetches compact data (latest 100 candles) for 1-min and 30-min timeframes
 3. Reads existing data from DigitalOcean Spaces
 4. Intelligently appends only new, unique candles (no duplicates)
