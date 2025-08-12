@@ -192,18 +192,22 @@ def process_ticker_interval(ticker, interval):
         logger.debug(f"📂 Reading existing data: {file_path}")
         existing_df = read_df_from_s3(file_path)
         existing_count = len(existing_df) if not existing_df.empty else 0
+        logging.info(f"[{ticker}] Loaded existing file... It has {existing_count} rows.")
         logger.debug(f"📊 Existing data for {ticker} ({interval}): {existing_count} rows")
         
         # Fetch latest compact data (100 candles)
+        logging.info(f"[{ticker}] Attempting to fetch...")
         logger.debug(f"🔄 Fetching compact {interval} data for {ticker}...")
         new_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
         
         if new_df.empty:
+            logging.info(f"[{ticker}] API returned no new data. Skipping.")
             logger.warning(f"⚠️ No new data received for {ticker} ({interval}) - API may have failed or market closed")
             # Not necessarily an error - market might be closed or no new data available
             return True  # Consider this a success since it's not a processing failure
         
         new_count = len(new_df)
+        logging.info(f"[{ticker}] API returned {new_count} new rows.")
         logger.info(f"📥 Received {new_count} new candles for {ticker} ({interval})")
         
         # Standardize timestamps for new data
@@ -214,15 +218,19 @@ def process_ticker_interval(ticker, interval):
         # Merge with existing data (intelligent deduplication)
         logger.debug(f"🔀 Merging new data with existing for {ticker} ({interval})...")
         merged_df = merge_new_candles(existing_df, new_df)
+        logging.info(f"[{ticker}] Merge complete. Combined DataFrame now has {len(merged_df)} rows.")
         
         # Calculate new candles added
         final_count = len(merged_df)
         new_candles_count = final_count - existing_count
         
         if new_candles_count > 0:
+            logging.info(f"[{ticker}] Data has changed. Preparing to write...")
             logger.info(f"✅ Added {new_candles_count} new candles for {ticker} ({interval}) (total: {final_count})")
         else:
+            logging.info(f"[{ticker}] No data change detected... Skipping cloud write.")
             logger.debug(f"📊 No new candles for {ticker} ({interval}) - data up to date (total: {final_count})")
+            return True  # Skip writing if no new data
         
         # Save updated data back to Spaces
         logger.info(f"💾 Preparing to save updated data for {ticker} ({interval})...")
@@ -258,6 +266,7 @@ def run_compact_update():
     5. Standardize timestamps
     6. Save back to DigitalOcean Spaces
     """
+    logging.info("--- COMPACT UPDATE JOB STARTING ---")
     logger.info("=" * 60)
     logger.info("⚡ STARTING COMPACT UPDATE ENGINE")
     logger.info("=" * 60)
@@ -275,6 +284,7 @@ def run_compact_update():
         logger.info(f"INFO: Outside of all trading hours (4:00 AM - 8:00 PM ET). Current time: {now_eastern.strftime('%H:%M:%S ET')}. Skipping real-time update.")
         sys.exit(0)
     
+    logging.info(f"Market hours check PASSED...")
     logger.info(f"✅ Within trading hours ({now_eastern.strftime('%H:%M:%S ET')}). Proceeding with real-time update.")
     
     # Check environment setup
@@ -302,6 +312,7 @@ def run_compact_update():
     
     # CRITICAL: Loop through EVERY ticker (fixes incomplete ticker processing)
     for i, ticker in enumerate(tickers, 1):
+        logging.info(f"--- Processing Ticker: {ticker} ---")
         logger.info(f"\n📍 Processing ticker {i}/{len(tickers)}: {ticker}")
         
         # Process 1-minute interval
@@ -376,12 +387,15 @@ def run_compact_update():
     # Determine overall success
     if complete_success == len(tickers):
         logger.info("🌟 PERFECT COMPACT UPDATE - All tickers updated completely!")
+        logging.info("--- COMPACT UPDATE JOB FINISHED ---")
         return True
     elif ticker_success_rate >= 80:
         logger.info("🎉 SUCCESSFUL COMPACT UPDATE - Most tickers updated!")
+        logging.info("--- COMPACT UPDATE JOB FINISHED ---")
         return True
     else:
         logger.error("💥 FAILED COMPACT UPDATE - Too many ticker failures")
+        logging.info("--- COMPACT UPDATE JOB FINISHED ---")
         return False
 
 
