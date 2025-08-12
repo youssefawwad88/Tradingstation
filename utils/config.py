@@ -80,3 +80,13 @@ DEFAULT_TICKERS = [
 
 # Time Intervals
 INTRADAY_INTERVALS = ["1min", "30min"]
+
+# --- Data Health Check Requirements ---
+# Minimum number of rows required for historical daily data
+DAILY_MIN_ROWS = 200
+
+# Minimum number of rows required for historical 30-minute data
+THIRTY_MIN_MIN_ROWS = 500
+
+# Required lookback period in days for 1-minute data
+ONE_MIN_REQUIRED_DAYS = 7

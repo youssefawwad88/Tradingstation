@@ -251,15 +251,31 @@ def run_compact_update():
     Execute the compact update process.
     
     This is the main function that orchestrates real-time intraday updates:
-    1. Read master watchlist (ALL tickers)
-    2. For each ticker, fetch compact data for 1min and 30min
-    3. Merge with existing data (intelligent deduplication)  
-    4. Standardize timestamps
-    5. Save back to DigitalOcean Spaces
+    1. Check if we're within extended trading hours (4:00 AM - 8:00 PM ET)
+    2. Read master watchlist (ALL tickers)
+    3. For each ticker, fetch compact data for 1min and 30min
+    4. Merge with existing data (intelligent deduplication)  
+    5. Standardize timestamps
+    6. Save back to DigitalOcean Spaces
     """
     logger.info("=" * 60)
     logger.info("⚡ STARTING COMPACT UPDATE ENGINE")
     logger.info("=" * 60)
+    
+    # Check if we're within extended trading hours (4:00 AM - 8:00 PM ET)
+    now_utc = datetime.now(pytz.utc)
+    eastern = pytz.timezone('America/New_York')
+    now_eastern = now_utc.astimezone(eastern)
+    
+    # Define trading window (4:00 AM to 8:00 PM ET)
+    trading_start = now_eastern.replace(hour=4, minute=0, second=0, microsecond=0)
+    trading_end = now_eastern.replace(hour=20, minute=0, second=0, microsecond=0)
+    
+    if not (trading_start <= now_eastern <= trading_end):
+        logger.info(f"INFO: Outside of all trading hours (4:00 AM - 8:00 PM ET). Current time: {now_eastern.strftime('%H:%M:%S ET')}. Skipping real-time update.")
+        sys.exit(0)
+    
+    logger.info(f"✅ Within trading hours ({now_eastern.strftime('%H:%M:%S ET')}). Proceeding with real-time update.")
     
     # Check environment setup
     if not ALPHA_VANTAGE_API_KEY:
