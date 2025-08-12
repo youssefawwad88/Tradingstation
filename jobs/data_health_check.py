@@ -52,21 +52,26 @@ def check_daily_data_health(ticker):
         bool: True if data is compliant
     """
     try:
+        logging.info(f"[{ticker}] Checking Daily data against rule: min {DAILY_MIN_ROWS} rows.")
         daily_path = f'data/daily/{ticker}_daily.csv'
         daily_df = read_df_from_s3(daily_path)
         
         if daily_df.empty:
+            logging.warning(f"[{ticker}] Daily data file NOT FOUND. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: Daily data file is empty or missing")
             return False
             
         if len(daily_df) < DAILY_MIN_ROWS:
+            logging.warning(f"[{ticker}] Daily data FAILED check. Found {len(daily_df)} rows, require {DAILY_MIN_ROWS}. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: Daily data insufficient - {len(daily_df)} rows (required: {DAILY_MIN_ROWS})")
             return False
             
+        logging.info(f"[{ticker}] Daily data OK ({len(daily_df)} rows).")
         logger.debug(f"✅ {ticker}: Daily data compliant - {len(daily_df)} rows")
         return True
         
     except Exception as e:
+        logging.warning(f"[{ticker}] Daily data file NOT FOUND. Flagging as deficient.")
         logger.debug(f"❌ {ticker}: Daily data check failed - {e}")
         return False
 
@@ -82,21 +87,26 @@ def check_30min_data_health(ticker):
         bool: True if data is compliant
     """
     try:
+        logging.info(f"[{ticker}] Checking 30min data against rule: min {THIRTY_MIN_MIN_ROWS} rows.")
         min_30_path = f'data/intraday_30min/{ticker}_30min.csv'
         min_30_df = read_df_from_s3(min_30_path)
         
         if min_30_df.empty:
+            logging.warning(f"[{ticker}] 30min data file NOT FOUND. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: 30-minute data file is empty or missing")
             return False
             
         if len(min_30_df) < THIRTY_MIN_MIN_ROWS:
+            logging.warning(f"[{ticker}] 30min data FAILED check. Found {len(min_30_df)} rows, require {THIRTY_MIN_MIN_ROWS}. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: 30-minute data insufficient - {len(min_30_df)} rows (required: {THIRTY_MIN_MIN_ROWS})")
             return False
             
+        logging.info(f"[{ticker}] 30min data OK ({len(min_30_df)} rows).")
         logger.debug(f"✅ {ticker}: 30-minute data compliant - {len(min_30_df)} rows")
         return True
         
     except Exception as e:
+        logging.warning(f"[{ticker}] 30min data file NOT FOUND. Flagging as deficient.")
         logger.debug(f"❌ {ticker}: 30-minute data check failed - {e}")
         return False
 
@@ -112,16 +122,19 @@ def check_1min_data_health(ticker):
         bool: True if data is compliant
     """
     try:
+        logging.info(f"[{ticker}] Checking 1min data against rule: min {ONE_MIN_REQUIRED_DAYS} days coverage.")
         min_1_path = f'data/intraday/{ticker}_1min.csv'
         min_1_df = read_df_from_s3(min_1_path)
         
         if min_1_df.empty:
+            logging.warning(f"[{ticker}] 1min data file NOT FOUND. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: 1-minute data file is empty or missing")
             return False
         
         # Check date coverage
         timestamp_col = 'timestamp' if 'timestamp' in min_1_df.columns else 'Date'
         if timestamp_col not in min_1_df.columns:
+            logging.warning(f"[{ticker}] 1min data FAILED check. Missing timestamp column. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: 1-minute data missing timestamp column")
             return False
             
@@ -136,14 +149,17 @@ def check_1min_data_health(ticker):
         
         if oldest_data_localized > cutoff_date:
             days_coverage = (datetime.now(pytz.timezone(TIMEZONE)) - oldest_data_localized).days
+            logging.warning(f"[{ticker}] 1min data FAILED check. Found {days_coverage} days coverage, require {ONE_MIN_REQUIRED_DAYS} days. Flagging as deficient.")
             logger.debug(f"❌ {ticker}: 1-minute data insufficient coverage - {days_coverage} days (required: {ONE_MIN_REQUIRED_DAYS})")
             return False
             
         days_coverage = (datetime.now(pytz.timezone(TIMEZONE)) - oldest_data_localized).days
+        logging.info(f"[{ticker}] 1min data OK ({days_coverage} days coverage, {len(min_1_df)} rows).")
         logger.debug(f"✅ {ticker}: 1-minute data compliant - {days_coverage} days coverage, {len(min_1_df)} rows")
         return True
         
     except Exception as e:
+        logging.warning(f"[{ticker}] 1min data file NOT FOUND. Flagging as deficient.")
         logger.debug(f"❌ {ticker}: 1-minute data check failed - {e}")
         return False
 
@@ -158,6 +174,7 @@ def run_health_check():
     3. Identify deficient tickers
     4. Trigger targeted full fetch for repairs
     """
+    logging.info("--- DATA HEALTH & RECOVERY JOB STARTING ---")
     logger.info("=" * 60)
     logger.info("🏥 STARTING DATA HEALTH AND RECOVERY CHECK")
     logger.info("=" * 60)
@@ -168,6 +185,7 @@ def run_health_check():
         logger.error("❌ No tickers found in master watchlist")
         return False
     
+    logging.info(f"Loaded {len(tickers)} tickers from master list.")
     logger.info(f"📋 Checking health for {len(tickers)} tickers: {tickers}")
     
     # Initialize deficiencies tracking
@@ -175,6 +193,7 @@ def run_health_check():
     
     # Loop through every ticker and check health
     for i, ticker in enumerate(tickers, 1):
+        logging.info(f"--- Checking Ticker: {ticker} ---")
         logger.debug(f"🔍 Checking health for ticker: {ticker} ({i}/{len(tickers)})")
         
         # Check daily data first (most critical)
@@ -197,15 +216,21 @@ def run_health_check():
             
         logger.debug(f"✅ {ticker}: All data health checks passed")
     
+    logging.info("--- Health Check Analysis Complete ---")
+    
     # Analyze results and take action
     if not deficient_tickers:
+        logging.info("No deficient tickers found. All data is compliant.")
         logger.info("🎉 Data health check complete. All tickers are compliant.")
         logger.info(f"✅ System health: 100% ({len(tickers)}/{len(tickers)} tickers compliant)")
+        logging.info("--- DATA HEALTH & RECOVERY JOB FINISHED ---")
         return True
     else:
         compliant_count = len(tickers) - len(deficient_tickers)
         compliance_rate = (compliant_count / len(tickers)) * 100 if tickers else 0
         
+        logging.info(f"Found {len(deficient_tickers)} deficient tickers: {deficient_tickers}.")
+        logging.info("Triggering targeted full fetch for deficient tickers...")
         logger.info(f"⚠️ Found {len(deficient_tickers)} deficient tickers: {deficient_tickers}")
         logger.info(f"📊 System health: {compliance_rate:.1f}% ({compliant_count}/{len(tickers)} tickers compliant)")
         logger.info("🔧 Triggering targeted full fetch for data recovery...")
@@ -220,14 +245,17 @@ def run_health_check():
             if recovery_success:
                 logger.info("✅ Targeted full fetch completed successfully")
                 logger.info("🏥 Data recovery operation finished - system health should be restored")
+                logging.info("--- DATA HEALTH & RECOVERY JOB FINISHED ---")
                 return True
             else:
                 logger.error("❌ Targeted full fetch failed - manual intervention may be required")
+                logging.info("--- DATA HEALTH & RECOVERY JOB FINISHED ---")
                 return False
                 
         except Exception as e:
             logger.error(f"❌ Error during targeted full fetch: {e}")
             logger.error("💥 Data recovery failed - manual intervention required")
+            logging.info("--- DATA HEALTH & RECOVERY JOB FINISHED ---")
             return False
 
 
