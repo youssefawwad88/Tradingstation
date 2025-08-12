@@ -72,7 +72,7 @@ def standardize_timestamp_column(df: pd.DataFrame, timestamp_col: str = 'timesta
         logger.info("🌍 Step 3: Converting to UTC for standardized storage")
         df_copy[timestamp_col] = df_copy[timestamp_col].dt.tz_convert(UTC_TIMEZONE)
         
-        # Format as ISO 8601 UTC string for CSV storage
+        # Format as clean UTC string for CSV storage (remove microseconds for clean timestamps)
         df_copy[timestamp_col] = df_copy[timestamp_col].dt.strftime('%Y-%m-%d %H:%M:%S+00:00')
         
         logger.info(f"✅ TIMESTAMP STANDARDIZATION COMPLETE: {len(df_copy)} rows processed")
