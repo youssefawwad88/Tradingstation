@@ -312,16 +312,20 @@ def save_ticker_data(ticker, results):
         return False
 
 
-def run_full_fetch():
+def run_full_fetch(tickers_to_fetch: list = None):
     """
     Execute the full fetch process.
     
     This is the main function that orchestrates the complete daily data refresh:
-    1. Read master watchlist (ALL tickers)
+    1. Read master watchlist (ALL tickers) or use provided targeted list
     2. Fetch full historical data for all timeframes
     3. Apply cleanup and trimming rules
     4. Standardize timestamps
     5. Save to DigitalOcean Spaces
+    
+    Args:
+        tickers_to_fetch (list, optional): Specific list of tickers to fetch.
+                                         If None, fetches all tickers from master list.
     """
     logger.info("=" * 60)
     logger.info("🚀 STARTING FULL FETCH ENGINE")
@@ -335,14 +339,21 @@ def run_full_fetch():
     if not SPACES_BUCKET_NAME:
         logger.warning("⚠️ DigitalOcean Spaces not configured - using local storage only")
     
-    # Read master watchlist - CRITICAL: Read entire ticker column
-    tickers = read_master_tickerlist()
-    if not tickers:
-        logger.error("❌ No tickers found in master watchlist")
-        return False
+    # Determine ticker list to process
+    if tickers_to_fetch is not None:
+        tickers = tickers_to_fetch
+        logger.info(f"📋 Running full fetch in targeted mode for {len(tickers)} tickers: {tickers}")
+        logger.info("🎯 Targeted mode: Processing specific deficient tickers for data recovery")
+    else:
+        # Read master watchlist - CRITICAL: Read entire ticker column
+        tickers = read_master_tickerlist()
+        if not tickers:
+            logger.error("❌ No tickers found in master watchlist")
+            return False
+        logger.info(f"📋 Running full fetch in default mode for all {len(tickers)} tickers: {tickers}")
+        logger.info("🔄 Default mode: Processing EVERY ticker for complete data refresh")
     
-    logger.info(f"📋 Processing {len(tickers)} tickers from master_tickerlist.csv: {tickers}")
-    logger.info("🔄 This engine will process EVERY single ticker to fix incomplete processing")
+    logger.info("🔄 This engine will process EVERY specified ticker to fix incomplete processing")
     
     # Track progress
     processed_count = 0

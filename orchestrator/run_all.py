@@ -193,12 +193,27 @@ def run_consolidation():
         logger.info("[TEST MODE] Signal consolidation simulation completed")
     return result
 
+def run_data_health_check():
+    """Run data health check and auto-repair."""
+    mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
+    logger.info(f"{mode_prefix} Starting data health check")
+    result = run_job("jobs/data_health_check.py", "data_health_check")
+    if TEST_MODE_ACTIVE and result:
+        logger.info("[TEST MODE] Data health check simulation completed")
+    return result
+
 def setup_production_schedule():
     """Set up all production job schedules."""
     ny_tz = pytz.timezone('America/New_York')
     
+    # Import the data health check function
+    from jobs.data_health_check import run_health_check
+    
     # Daily data jobs - 5:00 PM ET
     schedule.every().day.at("17:00").do(run_daily_data_jobs).tag('daily')
+    
+    # Data health check - every 6 hours (4 times a day)
+    schedule.every(6).hours.do(run_data_health_check).tag('health_check')
     
     # Intraday updates - every minute during extended hours (4:00 AM - 8:00 PM ET)
     for hour in range(4, 20):
