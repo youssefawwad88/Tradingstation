@@ -70,7 +70,7 @@ def standardize_timestamps(df, data_type):
 
 def merge_new_candles(existing_df, new_df):
     """
-    Intelligently merge new candles with existing data.
+    Intelligently merge new candles with existing data with enhanced transparency logging.
     
     Ensures no duplicates by comparing timestamps and only adding truly new candles.
     This is critical for correctly updating the current day's files.
@@ -83,14 +83,21 @@ def merge_new_candles(existing_df, new_df):
         DataFrame: Merged dataframe with new unique candles appended
     """
     if existing_df.empty:
-        logger.debug("No existing data - returning all new data")
+        logger.info("📊 Merge analysis: No existing data - returning all new data")
+        logger.info(f"   Original: 0 rows, New: {len(new_df)} rows, Final: {len(new_df)} rows")
         return new_df
     
     if new_df.empty:
-        logger.debug("No new data - returning existing data unchanged")
+        logger.info("📊 Merge analysis: No new data - returning existing data unchanged")
+        logger.info(f"   Original: {len(existing_df)} rows, New: 0 rows, Final: {len(existing_df)} rows")
         return existing_df
     
     try:
+        # Enhanced logging: Show initial counts
+        original_count = len(existing_df)
+        new_count = len(new_df)
+        logger.info(f"📊 Merge analysis: Starting with {original_count} existing rows, {new_count} new rows")
+        
         # Ensure both dataframes have consistent timestamp column
         timestamp_col = 'timestamp'
         
@@ -118,7 +125,14 @@ def merge_new_candles(existing_df, new_df):
         existing_timestamps = set(existing_df[timestamp_col])
         new_candles = new_df[~new_df[timestamp_col].isin(existing_timestamps)]
         
-        logger.debug(f"Merge analysis: {len(existing_df)} existing, {len(new_df)} new, {len(new_candles)} unique new candles")
+        # Enhanced logging: Show detailed merge analysis
+        unique_new_count = len(new_candles)
+        overlap_count = new_count - unique_new_count
+        logger.info(f"📊 Merge deduplication analysis:")
+        logger.info(f"   • Existing data: {original_count} rows")
+        logger.info(f"   • New data received: {new_count} rows") 
+        logger.info(f"   • Overlapping timestamps: {overlap_count} rows (will be skipped)")
+        logger.info(f"   • Unique new candles: {unique_new_count} rows (will be added)")
         
         if not new_candles.empty:
             # Append new candles to existing data
@@ -128,22 +142,25 @@ def merge_new_candles(existing_df, new_df):
             merged_df = merged_df.sort_values(by=timestamp_col, ascending=True)
             
             # Remove any potential duplicates (safety check)
-            original_count = len(merged_df)
+            pre_dedup_count = len(merged_df)
             merged_df = merged_df.drop_duplicates(subset=[timestamp_col], keep='last')
-            deduplicated_count = len(merged_df)
+            final_count = len(merged_df)
             
-            if original_count != deduplicated_count:
-                logger.warning(f"Removed {original_count - deduplicated_count} duplicate timestamps during merge")
+            if pre_dedup_count != final_count:
+                logger.warning(f"⚠️ Removed {pre_dedup_count - final_count} duplicate timestamps during final deduplication")
             
-            logger.info(f"✅ Merge successful: added {len(new_candles)} new candles, total: {len(merged_df)}")
+            # Enhanced logging: Show final merge results
+            logger.info(f"✅ Merge successful: Added {unique_new_count} new candles")
+            logger.info(f"   Original: {original_count} rows → New: {new_count} rows → Final: {final_count} rows")
             return merged_df
         else:
-            logger.debug("No new candles found to append - data is up to date")
+            logger.info("ℹ️ No new candles found to append - data is current and up to date")
+            logger.info(f"   Original: {original_count} rows → New: {new_count} rows → Final: {original_count} rows (no changes)")
             return existing_df
             
     except Exception as e:
         logger.error(f"❌ Error merging candles: {e}")
-        logger.warning("🔄 Returning existing data as fallback to avoid data loss")
+        logger.warning(f"🔄 Returning existing data as fallback to avoid data loss ({len(existing_df)} rows)")
         # On error, return existing data to avoid data loss
         return existing_df
 
@@ -208,12 +225,19 @@ def process_ticker_interval(ticker, interval):
             logger.debug(f"📊 No new candles for {ticker} ({interval}) - data up to date (total: {final_count})")
         
         # Save updated data back to Spaces
-        logger.debug(f"💾 Saving updated data for {ticker} ({interval})...")
+        logger.info(f"💾 Preparing to save updated data for {ticker} ({interval})...")
+        
+        # Enhanced logging: Show exact data being saved
+        data_size = len(merged_df.to_csv(index=False).encode('utf-8'))
+        logger.info(f"   Data size: {data_size} bytes, Total rows: {final_count}")
+        
         if save_df_to_s3(merged_df, file_path):
-            logger.info(f"✅ Saved updated data: {file_path} ({final_count} total rows)")
+            # Enhanced logging: Confirm successful write with details
+            logger.info(f"✅ Successfully wrote {data_size} bytes to S3 path: {file_path}")
+            logger.info(f"   Updated data for {ticker} ({interval}): {final_count} total rows saved")
             return True
         else:
-            logger.error(f"❌ Failed to save data for {ticker} ({interval})")
+            logger.error(f"❌ Failed to save data for {ticker} ({interval}) to path: {file_path}")
             return False
             
     except Exception as e:

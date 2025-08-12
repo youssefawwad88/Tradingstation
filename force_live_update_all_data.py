@@ -26,8 +26,9 @@ os.environ['MODE'] = 'production'
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
-# Import update_all_data function and other utilities
-from jobs.update_all_data import run_full_rebuild
+# Import new data engine functions and other utilities
+from jobs.full_fetch import run_full_fetch
+from jobs.compact_update import run_compact_update
 from utils.helpers import read_df_from_s3
 from utils.config import ALPHA_VANTAGE_API_KEY
 
@@ -165,25 +166,32 @@ def update_all_data_with_override(force_live=True, verbose=False):
     logger.info(f"📊 PROCESSING {len(tickers)} TICKERS FOR LIVE DATA UPDATE")
     logger.info("=" * 80)
     
-    # Import and patch the update_all_data to ensure it runs in live mode
-    import jobs.update_all_data as update_module
-    
-    # Override any test mode detection within the module
-    if hasattr(update_module, 'should_use_test_mode'):
-        original_test_mode = update_module.should_use_test_mode
-        update_module.should_use_test_mode = lambda: False
-        logger.info("🔧 Patched should_use_test_mode() to return False")
-    
     try:
-        # Run the full rebuild process with live data
-        logger.info("🚀 STARTING LIVE DATA REBUILD PROCESS")
+        # Run the new two-engine architecture with live data
+        logger.info("🚀 STARTING LIVE DATA ENGINE OVERHAUL")
         logger.info("   This will make REAL API calls to Alpha Vantage")
-        logger.info("   Processing ALL timeframes: daily, 30min, 1min")
+        logger.info("   Using NEW two-engine architecture: Full Fetch + Compact Update")
         
-        # Call the run_full_rebuild function
-        run_full_rebuild()
+        # Step 1: Run Full Fetch Engine
+        logger.info("📊 STEP 1: Running Full Fetch Engine (complete historical rebuild)")
+        full_fetch_success = run_full_fetch()
         
-        logger.info("✅ LIVE DATA REBUILD COMPLETED SUCCESSFULLY")
+        if not full_fetch_success:
+            logger.error("❌ Full Fetch Engine failed!")
+            return False
+        
+        logger.info("✅ Full Fetch Engine completed successfully")
+        
+        # Step 2: Run Compact Update Engine for current data
+        logger.info("⚡ STEP 2: Running Compact Update Engine (real-time updates)")
+        compact_update_success = run_compact_update()
+        
+        if not compact_update_success:
+            logger.warning("⚠️ Compact Update Engine had issues (may be normal if market is closed)")
+        else:
+            logger.info("✅ Compact Update Engine completed successfully")
+        
+        logger.info("✅ LIVE DATA ENGINE OVERHAUL COMPLETED")
         
         # Post-processing verification
         logger.info("🔍 STARTING POST-PROCESSING VERIFICATION")
