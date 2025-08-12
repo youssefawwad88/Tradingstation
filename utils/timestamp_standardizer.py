@@ -211,8 +211,13 @@ def apply_timestamp_standardization_to_api_data(df: pd.DataFrame, data_type: str
     else:
         standardized_df = standardize_timestamp_column(df, timestamp_col)
     
+    # Ensure the column is named 'timestamp' for consistency
+    if timestamp_col != 'timestamp':
+        standardized_df = standardized_df.rename(columns={timestamp_col: 'timestamp'})
+        logger.debug(f"Renamed column '{timestamp_col}' to 'timestamp' for consistency")
+    
     # Validate the standardization
-    if validate_timestamp_standardization(standardized_df, timestamp_col):
+    if validate_timestamp_standardization(standardized_df, 'timestamp'):
         logger.info("✅ TIMESTAMP STANDARDIZATION VALIDATED SUCCESSFULLY")
     else:
         logger.error("❌ TIMESTAMP STANDARDIZATION VALIDATION FAILED")
