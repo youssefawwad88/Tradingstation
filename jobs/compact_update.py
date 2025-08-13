@@ -266,6 +266,7 @@ def run_compact_update():
     5. Standardize timestamps
     6. Save back to DigitalOcean Spaces
     """
+    print("!!!! DEPLOYMENT TEST v5: compact_update IS RUNNING NEW CODE !!!!")
     logging.info("--- COMPACT UPDATE JOB STARTING ---")
     logger.info("=" * 60)
     logger.info("⚡ STARTING COMPACT UPDATE ENGINE")
