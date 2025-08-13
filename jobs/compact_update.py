@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-Compact Update Engine - Real-time Intraday Updates
-==================================================
+Compact Update Engine - Real-time Data Updates
+==============================================
 
 This script keeps intraday data up-to-date in real-time during market hours.
+UPDATED: Now uses GLOBAL_QUOTE endpoint for true real-time data fetching.
+
 Implements the requirements specified in the problem statement:
 
 1. Reads entire ticker column from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)
 2. Loops through EVERY single ticker (fixes incomplete ticker processing)
-3. Fetches compact data (latest 100 candles) for 1-min and 30-min timeframes
+3. Fetches real-time data using GLOBAL_QUOTE endpoint (latest live quote)
 4. Reads existing data from DigitalOcean Spaces
-5. Intelligently merges new data with existing files, appending only new, unique candles
+5. Intelligently merges new real-time data with existing files, appending only new candles
 6. Performs mandatory timestamp standardization (America/New_York -> UTC)
 7. Saves updated datasets back to Spaces
 
 This is the live update layer that runs frequently during market hours AFTER full fetch completes.
+Now uses the correct real-time API endpoint to fix the bug where current day's data was not being fetched.
 """
 
 import os
@@ -30,13 +33,46 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import core utilities
 from utils.config import ALPHA_VANTAGE_API_KEY, SPACES_BUCKET_NAME, TIMEZONE
-from utils.alpha_vantage_api import get_intraday_data
+from utils.alpha_vantage_api import get_real_time_price
 from utils.helpers import read_master_tickerlist, save_df_to_s3, read_df_from_s3, update_scheduler_status
 from utils.timestamp_standardizer import apply_timestamp_standardization_to_api_data
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def convert_global_quote_to_dataframe(quote_data, ticker):
+    """
+    Convert GLOBAL_QUOTE API response to DataFrame format matching existing data structure.
+    
+    Args:
+        quote_data (dict): Global quote data from Alpha Vantage API
+        ticker (str): Stock ticker symbol
+        
+    Returns:
+        DataFrame: Single-row DataFrame with current real-time data
+    """
+    if not quote_data:
+        return pd.DataFrame()
+    
+    try:
+        # Create DataFrame with structure matching existing historical data
+        df = pd.DataFrame({
+            'timestamp': [quote_data['latest_trading_day']],
+            'open': [quote_data['open']],
+            'high': [quote_data['high']], 
+            'low': [quote_data['low']],
+            'close': [quote_data['price']],  # Use current price as close
+            'volume': [quote_data['volume']]
+        })
+        
+        logger.debug(f"Converted GLOBAL_QUOTE to DataFrame for {ticker}: {len(df)} row")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error converting GLOBAL_QUOTE data to DataFrame for {ticker}: {e}")
+        return pd.DataFrame()
 
 
 def standardize_timestamps(df, data_type):
@@ -168,58 +204,67 @@ def merge_new_candles(existing_df, new_df):
         return existing_df
 
 
-def process_ticker_interval(ticker, interval):
+def process_ticker_realtime(ticker):
     """
-    Process updates for a single ticker and interval.
+    Process real-time updates for a single ticker using GLOBAL_QUOTE endpoint.
+    
+    New real-time logic as per requirements:
+    1. Call GLOBAL_QUOTE endpoint for the ticker
+    2. Transform single quote into one-row DataFrame matching existing structure  
+    3. Load existing data file from DigitalOcean Spaces
+    4. Append new one-row DataFrame to end of existing data
+    5. Save updated DataFrame back to DigitalOcean Spaces
     
     Args:
         ticker (str): Stock ticker symbol
-        interval (str): '1min' or '30min'
         
     Returns:
         bool: True if processing successful
     """
     try:
-        logger.info(f"📊 Processing {ticker} ({interval})")
+        logger.info(f"📊 Processing real-time data for {ticker}")
         
-        # Determine file path based on interval
-        if interval == '1min':
-            file_path = f'data/intraday/{ticker}_1min.csv'
-        elif interval == '30min':
-            file_path = f'data/intraday_30min/{ticker}_30min.csv'
-        else:
-            logger.error(f"❌ Invalid interval: {interval}")
-            return False
+        # Step 1: Call GLOBAL_QUOTE endpoint for the ticker
+        logging.info(f"[{ticker}] Fetching real-time quote...")
+        logger.debug(f"🔄 Fetching GLOBAL_QUOTE data for {ticker}...")
+        quote_data = get_real_time_price(ticker)
         
-        # Read existing data from Spaces
-        logger.debug(f"📂 Reading existing data: {file_path}")
-        existing_df = read_df_from_s3(file_path)
-        existing_count = len(existing_df) if not existing_df.empty else 0
-        logging.info(f"[{ticker}] Loaded existing file... It has {existing_count} rows.")
-        logger.debug(f"📊 Existing data for {ticker} ({interval}): {existing_count} rows")
-        
-        # Fetch latest compact data (100 candles)
-        logging.info(f"[{ticker}] Attempting to fetch...")
-        logger.debug(f"🔄 Fetching compact {interval} data for {ticker}...")
-        new_df = get_intraday_data(ticker, interval=interval, outputsize='full')
-        
-        if new_df.empty:
-            logging.info(f"[{ticker}] API returned no new data. Skipping.")
-            logger.warning(f"⚠️ No new data received for {ticker} ({interval}) - API may have failed or market closed")
+        if not quote_data:
+            logging.info(f"[{ticker}] API returned no real-time data. Skipping.")
+            logger.warning(f"⚠️ No real-time data received for {ticker} - API may have failed or market closed")
             # Not necessarily an error - market might be closed or no new data available
             return True  # Consider this a success since it's not a processing failure
         
-        new_count = len(new_df)
-        logging.info(f"[{ticker}] API returned {new_count} new rows.")
-        logger.info(f"📥 Received {new_count} new candles for {ticker} ({interval})")
+        logging.info(f"[{ticker}] Real-time quote received.")
+        logger.info(f"📥 Received real-time quote for {ticker}")
+        
+        # Step 2: Transform single quote into one-row DataFrame matching existing structure
+        logger.debug(f"🔄 Converting GLOBAL_QUOTE to DataFrame for {ticker}...")
+        new_df = convert_global_quote_to_dataframe(quote_data, ticker)
+        
+        if new_df.empty:
+            logger.error(f"❌ Failed to convert GLOBAL_QUOTE data to DataFrame for {ticker}")
+            return False
+        
+        logger.debug(f"✅ Real-time data converted to DataFrame for {ticker}: {len(new_df)} row")
         
         # Standardize timestamps for new data
-        logger.debug(f"🕐 Standardizing timestamps for {ticker} ({interval})...")
-        new_df = standardize_timestamps(new_df, interval)
-        logger.debug(f"✅ Timestamps standardized for {ticker} ({interval})")
+        logger.debug(f"🕐 Standardizing timestamps for {ticker}...")
+        new_df = standardize_timestamps(new_df, '1min')  # Use 1min as data type for real-time
+        logger.debug(f"✅ Timestamps standardized for {ticker}")
         
-        # Merge with existing data (intelligent deduplication)
-        logger.debug(f"🔀 Merging new data with existing for {ticker} ({interval})...")
+        # Process for 1-minute data file (most granular real-time updates)
+        file_path = f'data/intraday/{ticker}_1min.csv'
+        
+        # Step 3: Load existing data file from DigitalOcean Spaces
+        logger.debug(f"📂 Reading existing 1min data: {file_path}")
+        existing_df = read_df_from_s3(file_path)
+        existing_count = len(existing_df) if not existing_df.empty else 0
+        logging.info(f"[{ticker}] Loaded existing 1min file... It has {existing_count} rows.")
+        logger.debug(f"📊 Existing 1min data for {ticker}: {existing_count} rows")
+        
+        # Step 4: Append new one-row DataFrame to end of existing data  
+        logger.debug(f"🔀 Merging new real-time data with existing for {ticker}...")
         merged_df = merge_new_candles(existing_df, new_df)
         logging.info(f"[{ticker}] Merge complete. Combined DataFrame now has {len(merged_df)} rows.")
         
@@ -228,16 +273,16 @@ def process_ticker_interval(ticker, interval):
         new_candles_count = final_count - existing_count
         
         if new_candles_count > 0:
-            logging.info(f"[{ticker}] Data has changed. Preparing to write...")
-            # Required logging format: "INFO: Merge successful: Added X new candles for TICKER (interval)"
-            logger.info(f"INFO: Merge successful: Added {new_candles_count} new candles for {ticker} ({interval})")
+            logging.info(f"[{ticker}] Real-time data has changed. Preparing to write...")
+            # Required logging format: "INFO: Merge successful: Added X new candles for TICKER (real-time)"
+            logger.info(f"INFO: Merge successful: Added {new_candles_count} new candles for {ticker} (real-time)")
         else:
-            logging.info(f"[{ticker}] No data change detected... Skipping cloud write.")
-            logger.debug(f"📊 No new candles for {ticker} ({interval}) - data up to date (total: {final_count})")
+            logging.info(f"[{ticker}] No real-time data change detected... Skipping cloud write.")
+            logger.debug(f"📊 No new real-time candles for {ticker} - data up to date (total: {final_count})")
             return True  # Skip writing if no new data
         
-        # Save updated data back to Spaces
-        logger.info(f"💾 Preparing to save updated data for {ticker} ({interval})...")
+        # Step 5: Save updated DataFrame back to DigitalOcean Spaces
+        logger.info(f"💾 Preparing to save updated real-time data for {ticker}...")
         
         # Enhanced logging: Show exact data being saved
         data_size = len(merged_df.to_csv(index=False).encode('utf-8'))
@@ -246,15 +291,15 @@ def process_ticker_interval(ticker, interval):
         if save_df_to_s3(merged_df, file_path):
             # Enhanced logging: Confirm successful write with details
             logger.info(f"✅ Successfully wrote {data_size} bytes to S3 path: {file_path}")
-            logger.info(f"   Updated data for {ticker} ({interval}): {final_count} total rows saved")
+            logger.info(f"   Updated real-time data for {ticker}: {final_count} total rows saved")
             return True
         else:
-            logger.error(f"❌ Failed to save data for {ticker} ({interval}) to path: {file_path}")
+            logger.error(f"❌ Failed to save real-time data for {ticker} to path: {file_path}")
             return False
             
     except Exception as e:
-        logger.error(f"❌ Critical error processing {ticker} ({interval}): {e}")
-        logger.error(f"❌ Ticker {ticker} ({interval}) processing failed - continuing with next")
+        logger.error(f"❌ Critical error processing real-time data for {ticker}: {e}")
+        logger.error(f"❌ Ticker {ticker} real-time processing failed - continuing with next")
         return False
 
 
@@ -310,7 +355,7 @@ def run_compact_update():
     logger.info("🔄 This engine will process EVERY single ticker to fix incomplete processing")
     
     # Track progress
-    total_operations = len(tickers) * 2  # 1min + 30min for each ticker
+    total_operations = len(tickers)  # One real-time operation per ticker
     success_count = 0
     failed_operations = []
     ticker_summaries = []
@@ -320,39 +365,21 @@ def run_compact_update():
         logging.info(f"--- Processing Ticker: {ticker} ---")
         logger.info(f"\n📍 Processing ticker {i}/{len(tickers)}: {ticker}")
         
-        # Process 1-minute interval
-        logger.debug(f"🔄 Starting 1min processing for {ticker}...")
-        success_1min = process_ticker_interval(ticker, '1min')
-        if success_1min:
+        # Process real-time data using GLOBAL_QUOTE endpoint
+        logger.debug(f"🔄 Starting real-time processing for {ticker}...")
+        success_realtime = process_ticker_realtime(ticker)
+        if success_realtime:
             success_count += 1
-            logger.debug(f"✅ 1min processing successful for {ticker}")
-        else:
-            failed_operations.append(f"{ticker}:1min")
-            logger.warning(f"❌ 1min processing failed for {ticker}")
-        
-        # Process 30-minute interval
-        logger.debug(f"🔄 Starting 30min processing for {ticker}...")
-        success_30min = process_ticker_interval(ticker, '30min')
-        if success_30min:
-            success_count += 1
-            logger.debug(f"✅ 30min processing successful for {ticker}")
-        else:
-            failed_operations.append(f"{ticker}:30min")
-            logger.warning(f"❌ 30min processing failed for {ticker}")
-        
-        # Log ticker completion
-        overall_success = success_1min and success_30min
-        if overall_success:
+            logger.debug(f"✅ Real-time processing successful for {ticker}")
             status = "🎉 COMPLETE SUCCESS"
             ticker_summaries.append(f"{ticker}: ✅")
-        elif success_1min or success_30min:
-            status = "⚠️ PARTIAL SUCCESS"
-            ticker_summaries.append(f"{ticker}: ⚠️")
         else:
+            failed_operations.append(f"{ticker}:realtime")
+            logger.warning(f"❌ Real-time processing failed for {ticker}")
             status = "💥 COMPLETE FAILURE"
             ticker_summaries.append(f"{ticker}: ❌")
             
-        logger.info(f"📊 {ticker}: {status} (1min: {'✅' if success_1min else '❌'}, 30min: {'✅' if success_30min else '❌'})")
+        logger.info(f"📊 {ticker}: {status} (real-time: {'✅' if success_realtime else '❌'})")
         
         # Rate limiting - respect API limits
         if i < len(tickers):  # Don't sleep after last ticker
@@ -370,11 +397,9 @@ def run_compact_update():
     
     # Calculate ticker-level results
     complete_success = sum(1 for summary in ticker_summaries if "✅" in summary)
-    partial_success = sum(1 for summary in ticker_summaries if "⚠️" in summary)
     complete_failures = sum(1 for summary in ticker_summaries if "❌" in summary)
     
     logger.info(f"🎉 Complete ticker success: {complete_success}")
-    logger.info(f"⚠️ Partial ticker success: {partial_success}")
     logger.info(f"💥 Complete ticker failures: {complete_failures}")
     
     if failed_operations:
@@ -384,10 +409,10 @@ def run_compact_update():
     logger.info(f"📊 Ticker results: {' '.join(ticker_summaries)}")
     
     operation_success_rate = (success_count / total_operations) * 100 if total_operations else 0
-    ticker_success_rate = ((complete_success + partial_success) / len(tickers)) * 100 if tickers else 0
+    ticker_success_rate = (complete_success / len(tickers)) * 100 if tickers else 0
     
     logger.info(f"📈 Operation success rate: {operation_success_rate:.1f}% ({success_count}/{total_operations})")
-    logger.info(f"🎯 Ticker success rate: {ticker_success_rate:.1f}% ({complete_success + partial_success}/{len(tickers)})")
+    logger.info(f"🎯 Ticker success rate: {ticker_success_rate:.1f}% ({complete_success}/{len(tickers)})")
     
     # Determine overall success
     if complete_success == len(tickers):
