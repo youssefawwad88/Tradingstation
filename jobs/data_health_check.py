@@ -174,6 +174,7 @@ def run_health_check():
     3. Identify deficient tickers
     4. Trigger targeted full fetch for repairs
     """
+    print("!!!! DEPLOYMENT TEST v5: data_health_check IS RUNNING NEW CODE !!!!")
     logging.info("--- DATA HEALTH & RECOVERY JOB STARTING ---")
     logger.info("=" * 60)
     logger.info("🏥 STARTING DATA HEALTH AND RECOVERY CHECK")
