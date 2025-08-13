@@ -121,35 +121,38 @@ def merge_new_candles(existing_df, new_df):
         existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
         new_df[timestamp_col] = pd.to_datetime(new_df[timestamp_col])
         
-        # Find new candles that don't exist in current data
-        existing_timestamps = set(existing_df[timestamp_col])
-        new_candles = new_df[~new_df[timestamp_col].isin(existing_timestamps)]
+        # ROBUST 4-STEP MERGE PROCESS (as per problem statement requirements):
         
-        # Enhanced logging: Show detailed merge analysis
-        unique_new_count = len(new_candles)
-        overlap_count = new_count - unique_new_count
-        logger.info(f"📊 Merge deduplication analysis:")
-        logger.info(f"   • Existing data: {original_count} rows")
-        logger.info(f"   • New data received: {new_count} rows") 
-        logger.info(f"   • Overlapping timestamps: {overlap_count} rows (will be skipped)")
-        logger.info(f"   • Unique new candles: {unique_new_count} rows (will be added)")
+        # Step 1: Combine - Concatenate both DataFrames into one
+        logger.debug("Step 1: Combining existing and new DataFrames")
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+        combined_count = len(combined_df)
+        logger.debug(f"   Combined DataFrame: {combined_count} rows")
         
-        if not new_candles.empty:
-            # Append new candles to existing data
-            merged_df = pd.concat([existing_df, new_candles], ignore_index=True)
-            
-            # Sort by timestamp (chronological order)
-            merged_df = merged_df.sort_values(by=timestamp_col, ascending=True)
-            
-            # Remove any potential duplicates (safety check)
-            pre_dedup_count = len(merged_df)
-            merged_df = merged_df.drop_duplicates(subset=[timestamp_col], keep='last')
-            final_count = len(merged_df)
-            
-            if pre_dedup_count != final_count:
-                logger.warning(f"⚠️ Removed {pre_dedup_count - final_count} duplicate timestamps during final deduplication")
-            
-            # Enhanced logging: Show final merge results
+        # Step 2: Sort - Sort the combined DataFrame by timestamp, from oldest to newest
+        logger.debug("Step 2: Sorting combined DataFrame by timestamp (oldest to newest)")
+        combined_df = combined_df.sort_values(by=timestamp_col, ascending=True)
+        
+        # Step 3: Deduplicate - Remove duplicate rows based on timestamp, keeping the last entry
+        logger.debug("Step 3: Deduplicating by timestamp, keeping last entry")
+        pre_dedup_count = len(combined_df)
+        merged_df = combined_df.drop_duplicates(subset=[timestamp_col], keep='last')
+        final_count = len(merged_df)
+        
+        # Calculate how many unique new rows were actually added
+        unique_new_count = final_count - original_count
+        duplicates_removed = pre_dedup_count - final_count
+        
+        # Step 4: Log the Result - Crystal clear logging about the merge analysis
+        logger.info(f"📊 Merge analysis:")
+        logger.info(f"   • Original file: {original_count} rows")
+        logger.info(f"   • Fetched from API: {new_count} rows")
+        logger.info(f"   • Combined total: {combined_count} rows")
+        logger.info(f"   • Duplicates removed: {duplicates_removed} rows")
+        logger.info(f"   • Unique new rows added: {unique_new_count} rows")
+        logger.info(f"   • Final result: {final_count} rows")
+        
+        if unique_new_count > 0:
             logger.info(f"✅ Merge successful: Added {unique_new_count} new candles")
             logger.info(f"   Original: {original_count} rows → New: {new_count} rows → Final: {final_count} rows")
             return merged_df
@@ -226,7 +229,8 @@ def process_ticker_interval(ticker, interval):
         
         if new_candles_count > 0:
             logging.info(f"[{ticker}] Data has changed. Preparing to write...")
-            logger.info(f"✅ Added {new_candles_count} new candles for {ticker} ({interval}) (total: {final_count})")
+            # Required logging format: "INFO: Merge successful: Added X new candles for TICKER (interval)"
+            logger.info(f"INFO: Merge successful: Added {new_candles_count} new candles for {ticker} ({interval})")
         else:
             logging.info(f"[{ticker}] No data change detected... Skipping cloud write.")
             logger.debug(f"📊 No new candles for {ticker} ({interval}) - data up to date (total: {final_count})")
