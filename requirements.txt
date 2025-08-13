@@ -10,3 +10,4 @@ alpha_vantage
 aiohttp>=3.8.0
 PyYAML>=6.0
 psutil>=5.8.0
+# Deployment test v6 - Force DigitalOcean rebuild
