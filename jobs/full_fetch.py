@@ -146,7 +146,7 @@ def fetch_and_process_ticker(ticker):
             
             # Trim to 200 rows
             daily_df = trim_data_to_requirements(daily_df, 'daily')
-            logger.info(f"✂️ Daily data trimmed for {ticker}: {len(daily_df)} rows (target: 200)")
+            logger.info(f"INFO: Daily data trimmed for {ticker}: {len(daily_df)} rows")
             
             results['daily'] = daily_df
             success_count += 1
@@ -172,7 +172,7 @@ def fetch_and_process_ticker(ticker):
             
             # Trim to 500 rows
             min_30_df = trim_data_to_requirements(min_30_df, '30min')
-            logger.info(f"✂️ 30min data trimmed for {ticker}: {len(min_30_df)} rows (target: 500)")
+            logger.info(f"INFO: 30-minute data trimmed for {ticker}: {len(min_30_df)} rows")
             
             results['30min'] = min_30_df
             success_count += 1
@@ -198,7 +198,7 @@ def fetch_and_process_ticker(ticker):
             
             # Trim to 7 days
             min_1_df = trim_data_to_requirements(min_1_df, '1min')
-            logger.info(f"✂️ 1min data trimmed for {ticker}: {len(min_1_df)} rows (last 7 days)")
+            logger.info(f"INFO: 1-minute data trimmed for {ticker}: {len(min_1_df)} rows")
             
             results['1min'] = min_1_df
             success_count += 1
