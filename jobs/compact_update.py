@@ -198,7 +198,7 @@ def process_ticker_interval(ticker, interval):
         # Fetch latest compact data (100 candles)
         logging.info(f"[{ticker}] Attempting to fetch...")
         logger.debug(f"🔄 Fetching compact {interval} data for {ticker}...")
-        new_df = get_intraday_data(ticker, interval=interval, outputsize='compact')
+        new_df = get_intraday_data(ticker, interval=interval, outputsize='full')
         
         if new_df.empty:
             logging.info(f"[{ticker}] API returned no new data. Skipping.")
