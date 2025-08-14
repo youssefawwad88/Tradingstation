@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 def convert_global_quote_to_dataframe(quote_data, ticker):
     """
     Convert GLOBAL_QUOTE API response to DataFrame format matching existing data structure.
+    UPDATED: Uses current timestamp rounded to minute boundary for real-time candle generation.
     
     Args:
         quote_data (dict): Global quote data from Alpha Vantage API
@@ -57,17 +58,23 @@ def convert_global_quote_to_dataframe(quote_data, ticker):
         return pd.DataFrame()
     
     try:
+        # CRITICAL FIX: Use current timestamp instead of latest_trading_day for real-time data
+        # Round to the current minute boundary for proper candle generation
+        ny_tz = pytz.timezone('America/New_York')
+        current_time = datetime.now(ny_tz)
+        current_minute = current_time.replace(second=0, microsecond=0)
+        
         # Create DataFrame with structure matching existing historical data
         df = pd.DataFrame({
-            'timestamp': [quote_data['latest_trading_day']],
-            'open': [quote_data['open']],
-            'high': [quote_data['high']], 
-            'low': [quote_data['low']],
-            'close': [quote_data['price']],  # Use current price as close
-            'volume': [quote_data['volume']]
+            'timestamp': [current_minute.strftime('%Y-%m-%d %H:%M:%S')],
+            'open': [quote_data['price']],   # For real-time: open=current price (will be updated intelligently)
+            'high': [quote_data['price']],   # For real-time: high=current price (will be updated intelligently)
+            'low': [quote_data['price']],    # For real-time: low=current price (will be updated intelligently)
+            'close': [quote_data['price']],  # For real-time: close=current price
+            'volume': [quote_data['volume']] # Use reported volume
         })
         
-        logger.debug(f"Converted GLOBAL_QUOTE to DataFrame for {ticker}: {len(df)} row")
+        logger.debug(f"Converted GLOBAL_QUOTE to DataFrame for {ticker}: {len(df)} row with timestamp {current_minute}")
         return df
         
     except Exception as e:
@@ -104,36 +111,47 @@ def standardize_timestamps(df, data_type):
         return df
 
 
-def merge_new_candles(existing_df, new_df):
+def intelligent_append_or_update(existing_df, new_df):
     """
-    Intelligently merge new candles with existing data with enhanced transparency logging.
+    INTELLIGENT APPEND & UPDATE LOGIC as per problem statement requirements.
     
-    Ensures no duplicates by comparing timestamps and only adding truly new candles.
-    This is critical for correctly updating the current day's files.
+    Compare live quote timestamp with last candle timestamp:
+    - If live quote is in NEW minute: Append new candle 
+    - If live quote is in SAME minute: Update existing candle (high=max, low=min, close=current)
     
     Args:
-        existing_df (DataFrame): Current data from storage
-        new_df (DataFrame): New data from API
+        existing_df (DataFrame): Current data from storage (1-minute data)
+        new_df (DataFrame): New real-time data from GLOBAL_QUOTE
         
     Returns:
-        DataFrame: Merged dataframe with new unique candles appended
+        DataFrame: Updated dataframe with intelligent append/update applied
+    """
+def intelligent_append_or_update(existing_df, new_df):
+    """
+    INTELLIGENT APPEND & UPDATE LOGIC as per problem statement requirements.
+    
+    Compare live quote timestamp with last candle timestamp:
+    - If live quote is in NEW minute: Append new candle 
+    - If live quote is in SAME minute: Update existing candle (high=max, low=min, close=current)
+    
+    Args:
+        existing_df (DataFrame): Current data from storage (1-minute data)
+        new_df (DataFrame): New real-time data from GLOBAL_QUOTE
+        
+    Returns:
+        DataFrame: Updated dataframe with intelligent append/update applied
     """
     if existing_df.empty:
-        logger.info("📊 Merge analysis: No existing data - returning all new data")
+        logger.info("📊 Intelligent Append: No existing data - appending new candle")
         logger.info(f"   Original: 0 rows, New: {len(new_df)} rows, Final: {len(new_df)} rows")
         return new_df
     
     if new_df.empty:
-        logger.info("📊 Merge analysis: No new data - returning existing data unchanged")
+        logger.info("📊 Intelligent Append: No new data - returning existing data unchanged")
         logger.info(f"   Original: {len(existing_df)} rows, New: 0 rows, Final: {len(existing_df)} rows")
         return existing_df
     
     try:
-        # Enhanced logging: Show initial counts
-        original_count = len(existing_df)
-        new_count = len(new_df)
-        logger.info(f"📊 Merge analysis: Starting with {original_count} existing rows, {new_count} new rows")
-        
         # Ensure both dataframes have consistent timestamp column
         timestamp_col = 'timestamp'
         
@@ -148,72 +166,158 @@ def merge_new_candles(existing_df, new_df):
         # Validate timestamp column exists
         if timestamp_col not in existing_df.columns:
             logger.error(f"Timestamp column '{timestamp_col}' not found in existing data")
-            return existing_df  # Return existing data as fallback
+            return existing_df
         if timestamp_col not in new_df.columns:
             logger.error(f"Timestamp column '{timestamp_col}' not found in new data")
-            return existing_df  # Return existing data as fallback
+            return existing_df
         
         # Convert timestamps to datetime for comparison
         existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
         new_df[timestamp_col] = pd.to_datetime(new_df[timestamp_col])
         
-        # ROBUST 4-STEP MERGE PROCESS (as per problem statement requirements):
-        
-        # Step 1: Combine - Concatenate both DataFrames into one
-        logger.debug("Step 1: Combining existing and new DataFrames")
-        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-        combined_count = len(combined_df)
-        logger.debug(f"   Combined DataFrame: {combined_count} rows")
-        
-        # Step 2: Sort - Sort the combined DataFrame by timestamp, from oldest to newest
-        logger.debug("Step 2: Sorting combined DataFrame by timestamp (oldest to newest)")
-        combined_df = combined_df.sort_values(by=timestamp_col, ascending=True)
-        
-        # Step 3: Deduplicate - Remove duplicate rows based on timestamp, keeping the last entry
-        logger.debug("Step 3: Deduplicating by timestamp, keeping last entry")
-        pre_dedup_count = len(combined_df)
-        merged_df = combined_df.drop_duplicates(subset=[timestamp_col], keep='last')
-        final_count = len(merged_df)
-        
-        # Calculate how many unique new rows were actually added
-        unique_new_count = final_count - original_count
-        duplicates_removed = pre_dedup_count - final_count
-        
-        # Step 4: Log the Result - Crystal clear logging about the merge analysis
-        logger.info(f"📊 Merge analysis:")
-        logger.info(f"   • Original file: {original_count} rows")
-        logger.info(f"   • Fetched from API: {new_count} rows")
-        logger.info(f"   • Combined total: {combined_count} rows")
-        logger.info(f"   • Duplicates removed: {duplicates_removed} rows")
-        logger.info(f"   • Unique new rows added: {unique_new_count} rows")
-        logger.info(f"   • Final result: {final_count} rows")
-        
-        if unique_new_count > 0:
-            logger.info(f"✅ Merge successful: Added {unique_new_count} new candles")
-            logger.info(f"   Original: {original_count} rows → New: {new_count} rows → Final: {final_count} rows")
-            return merged_df
-        else:
-            logger.info("ℹ️ No new candles found to append - data is current and up to date")
-            logger.info(f"   Original: {original_count} rows → New: {new_count} rows → Final: {original_count} rows (no changes)")
+        # Get the new quote data (should be single row)
+        if len(new_df) != 1:
+            logger.warning(f"Expected 1 row in new real-time data, got {len(new_df)} rows")
             return existing_df
+        
+        new_timestamp = new_df.iloc[0][timestamp_col]
+        new_high = new_df.iloc[0]['high']    # New high value
+        new_low = new_df.iloc[0]['low']      # New low value
+        new_close = new_df.iloc[0]['close']  # New close price
+        new_volume = new_df.iloc[0]['volume']
+        
+        # Get the last candle from existing data
+        if len(existing_df) > 0:
+            existing_df_sorted = existing_df.sort_values(timestamp_col)
+            last_candle_timestamp = existing_df_sorted.iloc[-1][timestamp_col]
+            
+            logger.info(f"📊 Intelligent Append Analysis:")
+            logger.info(f"   Last candle timestamp: {last_candle_timestamp}")
+            logger.info(f"   New quote timestamp: {new_timestamp}")
+            
+            # CORE LOGIC: Compare timestamps to determine append vs update
+            if new_timestamp == last_candle_timestamp:
+                # SAME MINUTE: Update existing candle
+                logger.info(f"✏️ SAME MINUTE detected - Updating existing candle")
+                
+                # Get the index of the last candle
+                last_idx = existing_df_sorted.index[-1]
+                
+                # Update the last candle with intelligent logic
+                updated_high = max(existing_df_sorted.loc[last_idx, 'high'], new_high)
+                updated_low = min(existing_df_sorted.loc[last_idx, 'low'], new_low)
+                
+                existing_df_sorted.loc[last_idx, 'high'] = updated_high
+                existing_df_sorted.loc[last_idx, 'low'] = updated_low
+                existing_df_sorted.loc[last_idx, 'close'] = new_close  # Always update close to current price
+                # Note: open stays the same, volume could be updated but we'll keep existing
+                
+                logger.info(f"   Updated candle: high={updated_high}, low={updated_low}, close={new_close}")
+                logger.info(f"   Original: {len(existing_df)} rows, Updated: 0 new rows, Final: {len(existing_df)} rows")
+                
+                return existing_df_sorted
+                
+            elif new_timestamp > last_candle_timestamp:
+                # NEW MINUTE: Append new candle
+                logger.info(f"➕ NEW MINUTE detected - Appending new candle")
+                
+                # Append the new candle
+                combined_df = pd.concat([existing_df_sorted, new_df], ignore_index=True)
+                combined_df = combined_df.sort_values(timestamp_col)
+                
+                logger.info(f"   Appended new candle: timestamp={new_timestamp}, price={new_close}")
+                logger.info(f"   Original: {len(existing_df)} rows, New: 1 candle, Final: {len(combined_df)} rows")
+                
+                return combined_df
+            else:
+                # PAST TIMESTAMP: This shouldn't happen in real-time, but handle gracefully
+                logger.warning(f"⚠️ New timestamp {new_timestamp} is older than last candle {last_candle_timestamp}")
+                logger.info(f"   Keeping existing data unchanged")
+                return existing_df
+        else:
+            # No existing data, append new candle
+            logger.info(f"➕ No existing candles - Appending first candle")
+            return new_df
             
     except Exception as e:
-        logger.error(f"❌ Error merging candles: {e}")
+        logger.error(f"❌ Error in intelligent append/update: {e}")
         logger.warning(f"🔄 Returning existing data as fallback to avoid data loss ({len(existing_df)} rows)")
-        # On error, return existing data to avoid data loss
         return existing_df
+
+
+def resample_1min_to_30min(df_1min):
+    """
+    Resample 1-minute data to 30-minute data with proper OHLCV aggregation.
+    
+    Aggregation rules as per requirements:
+    - open='first' (first open in 30-min period)
+    - high='max' (highest high in 30-min period)  
+    - low='min' (lowest low in 30-min period)
+    - close='last' (last close in 30-min period)
+    - volume='sum' (total volume in 30-min period)
+    
+    Args:
+        df_1min (DataFrame): 1-minute OHLCV data
+        
+    Returns:
+        DataFrame: 30-minute OHLCV data, trimmed to 500 rows (most recent)
+    """
+    if df_1min.empty:
+        logger.warning("📊 Resample: No 1-minute data to resample")
+        return pd.DataFrame()
+    
+    try:
+        # Ensure timestamp column exists and is datetime
+        timestamp_col = 'timestamp'
+        if timestamp_col not in df_1min.columns:
+            logger.error(f"Timestamp column '{timestamp_col}' not found in 1-minute data")
+            return pd.DataFrame()
+        
+        # Make a copy to avoid modifying original
+        df_work = df_1min.copy()
+        df_work[timestamp_col] = pd.to_datetime(df_work[timestamp_col])
+        
+        # Set timestamp as index for resampling
+        df_work = df_work.set_index(timestamp_col)
+        
+        # Resample to 30-minute intervals with proper aggregation
+        df_30min = df_work.resample('30min').agg({
+            'open': 'first',
+            'high': 'max', 
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        }).dropna()  # Remove any NaN rows
+        
+        # Reset index to get timestamp back as column
+        df_30min = df_30min.reset_index()
+        
+        # Sort by timestamp (newest first) and keep only last 500 rows as per requirements
+        df_30min = df_30min.sort_values(timestamp_col, ascending=False).head(500)
+        
+        # Sort back to chronological order (oldest first) for consistency
+        df_30min = df_30min.sort_values(timestamp_col, ascending=True)
+        
+        logger.info(f"📊 Resampled 1-minute data: {len(df_1min)} rows → 30-minute data: {len(df_30min)} rows (trimmed to 500)")
+        
+        return df_30min
+        
+    except Exception as e:
+        logger.error(f"❌ Error resampling 1-minute to 30-minute data: {e}")
+        return pd.DataFrame()
 
 
 def process_ticker_realtime(ticker):
     """
     Process real-time updates for a single ticker using GLOBAL_QUOTE endpoint.
     
-    New real-time logic as per requirements:
-    1. Call GLOBAL_QUOTE endpoint for the ticker
-    2. Transform single quote into one-row DataFrame matching existing structure  
-    3. Load existing data file from DigitalOcean Spaces
-    4. Append new one-row DataFrame to end of existing data
-    5. Save updated DataFrame back to DigitalOcean Spaces
+    UPDATED: Implements "Intelligent Append & Resample" Architecture:
+    1. Fetch Live Quote (GLOBAL_QUOTE endpoint)
+    2. Load 1-Minute History (full 7-day history from _1min.csv)
+    3. Intelligently Append or Update (compare timestamps, update same minute vs append new minute)
+    4. Save 1-Minute File (updated 1-minute DataFrame)
+    5. Resample to 30-Minute (create 30-minute data from perfected 1-minute data)
+    6. Save 30-Minute File (trimmed to 500 rows)
     
     Args:
         ticker (str): Stock ticker symbol
@@ -224,7 +328,7 @@ def process_ticker_realtime(ticker):
     try:
         logger.info(f"📊 Processing real-time data for {ticker}")
         
-        # Step 1: Call GLOBAL_QUOTE endpoint for the ticker
+        # Step 1: Fetch Live Quote (GLOBAL_QUOTE endpoint)
         logging.info(f"[{ticker}] Fetching real-time quote...")
         logger.debug(f"🔄 Fetching GLOBAL_QUOTE data for {ticker}...")
         quote_data = get_real_time_price(ticker)
@@ -232,11 +336,10 @@ def process_ticker_realtime(ticker):
         if not quote_data:
             logging.info(f"[{ticker}] API returned no real-time data. Skipping.")
             logger.warning(f"⚠️ No real-time data received for {ticker} - API may have failed or market closed")
-            # Not necessarily an error - market might be closed or no new data available
             return True  # Consider this a success since it's not a processing failure
         
         logging.info(f"[{ticker}] Real-time quote received.")
-        logger.info(f"📥 Received real-time quote for {ticker}")
+        logger.info(f"📥 Received real-time quote for {ticker}: price=${quote_data['price']}")
         
         # Step 2: Transform single quote into one-row DataFrame matching existing structure
         logger.debug(f"🔄 Converting GLOBAL_QUOTE to DataFrame for {ticker}...")
@@ -250,52 +353,68 @@ def process_ticker_realtime(ticker):
         
         # Standardize timestamps for new data
         logger.debug(f"🕐 Standardizing timestamps for {ticker}...")
-        new_df = standardize_timestamps(new_df, '1min')  # Use 1min as data type for real-time
+        new_df = standardize_timestamps(new_df, '1min')
         logger.debug(f"✅ Timestamps standardized for {ticker}")
         
-        # Process for 1-minute data file (most granular real-time updates)
-        file_path = f'data/intraday/{ticker}_1min.csv'
-        
-        # Step 3: Load existing data file from DigitalOcean Spaces
-        logger.debug(f"📂 Reading existing 1min data: {file_path}")
-        existing_df = read_df_from_s3(file_path)
-        existing_count = len(existing_df) if not existing_df.empty else 0
+        # Step 3: Load 1-Minute History (full 7-day history from _1min.csv)
+        file_path_1min = f'data/intraday/{ticker}_1min.csv'
+        logger.debug(f"📂 Reading existing 1min data: {file_path_1min}")
+        existing_1min_df = read_df_from_s3(file_path_1min)
+        existing_count = len(existing_1min_df) if not existing_1min_df.empty else 0
         logging.info(f"[{ticker}] Loaded existing 1min file... It has {existing_count} rows.")
         logger.debug(f"📊 Existing 1min data for {ticker}: {existing_count} rows")
         
-        # Step 4: Append new one-row DataFrame to end of existing data  
-        logger.debug(f"🔀 Merging new real-time data with existing for {ticker}...")
-        merged_df = merge_new_candles(existing_df, new_df)
-        logging.info(f"[{ticker}] Merge complete. Combined DataFrame now has {len(merged_df)} rows.")
+        # Step 4: Intelligently Append or Update (1-Min Data)
+        logger.debug(f"🧠 Applying intelligent append/update logic for {ticker}...")
+        updated_1min_df = intelligent_append_or_update(existing_1min_df, new_df)
+        logging.info(f"[{ticker}] Intelligent update complete. 1min DataFrame now has {len(updated_1min_df)} rows.")
         
-        # Calculate new candles added
-        final_count = len(merged_df)
-        new_candles_count = final_count - existing_count
+        # Calculate changes
+        final_1min_count = len(updated_1min_df)
+        rows_changed = final_1min_count - existing_count
         
-        if new_candles_count > 0:
-            logging.info(f"[{ticker}] Real-time data has changed. Preparing to write...")
-            # Required logging format: "INFO: Merge successful: Added X new candles for TICKER (real-time)"
-            logger.info(f"INFO: Merge successful: Added {new_candles_count} new candles for {ticker} (real-time)")
+        if rows_changed > 0:
+            logging.info(f"[{ticker}] 1-min data changed: +{rows_changed} rows. Saving...")
+            logger.info(f"INFO: Intelligent update successful: Added {rows_changed} new candles for {ticker} (1-min)")
+        elif rows_changed == 0 and final_1min_count > 0:
+            logging.info(f"[{ticker}] 1-min data updated in-place (same minute). Saving...")
+            logger.info(f"INFO: Intelligent update successful: Updated existing candle for {ticker} (1-min)")
         else:
-            logging.info(f"[{ticker}] No real-time data change detected... Skipping cloud write.")
-            logger.debug(f"📊 No new real-time candles for {ticker} - data up to date (total: {final_count})")
-            return True  # Skip writing if no new data
+            logging.info(f"[{ticker}] No 1-min data changes detected. Skipping saves.")
+            return True
         
-        # Step 5: Save updated DataFrame back to DigitalOcean Spaces
-        logger.info(f"💾 Preparing to save updated real-time data for {ticker}...")
+        # Step 5: Save 1-Minute File (updated 1-minute DataFrame)
+        logger.info(f"💾 Saving updated 1-minute data for {ticker}...")
+        save_1min_success = save_df_to_s3(updated_1min_df, file_path_1min)
         
-        # Enhanced logging: Show exact data being saved
-        data_size = len(merged_df.to_csv(index=False).encode('utf-8'))
-        logger.info(f"   Data size: {data_size} bytes, Total rows: {final_count}")
+        if not save_1min_success:
+            logger.error(f"❌ Failed to save 1-minute data for {ticker}")
+            return False
         
-        if save_df_to_s3(merged_df, file_path):
-            # Enhanced logging: Confirm successful write with details
-            logger.info(f"✅ Successfully wrote {data_size} bytes to S3 path: {file_path}")
-            logger.info(f"   Updated real-time data for {ticker}: {final_count} total rows saved")
+        logger.info(f"✅ Successfully saved 1-minute data for {ticker}: {final_1min_count} rows")
+        
+        # Step 6: Resample to Create 30-Minute Data
+        logger.debug(f"📊 Resampling 1-minute to 30-minute data for {ticker}...")
+        resampled_30min_df = resample_1min_to_30min(updated_1min_df)
+        
+        if resampled_30min_df.empty:
+            logger.warning(f"⚠️ Failed to resample 30-minute data for {ticker}")
+            return True  # 1-min save was successful, so this is still a partial success
+        
+        logger.info(f"📊 Resampled 30-minute data for {ticker}: {len(resampled_30min_df)} rows")
+        
+        # Step 7: Save 30-Minute File (trimmed to 500 rows)
+        file_path_30min = f'data/intraday_30min/{ticker}_30min.csv'
+        logger.info(f"💾 Saving resampled 30-minute data for {ticker}...")
+        save_30min_success = save_df_to_s3(resampled_30min_df, file_path_30min)
+        
+        if save_30min_success:
+            logger.info(f"✅ Successfully saved 30-minute data for {ticker}: {len(resampled_30min_df)} rows")
+            logger.info(f"🎉 Complete real-time update success for {ticker}: 1-min ✅, 30-min ✅")
             return True
         else:
-            logger.error(f"❌ Failed to save real-time data for {ticker} to path: {file_path}")
-            return False
+            logger.warning(f"⚠️ Failed to save 30-minute data for {ticker}, but 1-minute save succeeded")
+            return True  # Partial success is still success
             
     except Exception as e:
         logger.error(f"❌ Critical error processing real-time data for {ticker}: {e}")
