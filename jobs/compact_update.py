@@ -311,13 +311,16 @@ def process_ticker_realtime(ticker):
     """
     Process real-time updates for a single ticker using GLOBAL_QUOTE endpoint.
     
-    UPDATED: Implements "Intelligent Append & Resample" Architecture:
+    UPDATED: Implements "Intelligent Append & Resample" Architecture with production-grade error handling:
     1. Fetch Live Quote (GLOBAL_QUOTE endpoint)
     2. Load 1-Minute History (full 7-day history from _1min.csv)
     3. Intelligently Append or Update (compare timestamps, update same minute vs append new minute)
     4. Save 1-Minute File (updated 1-minute DataFrame)
     5. Resample to 30-Minute (create 30-minute data from perfected 1-minute data)
     6. Save 30-Minute File (trimmed to 500 rows)
+    
+    Each step is wrapped in individual try-except blocks for granular error reporting.
+    A failure in one ticker does not crash the entire update job.
     
     Args:
         ticker (str): Stock ticker symbol
@@ -329,96 +332,148 @@ def process_ticker_realtime(ticker):
         logger.info(f"📊 Processing real-time data for {ticker}")
         
         # Step 1: Fetch Live Quote (GLOBAL_QUOTE endpoint)
-        logging.info(f"[{ticker}] Fetching real-time quote...")
-        logger.debug(f"🔄 Fetching GLOBAL_QUOTE data for {ticker}...")
-        quote_data = get_real_time_price(ticker)
-        
-        if not quote_data:
-            logging.info(f"[{ticker}] API returned no real-time data. Skipping.")
-            logger.warning(f"⚠️ No real-time data received for {ticker} - API may have failed or market closed")
-            return True  # Consider this a success since it's not a processing failure
-        
-        logging.info(f"[{ticker}] Real-time quote received.")
-        logger.info(f"📥 Received real-time quote for {ticker}: price=${quote_data['price']}")
+        try:
+            logging.info(f"[{ticker}] Fetching real-time quote...")
+            logger.debug(f"🔄 Fetching GLOBAL_QUOTE data for {ticker}...")
+            quote_data = get_real_time_price(ticker)
+            
+            if not quote_data:
+                logging.info(f"[{ticker}] API returned no real-time data. Skipping.")
+                logger.warning(f"⚠️ No real-time data received for {ticker} - API may have failed or market closed")
+                return True  # Consider this a success since it's not a processing failure
+            
+            logging.info(f"[{ticker}] Real-time quote received.")
+            logger.info(f"📥 Received real-time quote for {ticker}: price=${quote_data['price']}")
+            
+        except Exception as e:
+            logger.error(f"❌ STEP 1 FAILED - Error fetching GLOBAL_QUOTE for {ticker}: {e}")
+            logger.error(f"❌ {ticker}: API call failed during quote fetch step")
+            return False
         
         # Step 2: Transform single quote into one-row DataFrame matching existing structure
-        logger.debug(f"🔄 Converting GLOBAL_QUOTE to DataFrame for {ticker}...")
-        new_df = convert_global_quote_to_dataframe(quote_data, ticker)
-        
-        if new_df.empty:
-            logger.error(f"❌ Failed to convert GLOBAL_QUOTE data to DataFrame for {ticker}")
+        try:
+            logger.debug(f"🔄 Converting GLOBAL_QUOTE to DataFrame for {ticker}...")
+            new_df = convert_global_quote_to_dataframe(quote_data, ticker)
+            
+            if new_df.empty:
+                logger.error(f"❌ STEP 2 FAILED - Failed to convert GLOBAL_QUOTE data to DataFrame for {ticker}")
+                logger.error(f"❌ {ticker}: Data transformation failed during DataFrame conversion step")
+                return False
+            
+            logger.debug(f"✅ Real-time data converted to DataFrame for {ticker}: {len(new_df)} row")
+            
+        except Exception as e:
+            logger.error(f"❌ STEP 2 FAILED - Error converting GLOBAL_QUOTE to DataFrame for {ticker}: {e}")
+            logger.error(f"❌ {ticker}: Data transformation failed during DataFrame conversion step")
             return False
         
-        logger.debug(f"✅ Real-time data converted to DataFrame for {ticker}: {len(new_df)} row")
-        
-        # Standardize timestamps for new data
-        logger.debug(f"🕐 Standardizing timestamps for {ticker}...")
-        new_df = standardize_timestamps(new_df, '1min')
-        logger.debug(f"✅ Timestamps standardized for {ticker}")
-        
-        # Step 3: Load 1-Minute History (full 7-day history from _1min.csv)
-        file_path_1min = f'data/intraday/{ticker}_1min.csv'
-        logger.debug(f"📂 Reading existing 1min data: {file_path_1min}")
-        existing_1min_df = read_df_from_s3(file_path_1min)
-        existing_count = len(existing_1min_df) if not existing_1min_df.empty else 0
-        logging.info(f"[{ticker}] Loaded existing 1min file... It has {existing_count} rows.")
-        logger.debug(f"📊 Existing 1min data for {ticker}: {existing_count} rows")
-        
-        # Step 4: Intelligently Append or Update (1-Min Data)
-        logger.debug(f"🧠 Applying intelligent append/update logic for {ticker}...")
-        updated_1min_df = intelligent_append_or_update(existing_1min_df, new_df)
-        logging.info(f"[{ticker}] Intelligent update complete. 1min DataFrame now has {len(updated_1min_df)} rows.")
-        
-        # Calculate changes
-        final_1min_count = len(updated_1min_df)
-        rows_changed = final_1min_count - existing_count
-        
-        if rows_changed > 0:
-            logging.info(f"[{ticker}] 1-min data changed: +{rows_changed} rows. Saving...")
-            logger.info(f"INFO: Intelligent update successful: Added {rows_changed} new candles for {ticker} (1-min)")
-        elif rows_changed == 0 and final_1min_count > 0:
-            logging.info(f"[{ticker}] 1-min data updated in-place (same minute). Saving...")
-            logger.info(f"INFO: Intelligent update successful: Updated existing candle for {ticker} (1-min)")
-        else:
-            logging.info(f"[{ticker}] No 1-min data changes detected. Skipping saves.")
-            return True
-        
-        # Step 5: Save 1-Minute File (updated 1-minute DataFrame)
-        logger.info(f"💾 Saving updated 1-minute data for {ticker}...")
-        save_1min_success = save_df_to_s3(updated_1min_df, file_path_1min)
-        
-        if not save_1min_success:
-            logger.error(f"❌ Failed to save 1-minute data for {ticker}")
+        # Step 3: Standardize timestamps for new data
+        try:
+            logger.debug(f"🕐 Standardizing timestamps for {ticker}...")
+            new_df = standardize_timestamps(new_df, '1min')
+            logger.debug(f"✅ Timestamps standardized for {ticker}")
+            
+        except Exception as e:
+            logger.error(f"❌ STEP 3 FAILED - Error standardizing timestamps for {ticker}: {e}")
+            logger.error(f"❌ {ticker}: Timestamp processing failed during standardization step")
             return False
         
-        logger.info(f"✅ Successfully saved 1-minute data for {ticker}: {final_1min_count} rows")
+        # Step 4: Load 1-Minute History (full 7-day history from _1min.csv)
+        try:
+            file_path_1min = f'data/intraday/{ticker}_1min.csv'
+            logger.debug(f"📂 Reading existing 1min data: {file_path_1min}")
+            existing_1min_df = read_df_from_s3(file_path_1min)
+            existing_count = len(existing_1min_df) if not existing_1min_df.empty else 0
+            logging.info(f"[{ticker}] Loaded existing 1min file... It has {existing_count} rows.")
+            logger.debug(f"📊 Existing 1min data for {ticker}: {existing_count} rows")
+            
+        except Exception as e:
+            logger.error(f"❌ STEP 4 FAILED - Error loading existing 1min data for {ticker}: {e}")
+            logger.error(f"❌ {ticker}: File read failed during 1min data loading step")
+            return False
         
-        # Step 6: Resample to Create 30-Minute Data
-        logger.debug(f"📊 Resampling 1-minute to 30-minute data for {ticker}...")
-        resampled_30min_df = resample_1min_to_30min(updated_1min_df)
+        # Step 5: Intelligently Append or Update (1-Min Data)
+        try:
+            logger.debug(f"🧠 Applying intelligent append/update logic for {ticker}...")
+            updated_1min_df = intelligent_append_or_update(existing_1min_df, new_df)
+            logging.info(f"[{ticker}] Intelligent update complete. 1min DataFrame now has {len(updated_1min_df)} rows.")
+            
+            # Calculate changes
+            final_1min_count = len(updated_1min_df)
+            rows_changed = final_1min_count - existing_count
+            
+            if rows_changed > 0:
+                logging.info(f"[{ticker}] 1-min data changed: +{rows_changed} rows. Saving...")
+                logger.info(f"INFO: Intelligent update successful: Added {rows_changed} new candles for {ticker} (1-min)")
+            elif rows_changed == 0 and final_1min_count > 0:
+                logging.info(f"[{ticker}] 1-min data updated in-place (same minute). Saving...")
+                logger.info(f"INFO: Intelligent update successful: Updated existing candle for {ticker} (1-min)")
+            else:
+                logging.info(f"[{ticker}] No 1-min data changes detected. Skipping saves.")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ STEP 5 FAILED - Error during intelligent append/update for {ticker}: {e}")
+            logger.error(f"❌ {ticker}: Data merge failed during intelligent append/update step")
+            return False
         
-        if resampled_30min_df.empty:
-            logger.warning(f"⚠️ Failed to resample 30-minute data for {ticker}")
+        # Step 6: Save 1-Minute File (updated 1-minute DataFrame)
+        try:
+            logger.info(f"💾 Saving updated 1-minute data for {ticker}...")
+            save_1min_success = save_df_to_s3(updated_1min_df, file_path_1min)
+            
+            if not save_1min_success:
+                logger.error(f"❌ STEP 6 FAILED - Failed to save 1-minute data for {ticker}")
+                logger.error(f"❌ {ticker}: File save failed during 1min data save step")
+                return False
+            
+            logger.info(f"✅ Successfully saved 1-minute data for {ticker}: {final_1min_count} rows")
+            
+        except Exception as e:
+            logger.error(f"❌ STEP 6 FAILED - Error saving 1-minute data for {ticker}: {e}")
+            logger.error(f"❌ {ticker}: File save failed during 1min data save step")
+            return False
+        
+        # Step 7: Resample to Create 30-Minute Data
+        try:
+            logger.debug(f"📊 Resampling 1-minute to 30-minute data for {ticker}...")
+            resampled_30min_df = resample_1min_to_30min(updated_1min_df)
+            
+            if resampled_30min_df.empty:
+                logger.warning(f"⚠️ STEP 7 WARNING - Failed to resample 30-minute data for {ticker}")
+                logger.warning(f"⚠️ {ticker}: Resampling failed during 30min data creation step, but 1min save succeeded")
+                return True  # 1-min save was successful, so this is still a partial success
+            
+            logger.info(f"📊 Resampled 30-minute data for {ticker}: {len(resampled_30min_df)} rows")
+            
+        except Exception as e:
+            logger.error(f"❌ STEP 7 FAILED - Error resampling 30-minute data for {ticker}: {e}")
+            logger.warning(f"⚠️ {ticker}: Resampling failed during 30min data creation step, but 1min save succeeded")
             return True  # 1-min save was successful, so this is still a partial success
         
-        logger.info(f"📊 Resampled 30-minute data for {ticker}: {len(resampled_30min_df)} rows")
-        
-        # Step 7: Save 30-Minute File (trimmed to 500 rows)
-        file_path_30min = f'data/intraday_30min/{ticker}_30min.csv'
-        logger.info(f"💾 Saving resampled 30-minute data for {ticker}...")
-        save_30min_success = save_df_to_s3(resampled_30min_df, file_path_30min)
-        
-        if save_30min_success:
-            logger.info(f"✅ Successfully saved 30-minute data for {ticker}: {len(resampled_30min_df)} rows")
-            logger.info(f"🎉 Complete real-time update success for {ticker}: 1-min ✅, 30-min ✅")
-            return True
-        else:
-            logger.warning(f"⚠️ Failed to save 30-minute data for {ticker}, but 1-minute save succeeded")
+        # Step 8: Save 30-Minute File (trimmed to 500 rows)
+        try:
+            file_path_30min = f'data/intraday_30min/{ticker}_30min.csv'
+            logger.info(f"💾 Saving resampled 30-minute data for {ticker}...")
+            save_30min_success = save_df_to_s3(resampled_30min_df, file_path_30min)
+            
+            if save_30min_success:
+                logger.info(f"✅ Successfully saved 30-minute data for {ticker}: {len(resampled_30min_df)} rows")
+                logger.info(f"🎉 Complete real-time update success for {ticker}: 1-min ✅, 30-min ✅")
+                return True
+            else:
+                logger.warning(f"⚠️ STEP 8 WARNING - Failed to save 30-minute data for {ticker}, but 1-minute save succeeded")
+                logger.warning(f"⚠️ {ticker}: File save failed during 30min data save step, but 1min save succeeded")
+                return True  # Partial success is still success
+                
+        except Exception as e:
+            logger.error(f"❌ STEP 8 FAILED - Error saving 30-minute data for {ticker}: {e}")
+            logger.warning(f"⚠️ {ticker}: File save failed during 30min data save step, but 1min save succeeded")
             return True  # Partial success is still success
             
     except Exception as e:
-        logger.error(f"❌ Critical error processing real-time data for {ticker}: {e}")
-        logger.error(f"❌ Ticker {ticker} real-time processing failed - continuing with next")
+        logger.error(f"❌ CRITICAL FAILURE - Unexpected error processing real-time data for {ticker}: {e}")
+        logger.error(f"❌ {ticker}: Critical failure in real-time processing - continuing with next ticker")
         return False
 
 
