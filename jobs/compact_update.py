@@ -37,6 +37,9 @@ from utils.alpha_vantage_api import get_real_time_price
 from utils.helpers import read_master_tickerlist, save_df_to_s3, read_df_from_s3, update_scheduler_status
 from utils.timestamp_standardizer import apply_timestamp_standardization_to_api_data
 
+# Import full_fetch for self-healing logic
+from jobs.full_fetch import fetch_and_process_ticker, save_ticker_data
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -309,89 +312,134 @@ def resample_1min_to_30min(df_1min):
 
 def check_ticker_data_health(ticker):
     """
-    Step A: Data Health Check & Bootstrapping
+    Step A: Data Health Check & Bootstrapping with Self-Healing Logic
     
     Check for History File existence and validate file integrity before attempting real-time updates.
     As per problem statement requirements:
     1. Check if {ticker}_1min.csv file exists in the production data store
     2. Validate file integrity (minimum file size > 50KB - a 100-byte file is considered corrupt)
-    3. Handle missing data gracefully with proper logging
+    3. Handle missing/corrupt data with self-healing logic: automatically trigger full_fetch to repair
     
     Args:
         ticker (str): Stock ticker symbol
         
     Returns:
-        bool: True if ticker has healthy data and can proceed with real-time updates
+        bool: True if ticker has healthy data (either originally or after successful repair)
     """
     try:
         file_path_1min = f'data/intraday/{ticker}_1min.csv'
         logger.debug(f"🏥 Health Check: Checking file existence for {file_path_1min}")
         
         # Step A1: Check for History File existence
+        data_is_healthy = False
+        existing_1min_df = None
+        
         try:
             existing_1min_df = read_df_from_s3(file_path_1min)
             
             if existing_1min_df.empty:
-                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
-                return False
+                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
+                data_is_healthy = False
+            else:
+                data_is_healthy = True
                 
         except Exception as e:
-            logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+            logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
             logger.debug(f"Health check file read error for {ticker}: {e}")
-            return False
+            data_is_healthy = False
         
-        # Step A2: Validate File Integrity - Check actual file size (>50KB as per requirements)
-        try:
-            # Try to get the actual file size from local filesystem first
-            local_file_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                file_path_1min
-            )
-            
-            file_size_bytes = 0
-            if os.path.exists(local_file_path):
-                file_size_bytes = os.path.getsize(local_file_path)
-                logger.debug(f"Local file size for {ticker}: {file_size_bytes} bytes")
-            else:
-                # If no local file, estimate size from DataFrame
-                # Based on testing: actual CSV size is roughly 55-60 bytes per row for OHLCV data
-                # Using conservative estimate of 60 bytes per row
-                estimated_size = len(existing_1min_df) * 60  # Realistic estimate based on testing
-                file_size_bytes = estimated_size
-                logger.debug(f"Estimated file size for {ticker}: {file_size_bytes} bytes (from {len(existing_1min_df)} rows)")
-            
-            # Check minimum file size (>50KB = 51,200 bytes as per problem statement)
-            min_file_size = 50 * 1024  # 50KB in bytes
-            if file_size_bytes <= min_file_size:
-                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
-                logger.debug(f"Health check failed for {ticker}: insufficient file size ({file_size_bytes} bytes, minimum {min_file_size} bytes required)")
+        # Step A2: Validate File Integrity if data exists
+        if data_is_healthy and existing_1min_df is not None:
+            try:
+                # Try to get the actual file size from local filesystem first
+                local_file_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                    file_path_1min
+                )
+                
+                file_size_bytes = 0
+                if os.path.exists(local_file_path):
+                    file_size_bytes = os.path.getsize(local_file_path)
+                    logger.debug(f"Local file size for {ticker}: {file_size_bytes} bytes")
+                else:
+                    # If no local file, estimate size from DataFrame
+                    # Based on testing: actual CSV size is roughly 55-60 bytes per row for OHLCV data
+                    # Using conservative estimate of 60 bytes per row
+                    estimated_size = len(existing_1min_df) * 60  # Realistic estimate based on testing
+                    file_size_bytes = estimated_size
+                    logger.debug(f"Estimated file size for {ticker}: {file_size_bytes} bytes (from {len(existing_1min_df)} rows)")
+                
+                # Check minimum file size (>50KB = 51,200 bytes as per problem statement)
+                min_file_size = 50 * 1024  # 50KB in bytes
+                if file_size_bytes <= min_file_size:
+                    logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
+                    logger.debug(f"Health check failed for {ticker}: insufficient file size ({file_size_bytes} bytes, minimum {min_file_size} bytes required)")
+                    data_is_healthy = False
+                
+                # Check for required columns
+                if data_is_healthy:
+                    required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                    missing_columns = [col for col in required_columns if col not in existing_1min_df.columns]
+                    if missing_columns:
+                        logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
+                        logger.debug(f"Health check failed for {ticker}: missing columns {missing_columns}")
+                        data_is_healthy = False
+                
+                # Additional validation: Ensure substantial 7-day history
+                if data_is_healthy:
+                    # For 7 days of 1-minute data during market hours (~390 minutes/day * 7 days = ~2730 rows minimum)
+                    if len(existing_1min_df) < 1000:  # Conservative minimum for multi-day history
+                        logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
+                        logger.debug(f"Health check failed for {ticker}: insufficient history ({len(existing_1min_df)} rows, expected substantial 7-day history)")
+                        data_is_healthy = False
+                
+                if data_is_healthy:
+                    logger.debug(f"✅ Health check passed for {ticker}: {len(existing_1min_df)} rows, {file_size_bytes} bytes with required columns")
+                    return True
+                
+            except Exception as e:
+                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
+                logger.debug(f"Health check integrity validation failed for {ticker}: {e}")
+                data_is_healthy = False
+        
+        # Step A3: Self-Healing Logic - Automatically trigger full_fetch for corrupted/missing data
+        if not data_is_healthy:
+            logger.info(f"🔧 Self-Healing: Initiating full data fetch to repair {ticker}...")
+            try:
+                # Call the full_fetch logic for this specific ticker
+                fetch_results = fetch_and_process_ticker(ticker)
+                
+                # Save the fetched data using the full_fetch save logic
+                save_results = save_ticker_data(ticker, fetch_results)
+                
+                # Check if the repair was successful
+                if save_results['saves_successful'] > 0:
+                    logger.info(f"✅ Self-Healing: Successfully repaired data for {ticker} ({save_results['saves_successful']}/{save_results['saves_attempted']} files saved)")
+                    
+                    # Verify the repair by re-checking the 1-minute file
+                    try:
+                        repaired_df = read_df_from_s3(file_path_1min)
+                        if not repaired_df.empty and len(repaired_df) >= 1000:
+                            logger.info(f"✅ Self-Healing: Repair verification successful for {ticker} - {len(repaired_df)} rows available")
+                            return True
+                        else:
+                            logger.error(f"❌ Self-Healing: Repair verification failed for {ticker} - data still insufficient after repair")
+                            return False
+                    except Exception as e:
+                        logger.error(f"❌ Self-Healing: Repair verification failed for {ticker}: {e}")
+                        return False
+                else:
+                    logger.error(f"❌ Self-Healing: Failed to repair data for {ticker} (no files saved successfully)")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"❌ Self-Healing: Full data fetch failed for {ticker}: {e}")
                 return False
-            
-            # Check for required columns
-            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-            missing_columns = [col for col in required_columns if col not in existing_1min_df.columns]
-            if missing_columns:
-                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
-                logger.debug(f"Health check failed for {ticker}: missing columns {missing_columns}")
-                return False
-            
-            # Additional validation: Ensure substantial 7-day history
-            # For 7 days of 1-minute data during market hours (~390 minutes/day * 7 days = ~2730 rows minimum)
-            if len(existing_1min_df) < 1000:  # Conservative minimum for multi-day history
-                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
-                logger.debug(f"Health check failed for {ticker}: insufficient history ({len(existing_1min_df)} rows, expected substantial 7-day history)")
-                return False
-            
-            logger.debug(f"✅ Health check passed for {ticker}: {len(existing_1min_df)} rows, {file_size_bytes} bytes with required columns")
-            return True
-            
-        except Exception as e:
-            logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
-            logger.debug(f"Health check integrity validation failed for {ticker}: {e}")
-            return False
-            
+        
+        return False  # Should not reach here, but fallback to False
+        
     except Exception as e:
-        logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+        logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. A full data fetch is required for this ticker.")
         logger.debug(f"Health check critical error for {ticker}: {e}")
         return False
 
