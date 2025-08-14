@@ -307,17 +307,84 @@ def resample_1min_to_30min(df_1min):
         return pd.DataFrame()
 
 
+def check_ticker_data_health(ticker):
+    """
+    Step A: Data Health Check & Bootstrapping
+    
+    Check for History File existence and validate file integrity before attempting real-time updates.
+    As per problem statement requirements:
+    1. Check if {ticker}_1min.csv file exists in the production data store
+    2. Validate file integrity (minimum file size > 2KB or minimum rows > 100)
+    3. Handle missing data gracefully with proper logging
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        
+    Returns:
+        bool: True if ticker has healthy data and can proceed with real-time updates
+    """
+    try:
+        file_path_1min = f'data/intraday/{ticker}_1min.csv'
+        logger.debug(f"🏥 Health Check: Checking file existence for {file_path_1min}")
+        
+        # Step A1: Check for History File existence
+        try:
+            existing_1min_df = read_df_from_s3(file_path_1min)
+            
+            if existing_1min_df.empty:
+                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+            logger.debug(f"Health check file read error for {ticker}: {e}")
+            return False
+        
+        # Step A2: Validate File Integrity
+        try:
+            # Check minimum number of rows (> 100 as per requirements)
+            if len(existing_1min_df) <= 100:
+                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+                logger.debug(f"Health check failed for {ticker}: insufficient rows ({len(existing_1min_df)} rows, minimum 100 required)")
+                return False
+            
+            # Check for required columns
+            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            missing_columns = [col for col in required_columns if col not in existing_1min_df.columns]
+            if missing_columns:
+                logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+                logger.debug(f"Health check failed for {ticker}: missing columns {missing_columns}")
+                return False
+                
+            # Additional file size check (approximate 2KB check via data content)
+            # Each row with typical OHLCV data should be ~150-200 bytes, so 100+ rows should be well over 2KB
+            
+            logger.debug(f"✅ Health check passed for {ticker}: {len(existing_1min_df)} rows with required columns")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+            logger.debug(f"Health check integrity validation failed for {ticker}: {e}")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Skipping real-time update. A full data fetch is required for this ticker.")
+        logger.debug(f"Health check critical error for {ticker}: {e}")
+        return False
+
+
 def process_ticker_realtime(ticker):
     """
     Process real-time updates for a single ticker using GLOBAL_QUOTE endpoint.
     
     UPDATED: Implements "Intelligent Append & Resample" Architecture with production-grade error handling:
-    1. Fetch Live Quote (GLOBAL_QUOTE endpoint)
-    2. Load 1-Minute History (full 7-day history from _1min.csv)
-    3. Intelligently Append or Update (compare timestamps, update same minute vs append new minute)
-    4. Save 1-Minute File (updated 1-minute DataFrame)
-    5. Resample to 30-Minute (create 30-minute data from perfected 1-minute data)
-    6. Save 30-Minute File (trimmed to 500 rows)
+    Step A: Data Health Check & Bootstrapping (NEW - per problem statement)
+    Step 1: Fetch Live Quote (GLOBAL_QUOTE endpoint)
+    Step 2: Load 1-Minute History (full 7-day history from _1min.csv)
+    Step 3: Intelligently Append or Update (compare timestamps, update same minute vs append new minute)
+    Step 4: Save 1-Minute File (updated 1-minute DataFrame)
+    Step 5: Resample to 30-Minute (create 30-minute data from perfected 1-minute data)
+    Step 6: Save 30-Minute File (trimmed to 500 rows)
     
     Each step is wrapped in individual try-except blocks for granular error reporting.
     A failure in one ticker does not crash the entire update job.
@@ -326,15 +393,24 @@ def process_ticker_realtime(ticker):
         ticker (str): Stock ticker symbol
         
     Returns:
-        bool: True if processing successful
+        bool: True if processing successful (includes graceful skips for missing data)
     """
     try:
         logger.info(f"📊 Processing real-time data for {ticker}")
         
+        # Step A: Data Health Check & Bootstrapping (NEW - as per problem statement)
+        logger.debug(f"🏥 Step A: Data Health Check for {ticker}...")
+        if not check_ticker_data_health(ticker):
+            # Gracefully skip this ticker - log already handled in health check function
+            logger.info(f"⏭️ Skipping real-time update for {ticker} due to missing/incomplete data")
+            return True  # Return True to continue processing other tickers (graceful skip)
+        
+        logger.debug(f"✅ Step A passed: {ticker} has healthy data, proceeding with real-time update")
+        
         # Step 1: Fetch Live Quote (GLOBAL_QUOTE endpoint)
         try:
             logging.info(f"[{ticker}] Fetching real-time quote...")
-            logger.debug(f"🔄 Fetching GLOBAL_QUOTE data for {ticker}...")
+            logger.debug(f"🔄 Step 1: Fetching GLOBAL_QUOTE data for {ticker}...")
             quote_data = get_real_time_price(ticker)
             
             if not quote_data:
@@ -352,7 +428,7 @@ def process_ticker_realtime(ticker):
         
         # Step 2: Transform single quote into one-row DataFrame matching existing structure
         try:
-            logger.debug(f"🔄 Converting GLOBAL_QUOTE to DataFrame for {ticker}...")
+            logger.debug(f"🔄 Step 2: Converting GLOBAL_QUOTE to DataFrame for {ticker}...")
             new_df = convert_global_quote_to_dataframe(quote_data, ticker)
             
             if new_df.empty:
@@ -369,7 +445,7 @@ def process_ticker_realtime(ticker):
         
         # Step 3: Standardize timestamps for new data
         try:
-            logger.debug(f"🕐 Standardizing timestamps for {ticker}...")
+            logger.debug(f"🕐 Step 3: Standardizing timestamps for {ticker}...")
             new_df = standardize_timestamps(new_df, '1min')
             logger.debug(f"✅ Timestamps standardized for {ticker}")
             
@@ -381,7 +457,7 @@ def process_ticker_realtime(ticker):
         # Step 4: Load 1-Minute History (full 7-day history from _1min.csv)
         try:
             file_path_1min = f'data/intraday/{ticker}_1min.csv'
-            logger.debug(f"📂 Reading existing 1min data: {file_path_1min}")
+            logger.debug(f"📂 Step 4: Reading existing 1min data: {file_path_1min}")
             existing_1min_df = read_df_from_s3(file_path_1min)
             existing_count = len(existing_1min_df) if not existing_1min_df.empty else 0
             logging.info(f"[{ticker}] Loaded existing 1min file... It has {existing_count} rows.")
@@ -394,7 +470,7 @@ def process_ticker_realtime(ticker):
         
         # Step 5: Intelligently Append or Update (1-Min Data)
         try:
-            logger.debug(f"🧠 Applying intelligent append/update logic for {ticker}...")
+            logger.debug(f"🧠 Step 5: Applying intelligent append/update logic for {ticker}...")
             updated_1min_df = intelligent_append_or_update(existing_1min_df, new_df)
             logging.info(f"[{ticker}] Intelligent update complete. 1min DataFrame now has {len(updated_1min_df)} rows.")
             
@@ -419,7 +495,7 @@ def process_ticker_realtime(ticker):
         
         # Step 6: Save 1-Minute File (updated 1-minute DataFrame)
         try:
-            logger.info(f"💾 Saving updated 1-minute data for {ticker}...")
+            logger.info(f"💾 Step 6: Saving updated 1-minute data for {ticker}...")
             save_1min_success = save_df_to_s3(updated_1min_df, file_path_1min)
             
             if not save_1min_success:
@@ -436,7 +512,7 @@ def process_ticker_realtime(ticker):
         
         # Step 7: Resample to Create 30-Minute Data
         try:
-            logger.debug(f"📊 Resampling 1-minute to 30-minute data for {ticker}...")
+            logger.debug(f"📊 Step 7: Resampling 1-minute to 30-minute data for {ticker}...")
             resampled_30min_df = resample_1min_to_30min(updated_1min_df)
             
             if resampled_30min_df.empty:
@@ -454,7 +530,7 @@ def process_ticker_realtime(ticker):
         # Step 8: Save 30-Minute File (trimmed to 500 rows)
         try:
             file_path_30min = f'data/intraday_30min/{ticker}_30min.csv'
-            logger.info(f"💾 Saving resampled 30-minute data for {ticker}...")
+            logger.info(f"💾 Step 8: Saving resampled 30-minute data for {ticker}...")
             save_30min_success = save_df_to_s3(resampled_30min_df, file_path_30min)
             
             if save_30min_success:
