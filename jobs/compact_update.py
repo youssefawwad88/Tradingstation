@@ -175,50 +175,71 @@ def intelligent_append_or_update(existing_df, new_df):
             logger.error(f"Timestamp column '{timestamp_col}' not found in new data")
             return existing_df
         
-        # CRITICAL FIX: Implement America/New_York timezone standardization as per problem statement
-        # Step 1: Convert timestamps to datetime objects
+        # BULLETPROOF TIMESTAMP COMPARISON as per problem statement requirements
+        # Implement explicit, multi-step process that standardizes all timestamps to America/New_York timezone
+        
+        # Step 1: Convert History to Datetime - Convert timestamp column to timezone-aware datetime objects
+        logger.debug("🕐 Step 1: Converting history timestamps to datetime objects")
         existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
         new_df[timestamp_col] = pd.to_datetime(new_df[timestamp_col])
         
-        # Step 2: Standardize both historical and live data to America/New_York timezone
-        ny_tz = pytz.timezone('America/New_York')
-        utc_tz = pytz.UTC
+        # Ensure CSV data (stored in UTC) becomes UTC-aware datetime objects
+        if len(existing_df) > 0:
+            if existing_df[timestamp_col].dt.tz is None:
+                # CSV data is naive, localize as UTC (since CSV is stored in UTC format)
+                logger.debug("   History: Localizing naive timestamps as UTC (CSV standard)")
+                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_localize('UTC')
+            else:
+                # Already timezone-aware, convert to UTC if not already
+                logger.debug(f"   History: Converting from {existing_df[timestamp_col].dt.tz} to UTC")
+                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_convert('UTC')
+        
+        if len(new_df) > 0:
+            if new_df[timestamp_col].dt.tz is None:
+                # Live data should be in NY timezone, but if naive, localize as UTC for consistency
+                logger.debug("   Live: Localizing naive timestamps as UTC")
+                new_df[timestamp_col] = new_df[timestamp_col].dt.tz_localize('UTC')
+            else:
+                # Already timezone-aware, convert to UTC
+                logger.debug(f"   Live: Converting from {new_df[timestamp_col].dt.tz} to UTC")
+                new_df[timestamp_col] = new_df[timestamp_col].dt.tz_convert('UTC')
         
         if len(existing_df) > 0 and len(new_df) > 0:
-            # Localize Historical Data: Handle different timezone scenarios for historical data
-            existing_tzinfo = existing_df[timestamp_col].iloc[0].tzinfo
-            if existing_tzinfo is None:
-                # Historical data is naive - check if it looks like UTC or Eastern time
-                # In production, historical data is typically stored as UTC strings
-                # For backward compatibility, if naive timestamps look like they're in the proper range,
-                # assume they are already in Eastern time; otherwise assume UTC
-                sample_hour = existing_df[timestamp_col].iloc[0].hour
-                if 9 <= sample_hour <= 20:  # Likely Eastern time (market hours range)
-                    logger.debug("Naive historical data appears to be Eastern time - localizing as America/New_York")
-                    existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_localize(ny_tz)
-                else:
-                    logger.debug("Naive historical data appears to be UTC - localizing as UTC then converting to America/New_York")
-                    existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_localize(utc_tz).dt.tz_convert(ny_tz)
-            elif str(existing_tzinfo) == 'UTC' or '+00:00' in str(existing_tzinfo):
-                # Historical data is in UTC, convert to NY timezone
-                logger.debug("Converting historical data from UTC to America/New_York")
-                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_convert(ny_tz)
-            else:
-                # Historical data already has timezone, convert to NY timezone
-                logger.debug(f"Converting historical data from {existing_tzinfo} to America/New_York")
-                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_convert(ny_tz)
-                
-            # Localize Live Data: The new timestamp from datetime.now() should be in America/New_York timezone
-            new_tzinfo = new_df[timestamp_col].iloc[0].tzinfo
-            if new_tzinfo is None:
-                # New data is naive, assume it's in Eastern Time and localize
-                logger.debug("Localizing new live data to America/New_York timezone")
-                new_df[timestamp_col] = new_df[timestamp_col].dt.tz_localize(ny_tz)
-            elif str(new_tzinfo) != str(ny_tz):
-                # New data has different timezone, convert to NY timezone
-                logger.debug(f"Converting new live data from {new_tzinfo} to America/New_York")
-                new_df[timestamp_col] = new_df[timestamp_col].dt.tz_convert(ny_tz)
-            # If already in NY timezone, no conversion needed
+            # Step 2: Get Last Historical Time (UTC) - Get the last timestamp from history as UTC
+            logger.debug("🕐 Step 2: Getting last historical timestamp (UTC)")
+            existing_df_sorted = existing_df.sort_values(timestamp_col)
+            last_historical_ts_utc = existing_df_sorted.iloc[-1][timestamp_col]
+            logger.debug(f"   Last historical timestamp (UTC): {last_historical_ts_utc}")
+            
+            # Step 3: Get Live Time (UTC) - Get current live timestamp as UTC  
+            logger.debug("🕐 Step 3: Getting live timestamp (UTC)")
+            live_ts_utc = new_df.iloc[0][timestamp_col]
+            logger.debug(f"   Live timestamp (UTC): {live_ts_utc}")
+            
+            # Step 4: Convert BOTH to New York Time - Create timezone-aware NY variables
+            logger.debug("🕐 Step 4: Converting both timestamps to America/New_York timezone")
+            ny_tz = pytz.timezone('America/New_York')
+            
+            last_historical_ts_nyc = last_historical_ts_utc.tz_convert(ny_tz)
+            live_ts_nyc = live_ts_utc.tz_convert(ny_tz)
+            
+            logger.debug(f"   Last historical timestamp (NYC): {last_historical_ts_nyc}")
+            logger.debug(f"   Live timestamp (NYC): {live_ts_nyc}")
+            
+            # Step 5: Perform Comparison (in NY Time) - Compare minute/hour on timezone-aware _nyc variables
+            logger.debug("🕐 Step 5: Performing comparison in America/New_York timezone")
+            
+            # Truncate to minute precision for comparison (remove seconds and microseconds)
+            last_historical_minute_nyc = last_historical_ts_nyc.replace(second=0, microsecond=0)
+            live_minute_nyc = live_ts_nyc.replace(second=0, microsecond=0)
+            
+            logger.info(f"📊 Bulletproof Timestamp Comparison:")
+            logger.info(f"   Last historical minute (NYC): {last_historical_minute_nyc}")
+            logger.info(f"   Live quote minute (NYC): {live_minute_nyc}")
+            
+            # Convert existing timestamps back to NY timezone for processing
+            existing_df_sorted[timestamp_col] = existing_df_sorted[timestamp_col].dt.tz_convert(ny_tz)
+            new_df[timestamp_col] = new_df[timestamp_col].dt.tz_convert(ny_tz)
         
         # Get the new quote data (should be single row)
         if len(new_df) != 1:
@@ -233,20 +254,8 @@ def intelligent_append_or_update(existing_df, new_df):
         
         # Get the last candle from existing data
         if len(existing_df) > 0:
-            existing_df_sorted = existing_df.sort_values(timestamp_col)
-            last_candle_timestamp = existing_df_sorted.iloc[-1][timestamp_col]
-            
-            # CRITICAL FIX: Truncate timestamps to minute precision for comparison
-            # This removes seconds and microseconds which can cause false inequality
-            new_timestamp_minute = new_timestamp.replace(second=0, microsecond=0)
-            last_candle_timestamp_minute = last_candle_timestamp.replace(second=0, microsecond=0)
-            
-            logger.info(f"📊 Intelligent Append Analysis:")
-            logger.info(f"   Last candle timestamp (America/New_York): {last_candle_timestamp_minute}")
-            logger.info(f"   New quote timestamp (America/New_York): {new_timestamp_minute}")
-            
-            # CORE LOGIC: Compare timestamps to determine append vs update
-            if new_timestamp_minute == last_candle_timestamp_minute:
+            # CORE LOGIC: Compare timestamps using bulletproof NYC comparison variables
+            if live_minute_nyc == last_historical_minute_nyc:
                 # SAME MINUTE: Update existing candle
                 logger.info(f"✏️ SAME MINUTE detected - Updating existing candle")
                 
@@ -271,7 +280,7 @@ def intelligent_append_or_update(existing_df, new_df):
                 
                 return existing_df_sorted
                 
-            elif new_timestamp_minute > last_candle_timestamp_minute:
+            elif live_minute_nyc > last_historical_minute_nyc:
                 # NEW MINUTE: Append new candle
                 logger.info(f"➕ NEW MINUTE detected - Appending new candle")
                 
@@ -289,14 +298,14 @@ def intelligent_append_or_update(existing_df, new_df):
                 return combined_df
             else:
                 # PAST TIMESTAMP: This shouldn't happen in real-time, but handle gracefully
-                logger.warning(f"⚠️ New timestamp {new_timestamp_minute} is older than last candle {last_candle_timestamp_minute}")
+                logger.warning(f"⚠️ New timestamp {live_minute_nyc} is older than last candle {last_historical_minute_nyc}")
                 logger.info(f"   Keeping existing data unchanged")
                 
                 # Convert back to UTC for storage (as required by the system)
-                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_convert('UTC')
-                existing_df[timestamp_col] = existing_df[timestamp_col].dt.strftime('%Y-%m-%d %H:%M:%S+00:00')
+                existing_df_sorted[timestamp_col] = existing_df_sorted[timestamp_col].dt.tz_convert('UTC')
+                existing_df_sorted[timestamp_col] = existing_df_sorted[timestamp_col].dt.strftime('%Y-%m-%d %H:%M:%S+00:00')
                 
-                return existing_df
+                return existing_df_sorted
         else:
             # No existing data, append new candle
             logger.info(f"➕ No existing candles - Appending first candle")
