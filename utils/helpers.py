@@ -527,12 +527,13 @@ def load_manual_tickers():
     return DEFAULT_TICKERS
 
 
-def is_today_present(df):
+def is_today_present(df, timestamp_col='datetime'):
     """
     Check if today's data is present in the DataFrame.
 
     Args:
         df (pandas.DataFrame): DataFrame with datetime column
+        timestamp_col (str): Name of timestamp column (default: 'datetime')
 
     Returns:
         bool: True if today's data is present
@@ -544,9 +545,17 @@ def is_today_present(df):
         ny_tz = pytz.timezone("America/New_York")
         today = datetime.now(ny_tz).date()
 
-        # Assume datetime column exists
-        if "datetime" in df.columns:
-            df_dates = pd.to_datetime(df["datetime"]).dt.date
+        # Check multiple possible column names
+        possible_cols = [timestamp_col, 'datetime', 'timestamp', 'Date', 'date']
+        date_col = None
+        
+        for col in possible_cols:
+            if col in df.columns:
+                date_col = col
+                break
+        
+        if date_col:
+            df_dates = pd.to_datetime(df[date_col]).dt.date
             return today in df_dates.values
 
         return False
