@@ -129,21 +129,6 @@ def intelligent_append_or_update(existing_df, new_df):
     Returns:
         DataFrame: Updated dataframe with intelligent append/update applied
     """
-def intelligent_append_or_update(existing_df, new_df):
-    """
-    INTELLIGENT APPEND & UPDATE LOGIC as per problem statement requirements.
-    
-    Compare live quote timestamp with last candle timestamp:
-    - If live quote is in NEW minute: Append new candle 
-    - If live quote is in SAME minute: Update existing candle (high=max, low=min, close=current)
-    
-    Args:
-        existing_df (DataFrame): Current data from storage (1-minute data)
-        new_df (DataFrame): New real-time data from GLOBAL_QUOTE
-        
-    Returns:
-        DataFrame: Updated dataframe with intelligent append/update applied
-    """
     if existing_df.empty:
         logger.info("📊 Intelligent Append: No existing data - appending new candle")
         logger.info(f"   Original: 0 rows, New: {len(new_df)} rows, Final: {len(new_df)} rows")
@@ -174,9 +159,26 @@ def intelligent_append_or_update(existing_df, new_df):
             logger.error(f"Timestamp column '{timestamp_col}' not found in new data")
             return existing_df
         
-        # Convert timestamps to datetime for comparison
+        # CRITICAL FIX: Convert timestamps to datetime for comparison and normalize timezone handling
         existing_df[timestamp_col] = pd.to_datetime(existing_df[timestamp_col])
         new_df[timestamp_col] = pd.to_datetime(new_df[timestamp_col])
+        
+        # Handle timezone conversion - ensure both are timezone-aware in UTC
+        # First check if timestamps are already timezone-aware
+        if len(existing_df) > 0 and len(new_df) > 0:
+            existing_tzinfo = existing_df[timestamp_col].iloc[0].tzinfo
+            new_tzinfo = new_df[timestamp_col].iloc[0].tzinfo
+            
+            # Make both timezone-aware (UTC) for consistent comparison
+            if existing_tzinfo is None:
+                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_localize('UTC')
+            elif str(existing_tzinfo) != 'UTC':
+                existing_df[timestamp_col] = existing_df[timestamp_col].dt.tz_convert('UTC')
+                
+            if new_tzinfo is None:
+                new_df[timestamp_col] = new_df[timestamp_col].dt.tz_localize('UTC')
+            elif str(new_tzinfo) != 'UTC':
+                new_df[timestamp_col] = new_df[timestamp_col].dt.tz_convert('UTC')
         
         # Get the new quote data (should be single row)
         if len(new_df) != 1:
@@ -194,12 +196,17 @@ def intelligent_append_or_update(existing_df, new_df):
             existing_df_sorted = existing_df.sort_values(timestamp_col)
             last_candle_timestamp = existing_df_sorted.iloc[-1][timestamp_col]
             
+            # CRITICAL FIX: Truncate timestamps to minute precision for comparison
+            # This removes seconds and microseconds which can cause false inequality
+            new_timestamp_minute = new_timestamp.replace(second=0, microsecond=0)
+            last_candle_timestamp_minute = last_candle_timestamp.replace(second=0, microsecond=0)
+            
             logger.info(f"📊 Intelligent Append Analysis:")
-            logger.info(f"   Last candle timestamp: {last_candle_timestamp}")
-            logger.info(f"   New quote timestamp: {new_timestamp}")
+            logger.info(f"   Last candle timestamp (UTC): {last_candle_timestamp_minute}")
+            logger.info(f"   New quote timestamp (UTC): {new_timestamp_minute}")
             
             # CORE LOGIC: Compare timestamps to determine append vs update
-            if new_timestamp == last_candle_timestamp:
+            if new_timestamp_minute == last_candle_timestamp_minute:
                 # SAME MINUTE: Update existing candle
                 logger.info(f"✏️ SAME MINUTE detected - Updating existing candle")
                 
@@ -216,11 +223,11 @@ def intelligent_append_or_update(existing_df, new_df):
                 # Note: open stays the same, volume could be updated but we'll keep existing
                 
                 logger.info(f"   Updated candle: high={updated_high}, low={updated_low}, close={new_close}")
-                logger.info(f"   Original: {len(existing_df)} rows, Updated: 0 new rows, Final: {len(existing_df)} rows")
+                logger.info(f"   Original: {len(existing_df)} rows, Updated: 0 new rows, Final: {len(existing_df_sorted)} rows")
                 
                 return existing_df_sorted
                 
-            elif new_timestamp > last_candle_timestamp:
+            elif new_timestamp_minute > last_candle_timestamp_minute:
                 # NEW MINUTE: Append new candle
                 logger.info(f"➕ NEW MINUTE detected - Appending new candle")
                 
@@ -234,7 +241,7 @@ def intelligent_append_or_update(existing_df, new_df):
                 return combined_df
             else:
                 # PAST TIMESTAMP: This shouldn't happen in real-time, but handle gracefully
-                logger.warning(f"⚠️ New timestamp {new_timestamp} is older than last candle {last_candle_timestamp}")
+                logger.warning(f"⚠️ New timestamp {new_timestamp_minute} is older than last candle {last_candle_timestamp_minute}")
                 logger.info(f"   Keeping existing data unchanged")
                 return existing_df
         else:
