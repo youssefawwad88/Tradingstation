@@ -137,12 +137,13 @@ def run_daily_data_jobs():
     return True
 
 def run_intraday_updates():
-    """Run intraday data updates using new Compact Update Engine."""
+    """Run intraday data updates using FIXED Compact Intraday Fetch (TIME_SERIES_INTRADAY)."""
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
-    logger.info(f"{mode_prefix} Starting intraday updates (Compact Update Engine)")
-    result = run_job("jobs/compact_update.py", "compact_update")
+    logger.info(f"{mode_prefix} Starting intraday updates (Fixed Compact Intraday Fetch)")
+    logger.info(f"{mode_prefix} CRITICAL FIX: Now using TIME_SERIES_INTRADAY API for real minute-by-minute data")
+    result = run_job("fetch_intraday_compact.py", "fetch_intraday_compact")
     if TEST_MODE_ACTIVE and result:
-        logger.info("[TEST MODE] Compact Update Engine simulation completed successfully")
+        logger.info("[TEST MODE] Fixed Compact Intraday Fetch simulation completed successfully")
     return result
 
 def run_screener(screener_name, script_path):

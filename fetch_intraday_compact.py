@@ -13,6 +13,7 @@ import os
 from datetime import datetime, timedelta
 import time
 import logging
+import pytz
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -114,9 +115,21 @@ def fetch_intraday_compact():
                 combined_df = append_new_candles_smart(existing_df, latest_df)
                 
                 # Keep only last 7 days of data (rolling window)
-                seven_days_ago = datetime.now() - timedelta(days=7)
+                # CRITICAL FIX: Use timezone-aware datetime for proper comparison
+                ny_tz = pytz.timezone('America/New_York')
+                seven_days_ago = datetime.now(ny_tz) - timedelta(days=7)
                 timestamp_col = 'timestamp' if 'timestamp' in combined_df.columns else 'Date'
                 combined_df[timestamp_col] = pd.to_datetime(combined_df[timestamp_col])
+                
+                # Ensure timestamps are timezone-aware for proper comparison
+                if combined_df[timestamp_col].dt.tz is None:
+                    # If naive, localize to NY timezone first
+                    combined_df[timestamp_col] = combined_df[timestamp_col].dt.tz_localize(ny_tz)
+                elif combined_df[timestamp_col].dt.tz != ny_tz:
+                    # If different timezone, convert to NY timezone
+                    combined_df[timestamp_col] = combined_df[timestamp_col].dt.tz_convert(ny_tz)
+                
+                # Now we can safely compare timezone-aware datetimes
                 combined_df = combined_df[combined_df[timestamp_col] >= seven_days_ago]
                 
                 # Save updated data
