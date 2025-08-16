@@ -1292,8 +1292,20 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
             try:
                 cleaned_1min["timestamp"] = pd.to_datetime(cleaned_1min["timestamp"])
 
-                # Keep last 7 calendar days
-                seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+                # FIXED: Use timezone-aware datetime for proper comparison
+                ny_tz = pytz.timezone(TIMEZONE)
+                now_et = datetime.datetime.now(ny_tz)
+                seven_days_ago = now_et - datetime.timedelta(days=7)
+                
+                # Ensure timestamps are timezone-aware for proper comparison
+                if cleaned_1min["timestamp"].dt.tz is None:
+                    # If naive, localize to NY timezone first
+                    cleaned_1min["timestamp"] = cleaned_1min["timestamp"].dt.tz_localize(ny_tz)
+                elif cleaned_1min["timestamp"].dt.tz != ny_tz:
+                    # If different timezone, convert to NY timezone
+                    cleaned_1min["timestamp"] = cleaned_1min["timestamp"].dt.tz_convert(ny_tz)
+                
+                # Apply 7-day filter with timezone-aware comparison
                 mask = cleaned_1min["timestamp"] >= seven_days_ago
                 cleaned_1min = cleaned_1min[mask]
 
