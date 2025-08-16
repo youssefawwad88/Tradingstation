@@ -103,6 +103,15 @@ def trim_data_to_requirements(df, data_type):
             # Keep most recent 7 days
             cutoff_date = datetime.now(pytz.timezone(TIMEZONE)) - timedelta(days=7)
             df_sorted[timestamp_col] = pd.to_datetime(df_sorted[timestamp_col])
+            
+            # Ensure both cutoff_date and timestamps are timezone-aware for proper comparison
+            if df_sorted[timestamp_col].dt.tz is None:
+                # If timestamps are timezone-naive, localize them to Eastern Time first
+                df_sorted[timestamp_col] = df_sorted[timestamp_col].dt.tz_localize(TIMEZONE)
+            else:
+                # If timestamps are already timezone-aware, convert to Eastern Time for consistency
+                df_sorted[timestamp_col] = df_sorted[timestamp_col].dt.tz_convert(TIMEZONE)
+            
             trimmed_df = df_sorted[df_sorted[timestamp_col] >= cutoff_date]
             logger.debug(f"1-minute data trimmed to {len(trimmed_df)} rows (last 7 days)")
             

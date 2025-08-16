@@ -18,6 +18,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.helpers import read_master_tickerlist, save_df_to_s3, update_scheduler_status
 from utils.alpha_vantage_api import get_intraday_data
+from jobs.full_fetch import trim_data_to_requirements
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -50,8 +51,8 @@ def fetch_30min_data():
             intraday_30min_df = get_intraday_data(ticker, interval='30min', outputsize='full')
             
             if not intraday_30min_df.empty:
-                # Take exactly 500 rows as specified
-                intraday_30min_df = intraday_30min_df.head(500)
+                # Apply proper 30-minute data trimming (most recent 500 rows, properly sorted)
+                intraday_30min_df = trim_data_to_requirements(intraday_30min_df, '30min')
                 
                 # Save to Spaces with correct path format
                 file_path = f'data/intraday_30min/{ticker}_30min.csv'
