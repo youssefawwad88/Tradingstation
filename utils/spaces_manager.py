@@ -90,6 +90,49 @@ def upload_dataframe(df, object_name, file_format="csv"):
         return False
 
 
+def download_dataframe(object_name, file_format="csv"):
+    """
+    Download a pandas DataFrame directly from DigitalOcean Spaces.
+
+    Args:
+        object_name (str): Object name in the Spaces bucket
+        file_format (str): Format of the file ('csv' or 'parquet')
+
+    Returns:
+        pandas.DataFrame: Downloaded DataFrame, or empty DataFrame if failed
+    """
+    client = get_spaces_client()
+    if not client:
+        logger.warning(f"Cannot download from Spaces - no client available")
+        return pd.DataFrame()
+
+    try:
+        # Download the object
+        response = client.get_object(Bucket=SPACES_BUCKET_NAME, Key=object_name)
+        content = response['Body'].read()
+        
+        if file_format.lower() == "csv":
+            df = pd.read_csv(io.BytesIO(content))
+        elif file_format.lower() == "parquet":
+            df = pd.read_parquet(io.BytesIO(content))
+        else:
+            logger.error(f"Unsupported file format: {file_format}")
+            return pd.DataFrame()
+
+        logger.info(f"Downloaded DataFrame from {SPACES_BUCKET_NAME}/{object_name}: {len(df)} rows")
+        if DEBUG_MODE:
+            print(
+                f"☁️ Successfully downloaded from Spaces: {SPACES_BUCKET_NAME}/{object_name} - {len(df)} rows"
+            )
+        return df
+    except Exception as e:
+        logger.warning(f"Error downloading DataFrame from Spaces {object_name}: {e}")
+        if DEBUG_MODE:
+            print(f"⚠️ Failed to download from Spaces {object_name}: {e}")
+        return pd.DataFrame()
+
+
+
 def spaces_manager():
     """
     Initialize and return a spaces manager client for backwards compatibility.

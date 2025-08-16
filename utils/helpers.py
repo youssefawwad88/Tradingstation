@@ -412,7 +412,7 @@ def read_master_tickerlist():
 
 def read_df_from_s3(object_name):
     """
-    Read DataFrame from S3/Spaces or local fallback.
+    Read DataFrame from S3/Spaces with cloud-first approach and local fallback.
 
     Args:
         object_name (str): Object name/path in S3
@@ -422,21 +422,33 @@ def read_df_from_s3(object_name):
     """
     logger.info(f"Attempting to read DataFrame from {object_name}")
 
-    # Try to read from local file first
+    # Try to read from Spaces first (if credentials available)
+    from utils.spaces_manager import download_dataframe
+    try:
+        cloud_df = download_dataframe(object_name)
+        if not cloud_df.empty:
+            logger.info(f"✅ Successfully read {len(cloud_df)} rows from CLOUD STORAGE: {object_name}")
+            return cloud_df
+        else:
+            logger.info(f"⚠️ Cloud file exists but is empty or unreadable: {object_name}")
+    except Exception as e:
+        logger.info(f"⚠️ Could not read from cloud storage: {e}")
+
+    # Fallback to local file
     local_file = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), object_name
     )
     if os.path.exists(local_file):
         try:
             df = pd.read_csv(local_file)
-            logger.info(f"Successfully read {len(df)} rows from local file")
+            logger.info(f"📁 Successfully read {len(df)} rows from LOCAL FILE: {local_file}")
             return df
         except Exception as e:
             logger.error(f"Error reading local file {local_file}: {e}")
 
     # Return empty DataFrame if file doesn't exist or can't be read
     logger.warning(
-        f"File not found or unreadable: {object_name} - returning empty DataFrame"
+        f"File not found in cloud or locally: {object_name} - returning empty DataFrame"
     )
     return pd.DataFrame()
 
