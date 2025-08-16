@@ -78,6 +78,20 @@ def fetch_intraday_compact():
     """
     logger.info("🚀 Starting Intraday Compact Fetch Job (Every Minute)")
     
+    # Check API key availability
+    from utils.config import ALPHA_VANTAGE_API_KEY, SPACES_BUCKET_NAME
+    if not ALPHA_VANTAGE_API_KEY:
+        logger.warning("⚠️ ALPHA_VANTAGE_API_KEY not configured")
+        logger.warning("💡 Running in TEST MODE - no new data will be fetched")
+        logger.warning("🔧 Set ALPHA_VANTAGE_API_KEY environment variable to enable data fetching")
+        logger.warning("📝 For production use, ensure API credentials are properly configured")
+        # Don't return False here - let it continue for weekend testing
+    
+    if not SPACES_BUCKET_NAME:
+        logger.warning("⚠️ DigitalOcean Spaces not configured - using local storage only")
+        logger.warning("💡 CSV files will be saved locally but NOT uploaded to cloud storage")
+        logger.warning("🔧 Set SPACES credentials to enable cloud storage uploads")
+    
     # Load tickers from master_tickerlist.csv
     tickers = read_master_tickerlist()
     

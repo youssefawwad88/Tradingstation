@@ -343,10 +343,15 @@ def run_full_fetch(tickers_to_fetch: list = None):
     # Check environment setup
     if not ALPHA_VANTAGE_API_KEY:
         logger.error("❌ ALPHA_VANTAGE_API_KEY not configured")
+        logger.error("💡 Cannot fetch real market data without API key")
+        logger.error("🔧 Set ALPHA_VANTAGE_API_KEY environment variable to enable data fetching")
+        logger.error("📝 For production use, ensure API credentials are properly configured")
         return False
     
     if not SPACES_BUCKET_NAME:
         logger.warning("⚠️ DigitalOcean Spaces not configured - using local storage only")
+        logger.warning("💡 CSV files will be saved locally but NOT uploaded to cloud storage")
+        logger.warning("🔧 Set SPACES credentials to enable cloud storage uploads")
     
     # Determine ticker list to process
     if tickers_to_fetch is not None:
