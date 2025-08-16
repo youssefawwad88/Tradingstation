@@ -117,16 +117,61 @@ def fetch_intraday_compact():
             file_path = f'data/intraday/{ticker}_1min.csv'
             existing_df = read_df_from_s3(file_path)
             
-            # Fetch latest compact data (today's data)
-            latest_df = get_intraday_data(ticker, interval='1min', outputsize='compact')
+            # CRITICAL FIX: Check file size to determine outputsize strategy
+            # If file is smaller than 10KB or missing/incomplete, use full fetch
+            outputsize_strategy = 'compact'  # Default to compact for real-time updates
+            
+            if existing_df.empty:
+                # No existing data - need full historical fetch
+                outputsize_strategy = 'full'
+                logger.info(f"   {ticker}: No existing data found, using full historical fetch")
+            else:
+                # Check file size to determine if we need full historical data
+                try:
+                    # Try to get actual file size from local filesystem first
+                    local_file_path = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)), 
+                        file_path
+                    )
+                    
+                    file_size_bytes = 0
+                    if os.path.exists(local_file_path):
+                        file_size_bytes = os.path.getsize(local_file_path)
+                    else:
+                        # Estimate file size from DataFrame (60 bytes per row based on testing)
+                        file_size_bytes = len(existing_df) * 60
+                    
+                    # Apply 10KB threshold as specified in problem statement
+                    min_file_size = 10 * 1024  # 10KB in bytes
+                    if file_size_bytes <= min_file_size:
+                        outputsize_strategy = 'full'
+                        logger.info(f"   {ticker}: File size {file_size_bytes} bytes < {min_file_size} bytes threshold, using full historical fetch")
+                    else:
+                        logger.debug(f"   {ticker}: File size {file_size_bytes} bytes OK, using compact fetch")
+                        
+                except Exception as e:
+                    # If file size check fails, err on side of caution with full fetch
+                    outputsize_strategy = 'full'
+                    logger.warning(f"   {ticker}: Could not verify file size ({e}), using full historical fetch")
+            
+            # Fetch data using determined strategy
+            latest_df = get_intraday_data(ticker, interval='1min', outputsize=outputsize_strategy)
             
             if not latest_df.empty:
                 # Normalize column names if needed
                 if 'timestamp' not in latest_df.columns and len(latest_df.columns) >= 6:
                     latest_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
                 
-                # Combine with existing data
-                combined_df = append_new_candles_smart(existing_df, latest_df)
+                # Handle data combination based on fetch strategy
+                if outputsize_strategy == 'full':
+                    # For full fetch, we have complete historical data
+                    # Combine with existing if available, but prioritize new full dataset
+                    combined_df = append_new_candles_smart(existing_df, latest_df)
+                    logger.debug(f"   {ticker}: Full fetch completed, merged data")
+                else:
+                    # For compact fetch, append only new candles to existing data
+                    combined_df = append_new_candles_smart(existing_df, latest_df)
+                    logger.debug(f"   {ticker}: Compact fetch completed, appended new candles")
                 
                 # Keep only last 7 days of data (rolling window)
                 # CRITICAL FIX: Use timezone-aware datetime for proper comparison

@@ -443,8 +443,8 @@ def check_ticker_data_health(ticker):
                     file_size_bytes = estimated_size
                     logger.debug(f"Estimated file size for {ticker}: {file_size_bytes} bytes (from {len(existing_1min_df)} rows)")
                 
-                # Check minimum file size (>50KB = 51,200 bytes as per problem statement)
-                min_file_size = 50 * 1024  # 50KB in bytes
+                # Check minimum file size (>10KB = 10,240 bytes as per problem statement)
+                min_file_size = 10 * 1024  # 10KB in bytes
                 if file_size_bytes <= min_file_size:
                     logger.warning(f"⚠️ {ticker}_1min.csv not found or is incomplete. Triggering a full data fetch to repair.")
                     logger.debug(f"Health check failed for {ticker}: insufficient file size ({file_size_bytes} bytes, minimum {min_file_size} bytes required)")
