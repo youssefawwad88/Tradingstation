@@ -133,6 +133,39 @@ def download_dataframe(object_name, file_format="csv"):
 
 
 
+def get_cloud_file_size(object_name):
+    """
+    Get the size of a file in cloud storage (DigitalOcean Spaces) without downloading it.
+    
+    Args:
+        object_name (str): Object name/path in the cloud storage bucket
+        
+    Returns:
+        int: File size in bytes, or 0 if file doesn't exist or error occurs
+    """
+    client = get_spaces_client()
+    if not client:
+        logger.warning("Cannot check cloud file size - no client available")
+        return 0
+    
+    try:
+        # Use HEAD request to get object metadata without downloading
+        response = client.head_object(Bucket=SPACES_BUCKET_NAME, Key=object_name)
+        file_size = response.get('ContentLength', 0)
+        logger.debug(f"☁️ Cloud file size for {object_name}: {file_size} bytes")
+        return file_size
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            logger.debug(f"☁️ Cloud file not found: {object_name}")
+        else:
+            logger.warning(f"☁️ Error checking cloud file size for {object_name}: {e}")
+        return 0
+    except Exception as e:
+        logger.warning(f"☁️ Unexpected error checking cloud file size for {object_name}: {e}")
+        return 0
+
+
 def spaces_manager():
     """
     Initialize and return a spaces manager client for backwards compatibility.

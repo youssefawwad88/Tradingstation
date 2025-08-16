@@ -52,15 +52,9 @@ DATA_INTERVAL = "1min"  # Options: "1min" or "30min"
 # CONFIGURATION: Choose your ticker for testing  
 TEST_TICKER = "AAPL"  # Change this to test different tickers
 
-# CONFIGURATION: File paths
-if DATA_INTERVAL == "1min":
-    DATA_FOLDER = "data/intraday"
-    FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_1min.csv"
-elif DATA_INTERVAL == "30min":
-    DATA_FOLDER = "data/intraday_30min" 
-    FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_30min.csv"
-else:
-    raise ValueError(f"Unsupported DATA_INTERVAL: {DATA_INTERVAL}")
+# CONFIGURATION: File paths - will be set dynamically in run_final_logic()
+DATA_FOLDER = None
+FINAL_CSV_PATH = None
 
 # Alpha Vantage API Configuration
 BASE_URL = "https://www.alphavantage.co/query"
@@ -207,6 +201,30 @@ def ensure_directory_exists(file_path):
         logger.info(f"📁 Created directory: {directory}")
 
 
+def get_cloud_file_size_bytes(object_name):
+    """
+    Get the size of a file in cloud storage in bytes.
+    
+    This function replaces local file size checking to ensure we're working
+    with the actual cloud storage data source.
+    
+    Args:
+        object_name (str): Object name/path in cloud storage
+        
+    Returns:
+        int: File size in bytes from cloud storage
+    """
+    try:
+        from utils.spaces_manager import get_cloud_file_size
+        return get_cloud_file_size(object_name)
+    except ImportError:
+        logger.error("❌ Cannot import cloud file size function")
+        return 0
+    except Exception as e:
+        logger.error(f"❌ Error getting cloud file size for {object_name}: {e}")
+        return 0
+
+
 def get_file_size_bytes(file_path):
     """
     Get the size of a file in bytes. Returns 0 if file doesn't exist.
@@ -298,32 +316,35 @@ def save_data_to_csv(df, file_path):
 
 def determine_fetch_strategy(file_path, existing_df):
     """
-    CRITICAL FUNCTION: Implement the exact 10KB file size rule.
+    CRITICAL FUNCTION: Implement the exact 10KB file size rule using cloud storage.
     
-    Rule: "If the local data file's size is less than 10kb, the script must 
+    Rule: "If the cloud data file's size is less than 10kb, the script must 
     perform a full historical data fetch using outputsize='full'"
     
+    This function now checks cloud storage directly instead of local files
+    to ensure the logic aligns with the actual data source.
+    
     Args:
-        file_path (str): Path to the data file
+        file_path (str): Path to the data file (used as cloud object name)
         existing_df (pandas.DataFrame): Existing data (if any)
         
     Returns:
         str: "full" or "compact" strategy
     """
-    # Check if file exists and get its size
-    file_size_bytes = get_file_size_bytes(file_path)
+    # Check cloud file size instead of local file size
+    file_size_bytes = get_cloud_file_size_bytes(file_path)
     
-    logger.info(f"🔍 File Size Analysis for {file_path}:")
-    logger.info(f"   Current file size: {file_size_bytes} bytes")
+    logger.info(f"🔍 Cloud File Size Analysis for {file_path}:")
+    logger.info(f"   Current cloud file size: {file_size_bytes} bytes")
     logger.info(f"   Threshold: {FILE_SIZE_THRESHOLD_BYTES} bytes ({FILE_SIZE_THRESHOLD_KB}KB)")
     
-    # Apply the 10KB rule
+    # Apply the 10KB rule based on cloud storage
     if file_size_bytes <= FILE_SIZE_THRESHOLD_BYTES:
-        logger.info(f"🔄 RULE TRIGGERED: File size {file_size_bytes} bytes ≤ {FILE_SIZE_THRESHOLD_BYTES} bytes")
+        logger.info(f"🔄 RULE TRIGGERED: Cloud file size {file_size_bytes} bytes ≤ {FILE_SIZE_THRESHOLD_BYTES} bytes")
         logger.info(f"   ➤ Using outputsize='full' for complete historical data fetch")
         return "full"
     else:
-        logger.info(f"✅ RULE CHECK PASSED: File size {file_size_bytes} bytes > {FILE_SIZE_THRESHOLD_BYTES} bytes")
+        logger.info(f"✅ RULE CHECK PASSED: Cloud file size {file_size_bytes} bytes > {FILE_SIZE_THRESHOLD_BYTES} bytes")
         logger.info(f"   ➤ Using outputsize='compact' for efficient real-time updates")
         return "compact"
 
@@ -396,6 +417,18 @@ def run_comprehensive_intraday_fetch():
     Main function that implements the complete intraday data fetching logic
     with robust file size rule and 30-minute interval compatibility.
     """
+    # CRITICAL FIX: Set file path dynamically after DATA_INTERVAL is determined
+    global DATA_FOLDER, FINAL_CSV_PATH
+    
+    if DATA_INTERVAL == "1min":
+        DATA_FOLDER = "data/intraday"
+        FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_1min.csv"
+    elif DATA_INTERVAL == "30min":
+        DATA_FOLDER = "data/intraday_30min" 
+        FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_30min.csv"
+    else:
+        raise ValueError(f"Unsupported DATA_INTERVAL: {DATA_INTERVAL}")
+    
     logger.info("=" * 80)
     logger.info("🚀 COMPREHENSIVE INTRADAY DATA FETCHER - STARTING")
     logger.info("=" * 80)
@@ -500,10 +533,8 @@ def run_comprehensive_tests():
     
     # Test 1: 1-minute interval
     logger.info("\n🔬 Test 1: 1-minute interval functionality")
-    global DATA_INTERVAL, FINAL_CSV_PATH, DATA_FOLDER
+    global DATA_INTERVAL
     DATA_INTERVAL = "1min"
-    DATA_FOLDER = "data/intraday"
-    FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_1min.csv"
     
     result_1min = run_comprehensive_intraday_fetch()
     test_results.append(("1-minute interval", result_1min))
@@ -513,8 +544,6 @@ def run_comprehensive_tests():
     # Test 2: 30-minute interval  
     logger.info("\n🔬 Test 2: 30-minute interval functionality")
     DATA_INTERVAL = "30min"
-    DATA_FOLDER = "data/intraday_30min"
-    FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_30min.csv"
     
     result_30min = run_comprehensive_intraday_fetch()
     test_results.append(("30-minute interval", result_30min))
