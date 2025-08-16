@@ -5,26 +5,37 @@ Comprehensive Intraday Data Fetcher - Complete Solution
 
 This script addresses all the issues identified in the comprehensive request:
 
-1. ✅ Robust File Size Logic: Checks if file < 10KB and performs full historical fetch
-2. ✅ 30-Minute Interval Compatibility: Works flawlessly with both 1min and 30min intervals  
-3. ✅ API Key Integration: Uses provided ALPHA_VANTAGE_API_KEY properly
-4. ✅ Dynamic Fetch Strategy: Automatically switches between 'full' and 'compact' based on file size
-5. ✅ Error Handling: Graceful handling of all error conditions
-6. ✅ Self-Contained: Single script ready for Colab execution
+1. ✅ FIXED: No more infinite loop in get_cloud_file_size_bytes function  
+2. ✅ FIXED: Intelligent fetching logic using cloud storage file size checking
+3. ✅ READY: Set-and-forget single script with all configuration at the top
 
-Usage:
-    # For 1-minute data
-    DATA_INTERVAL = "1min"
+CORE FIXES IMPLEMENTED:
+- Fixed recursive call bug that caused infinite loop
+- Cloud file size check now works correctly without recursion 
+- 10KB rule logic correctly uses cloud storage instead of local files
+- Script is completely self-contained and ready to run
+
+USAGE EXAMPLES:
+
+    # For 1-minute data with default settings
+    python3 comprehensive_intraday_fix.py
     
-    # For 30-minute data  
-    DATA_INTERVAL = "30min"
+    # For testing both intervals
+    python3 comprehensive_intraday_fix.py --test
     
+    # Configure at the top of this file by editing the DEFAULT_CONFIG:
+    DATA_INTERVAL = "1min" or "30min"
+    TEST_TICKER = "AAPL" 
+    API_KEY = "your_alpha_vantage_key"
+    FILE_SIZE_THRESHOLD_KB = 10
+
 Key Features:
-- Implements exact 10KB file size rule as specified
-- Dynamic outputsize strategy (full vs compact) based on file completeness
-- Robust timestamp handling and data merging
-- Compatible with both 1min and 30min intervals
-- Comprehensive error handling and logging
+- ✅ No infinite loop - fixed recursive function call
+- ✅ Intelligent 10KB rule using cloud storage file size  
+- ✅ Dynamic outputsize strategy (full vs compact) based on file completeness
+- ✅ Compatible with both 1min and 30min intervals
+- ✅ Self-contained single script - no external dependencies on utils modules
+- ✅ Comprehensive error handling and logging
 """
 
 import os
@@ -37,6 +48,18 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
+
+# =============================================================================
+# 🔧 CONFIGURATION SECTION - EDIT THESE VALUES TO CUSTOMIZE THE SCRIPT
+# =============================================================================
+
+# 📝 QUICK SETUP - EDIT THESE VALUES FOR YOUR NEEDS:
+QUICK_SETUP = {
+    "DATA_INTERVAL": "1min",           # "1min" or "30min" 
+    "TEST_TICKER": "AAPL",             # Stock symbol to fetch
+    "API_KEY": "LF4A4K5UCTYB93VZ",     # Your Alpha Vantage API key
+    "FILE_SIZE_THRESHOLD_KB": 10,      # File size threshold for full vs compact fetch
+}
 
 # =============================================================================
 # CONFIGURATION SECTION
@@ -81,8 +104,13 @@ class AppConfig:
         self.DATA_INTERVAL = new_interval
         self._set_paths()
 
-# Default configuration instance for backward compatibility
-DEFAULT_CONFIG = AppConfig()
+# Default configuration instance using QUICK_SETUP values
+DEFAULT_CONFIG = AppConfig(
+    data_interval=QUICK_SETUP["DATA_INTERVAL"],
+    test_ticker=QUICK_SETUP["TEST_TICKER"], 
+    api_key=QUICK_SETUP["API_KEY"],
+    file_size_threshold_kb=QUICK_SETUP["FILE_SIZE_THRESHOLD_KB"]
+)
 
 # =============================================================================
 # LOGGING SETUP
@@ -240,13 +268,49 @@ def get_cloud_file_size_bytes(object_name):
         int: File size in bytes from cloud storage
     """
     try:
-        from utils.spaces_manager import get_cloud_file_size_bytes
-        return get_cloud_file_size_bytes(object_name)
+        # Import dependencies needed for cloud storage access
+        import boto3
+        from botocore.exceptions import ClientError
+        
+        # Get cloud storage configuration
+        spaces_access_key = os.getenv("SPACES_ACCESS_KEY_ID")
+        spaces_secret_key = os.getenv("SPACES_SECRET_ACCESS_KEY") 
+        spaces_bucket = os.getenv("SPACES_BUCKET_NAME")
+        spaces_region = os.getenv("SPACES_REGION", "nyc3")
+        
+        # Check if credentials are available
+        if not all([spaces_access_key, spaces_secret_key, spaces_bucket]):
+            logger.debug("☁️ Cloud storage credentials not configured - returning 0")
+            return 0
+            
+        # Create boto3 client for DigitalOcean Spaces
+        session = boto3.session.Session()
+        client = session.client(
+            "s3",
+            region_name=spaces_region,
+            endpoint_url=f"https://{spaces_region}.digitaloceanspaces.com",
+            aws_access_key_id=spaces_access_key,
+            aws_secret_access_key=spaces_secret_key,
+        )
+        
+        # Use HEAD request to get object metadata without downloading
+        response = client.head_object(Bucket=spaces_bucket, Key=object_name)
+        file_size = response.get('ContentLength', 0)
+        logger.debug(f"☁️ Cloud file size for {object_name}: {file_size} bytes")
+        return file_size
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            logger.debug(f"☁️ Cloud file not found: {object_name}")
+        else:
+            logger.warning(f"☁️ Error checking cloud file size for {object_name}: {e}")
+        return 0
     except ImportError:
-        logger.error("❌ Cannot import cloud file size function")
+        logger.warning("❌ boto3 not available - cannot check cloud file size")
         return 0
     except Exception as e:
-        logger.error(f"❌ Error getting cloud file size for {object_name}: {e}")
+        logger.warning(f"❌ Unexpected error getting cloud file size for {object_name}: {e}")
         return 0
 
 
