@@ -133,7 +133,7 @@ def download_dataframe(object_name, file_format="csv"):
 
 
 
-def get_cloud_file_size(object_name):
+def get_cloud_file_size_bytes(object_name):
     """
     Get the size of a file in cloud storage (DigitalOcean Spaces) without downloading it.
     

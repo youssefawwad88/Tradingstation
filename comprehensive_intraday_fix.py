@@ -42,27 +42,47 @@ from pathlib import Path
 # CONFIGURATION SECTION
 # =============================================================================
 
-# CRITICAL: Set your API key here - use the provided key from the request
-ALPHA_VANTAGE_API_KEY = "LF4A4K5UCTYB93VZ"
+class AppConfig:
+    """
+    Configuration object to hold all application settings.
+    This replaces global variables to make the code more testable and maintainable.
+    """
+    def __init__(self, data_interval="1min", test_ticker="AAPL", api_key="LF4A4K5UCTYB93VZ", 
+                 file_size_threshold_kb=10):
+        # Core configuration
+        self.DATA_INTERVAL = data_interval
+        self.TEST_TICKER = test_ticker
+        self.ALPHA_VANTAGE_API_KEY = api_key
+        
+        # File size threshold
+        self.FILE_SIZE_THRESHOLD_KB = file_size_threshold_kb
+        self.FILE_SIZE_THRESHOLD_BYTES = file_size_threshold_kb * 1024
+        
+        # API Configuration
+        self.BASE_URL = "https://www.alphavantage.co/query"
+        self.REQUEST_TIMEOUT = 15
+        
+        # Dynamic paths - set based on interval
+        self._set_paths()
+    
+    def _set_paths(self):
+        """Set file paths dynamically based on the data interval."""
+        if self.DATA_INTERVAL == "1min":
+            self.DATA_FOLDER = "data/intraday"
+            self.FINAL_CSV_PATH = f"{self.DATA_FOLDER}/{self.TEST_TICKER}_1min.csv"
+        elif self.DATA_INTERVAL == "30min":
+            self.DATA_FOLDER = "data/intraday_30min" 
+            self.FINAL_CSV_PATH = f"{self.DATA_FOLDER}/{self.TEST_TICKER}_30min.csv"
+        else:
+            raise ValueError(f"Unsupported DATA_INTERVAL: {self.DATA_INTERVAL}")
+    
+    def update_interval(self, new_interval):
+        """Update the data interval and recalculate paths."""
+        self.DATA_INTERVAL = new_interval
+        self._set_paths()
 
-# CONFIGURATION: Choose your data interval
-# Change this to "30min" for 30-minute interval testing
-DATA_INTERVAL = "1min"  # Options: "1min" or "30min"
-
-# CONFIGURATION: Choose your ticker for testing  
-TEST_TICKER = "AAPL"  # Change this to test different tickers
-
-# CONFIGURATION: File paths - will be set dynamically in run_final_logic()
-DATA_FOLDER = None
-FINAL_CSV_PATH = None
-
-# Alpha Vantage API Configuration
-BASE_URL = "https://www.alphavantage.co/query"
-REQUEST_TIMEOUT = 15
-
-# File size threshold as per problem statement
-FILE_SIZE_THRESHOLD_KB = 10
-FILE_SIZE_THRESHOLD_BYTES = FILE_SIZE_THRESHOLD_KB * 1024  # 10KB = 10,240 bytes
+# Default configuration instance for backward compatibility
+DEFAULT_CONFIG = AppConfig()
 
 # =============================================================================
 # LOGGING SETUP
@@ -81,29 +101,30 @@ logger = logging.getLogger(__name__)
 # CORE API FUNCTIONS
 # =============================================================================
 
-def make_api_request(params):
+def make_api_request(params, config):
     """
     Centralized API request function with robust error handling.
     
     Args:
         params (dict): API request parameters
+        config (AppConfig): Configuration object
         
     Returns:
         requests.Response or None: API response or None if failed
     """
-    if not ALPHA_VANTAGE_API_KEY:
+    if not config.ALPHA_VANTAGE_API_KEY:
         logger.error("❌ ALPHA_VANTAGE_API_KEY not configured")
         logger.error("💡 Cannot fetch data without API key")
         return None
 
     try:
         logger.debug(f"🌐 Making API request: {params.get('function')} for {params.get('symbol')}")
-        response = requests.get(BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
+        response = requests.get(config.BASE_URL, params=params, timeout=config.REQUEST_TIMEOUT)
         response.raise_for_status()
         logger.debug(f"✅ API request successful for {params.get('symbol')}")
         return response
     except requests.exceptions.Timeout:
-        logger.error(f"❌ API request timed out after {REQUEST_TIMEOUT} seconds for {params.get('symbol')}")
+        logger.error(f"❌ API request timed out after {config.REQUEST_TIMEOUT} seconds for {params.get('symbol')}")
         return None
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ HTTP request failed for {params.get('symbol')}: {e}")
@@ -113,7 +134,7 @@ def make_api_request(params):
         return None
 
 
-def get_intraday_data(symbol, interval="1min", outputsize="compact"):
+def get_intraday_data(symbol, interval="1min", outputsize="compact", config=None):
     """
     Fetch intraday time series data from Alpha Vantage API.
     
@@ -121,21 +142,25 @@ def get_intraday_data(symbol, interval="1min", outputsize="compact"):
         symbol (str): Stock ticker symbol
         interval (str): Time interval ("1min", "30min", etc.)
         outputsize (str): "compact" (latest 100 data points) or "full" (20+ days)
+        config (AppConfig): Configuration object (uses default if None)
         
     Returns:
         pandas.DataFrame: Intraday data with standardized columns
     """
+    if config is None:
+        config = DEFAULT_CONFIG
+        
     params = {
         "function": "TIME_SERIES_INTRADAY",
         "symbol": symbol,
         "interval": interval,
         "outputsize": outputsize,
-        "apikey": ALPHA_VANTAGE_API_KEY,
+        "apikey": config.ALPHA_VANTAGE_API_KEY,
         "datatype": "csv",
     }
     
     logger.info(f"📡 Fetching {interval} data for {symbol} (outputsize={outputsize})")
-    response = make_api_request(params)
+    response = make_api_request(params, config)
     
     if response:
         try:
@@ -215,8 +240,8 @@ def get_cloud_file_size_bytes(object_name):
         int: File size in bytes from cloud storage
     """
     try:
-        from utils.spaces_manager import get_cloud_file_size
-        return get_cloud_file_size(object_name)
+        from utils.spaces_manager import get_cloud_file_size_bytes
+        return get_cloud_file_size_bytes(object_name)
     except ImportError:
         logger.error("❌ Cannot import cloud file size function")
         return 0
@@ -314,7 +339,7 @@ def save_data_to_csv(df, file_path):
 # CORE LOGIC: FILE SIZE RULE IMPLEMENTATION
 # =============================================================================
 
-def determine_fetch_strategy(file_path, existing_df):
+def determine_fetch_strategy(file_path, existing_df, config=None):
     """
     CRITICAL FUNCTION: Implement the exact 10KB file size rule using cloud storage.
     
@@ -327,24 +352,28 @@ def determine_fetch_strategy(file_path, existing_df):
     Args:
         file_path (str): Path to the data file (used as cloud object name)
         existing_df (pandas.DataFrame): Existing data (if any)
+        config (AppConfig): Configuration object (uses default if None)
         
     Returns:
         str: "full" or "compact" strategy
     """
+    if config is None:
+        config = DEFAULT_CONFIG
+        
     # Check cloud file size instead of local file size
     file_size_bytes = get_cloud_file_size_bytes(file_path)
     
     logger.info(f"🔍 Cloud File Size Analysis for {file_path}:")
     logger.info(f"   Current cloud file size: {file_size_bytes} bytes")
-    logger.info(f"   Threshold: {FILE_SIZE_THRESHOLD_BYTES} bytes ({FILE_SIZE_THRESHOLD_KB}KB)")
+    logger.info(f"   Threshold: {config.FILE_SIZE_THRESHOLD_BYTES} bytes ({config.FILE_SIZE_THRESHOLD_KB}KB)")
     
     # Apply the 10KB rule based on cloud storage
-    if file_size_bytes <= FILE_SIZE_THRESHOLD_BYTES:
-        logger.info(f"🔄 RULE TRIGGERED: Cloud file size {file_size_bytes} bytes ≤ {FILE_SIZE_THRESHOLD_BYTES} bytes")
+    if file_size_bytes <= config.FILE_SIZE_THRESHOLD_BYTES:
+        logger.info(f"🔄 RULE TRIGGERED: Cloud file size {file_size_bytes} bytes ≤ {config.FILE_SIZE_THRESHOLD_BYTES} bytes")
         logger.info(f"   ➤ Using outputsize='full' for complete historical data fetch")
         return "full"
     else:
-        logger.info(f"✅ RULE CHECK PASSED: Cloud file size {file_size_bytes} bytes > {FILE_SIZE_THRESHOLD_BYTES} bytes")
+        logger.info(f"✅ RULE CHECK PASSED: Cloud file size {file_size_bytes} bytes > {config.FILE_SIZE_THRESHOLD_BYTES} bytes")
         logger.info(f"   ➤ Using outputsize='compact' for efficient real-time updates")
         return "compact"
 
@@ -412,22 +441,16 @@ def intelligent_data_merge(existing_df, new_df):
 # MAIN EXECUTION FUNCTION
 # =============================================================================
 
-def run_comprehensive_intraday_fetch():
+def run_comprehensive_intraday_fetch(config=None):
     """
     Main function that implements the complete intraday data fetching logic
     with robust file size rule and 30-minute interval compatibility.
-    """
-    # CRITICAL FIX: Set file path dynamically after DATA_INTERVAL is determined
-    global DATA_FOLDER, FINAL_CSV_PATH
     
-    if DATA_INTERVAL == "1min":
-        DATA_FOLDER = "data/intraday"
-        FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_1min.csv"
-    elif DATA_INTERVAL == "30min":
-        DATA_FOLDER = "data/intraday_30min" 
-        FINAL_CSV_PATH = f"{DATA_FOLDER}/{TEST_TICKER}_30min.csv"
-    else:
-        raise ValueError(f"Unsupported DATA_INTERVAL: {DATA_INTERVAL}")
+    Args:
+        config (AppConfig): Configuration object (uses default if None)
+    """
+    if config is None:
+        config = DEFAULT_CONFIG
     
     logger.info("=" * 80)
     logger.info("🚀 COMPREHENSIVE INTRADAY DATA FETCHER - STARTING")
@@ -435,25 +458,25 @@ def run_comprehensive_intraday_fetch():
     
     # Display configuration
     logger.info(f"📋 Configuration:")
-    logger.info(f"   Ticker: {TEST_TICKER}")
-    logger.info(f"   Interval: {DATA_INTERVAL}")
-    logger.info(f"   Output Path: {FINAL_CSV_PATH}")
-    logger.info(f"   API Key: {'✅ Configured' if ALPHA_VANTAGE_API_KEY else '❌ Missing'}")
-    logger.info(f"   File Size Threshold: {FILE_SIZE_THRESHOLD_KB}KB ({FILE_SIZE_THRESHOLD_BYTES} bytes)")
+    logger.info(f"   Ticker: {config.TEST_TICKER}")
+    logger.info(f"   Interval: {config.DATA_INTERVAL}")
+    logger.info(f"   Output Path: {config.FINAL_CSV_PATH}")
+    logger.info(f"   API Key: {'✅ Configured' if config.ALPHA_VANTAGE_API_KEY else '❌ Missing'}")
+    logger.info(f"   File Size Threshold: {config.FILE_SIZE_THRESHOLD_KB}KB ({config.FILE_SIZE_THRESHOLD_BYTES} bytes)")
     
     # STEP 1: Load existing data
     logger.info("\n" + "=" * 60)
     logger.info("📂 STEP 1: Loading existing data...")
     logger.info("=" * 60)
     
-    existing_df = load_existing_data(FINAL_CSV_PATH)
+    existing_df = load_existing_data(config.FINAL_CSV_PATH)
     
     # STEP 2: Apply file size rule to determine fetch strategy
     logger.info("\n" + "=" * 60) 
     logger.info("🔍 STEP 2: Applying 10KB file size rule...")
     logger.info("=" * 60)
     
-    fetch_strategy = determine_fetch_strategy(FINAL_CSV_PATH, existing_df)
+    fetch_strategy = determine_fetch_strategy(config.FINAL_CSV_PATH, existing_df, config)
     
     # STEP 3: Fetch data using determined strategy
     logger.info("\n" + "=" * 60)
@@ -461,9 +484,10 @@ def run_comprehensive_intraday_fetch():
     logger.info("=" * 60)
     
     new_df = get_intraday_data(
-        symbol=TEST_TICKER,
-        interval=DATA_INTERVAL,
-        outputsize=fetch_strategy
+        symbol=config.TEST_TICKER,
+        interval=config.DATA_INTERVAL,
+        outputsize=fetch_strategy,
+        config=config
     )
     
     if new_df.empty:
@@ -487,32 +511,32 @@ def run_comprehensive_intraday_fetch():
     logger.info("💾 STEP 5: Saving updated data...")
     logger.info("=" * 60)
     
-    save_success = save_data_to_csv(final_df, FINAL_CSV_PATH)
+    save_success = save_data_to_csv(final_df, config.FINAL_CSV_PATH)
     
     if save_success:
         # Verify the save by checking file size again
-        final_file_size = get_file_size_bytes(FINAL_CSV_PATH)
+        final_file_size = get_file_size_bytes(config.FINAL_CSV_PATH)
         logger.info(f"✅ Save verification:")
         logger.info(f"   Final file size: {final_file_size} bytes")
         logger.info(f"   Rows in file: {len(final_df)}")
-        logger.info(f"   File status: {'✅ Above 10KB threshold' if final_file_size > FILE_SIZE_THRESHOLD_BYTES else '⚠️ Still below 10KB threshold'}")
+        logger.info(f"   File status: {'✅ Above 10KB threshold' if final_file_size > config.FILE_SIZE_THRESHOLD_BYTES else '⚠️ Still below 10KB threshold'}")
     
     # STEP 6: Summary and next steps
     logger.info("\n" + "=" * 80)
     logger.info("📊 EXECUTION SUMMARY")
     logger.info("=" * 80)
     
-    logger.info(f"✅ Ticker processed: {TEST_TICKER}")
-    logger.info(f"✅ Interval: {DATA_INTERVAL}")
+    logger.info(f"✅ Ticker processed: {config.TEST_TICKER}")
+    logger.info(f"✅ Interval: {config.DATA_INTERVAL}")
     logger.info(f"✅ Fetch strategy used: {fetch_strategy}")
     logger.info(f"✅ Final dataset: {len(final_df)} rows")
     logger.info(f"✅ File saved: {'Yes' if save_success else 'No'}")
-    logger.info(f"✅ Final file size: {get_file_size_bytes(FINAL_CSV_PATH)} bytes")
+    logger.info(f"✅ Final file size: {get_file_size_bytes(config.FINAL_CSV_PATH)} bytes")
     
     # Provide next steps for testing
     logger.info("\n" + "🔧 TESTING RECOMMENDATIONS:")
-    logger.info("   1. Change DATA_INTERVAL to '30min' to test 30-minute functionality")
-    logger.info("   2. Change TEST_TICKER to test different symbols")
+    logger.info("   1. Use config.update_interval('30min') to test 30-minute functionality")
+    logger.info("   2. Create new config with different TEST_TICKER to test different symbols")
     logger.info("   3. Delete the CSV file to test full historical fetch")
     logger.info("   4. Run multiple times to test compact fetch behavior")
     
@@ -533,19 +557,18 @@ def run_comprehensive_tests():
     
     # Test 1: 1-minute interval
     logger.info("\n🔬 Test 1: 1-minute interval functionality")
-    global DATA_INTERVAL
-    DATA_INTERVAL = "1min"
+    config_1min = AppConfig(data_interval="1min")
     
-    result_1min = run_comprehensive_intraday_fetch()
+    result_1min = run_comprehensive_intraday_fetch(config_1min)
     test_results.append(("1-minute interval", result_1min))
     
     time.sleep(2)  # Brief pause between tests
     
     # Test 2: 30-minute interval  
     logger.info("\n🔬 Test 2: 30-minute interval functionality")
-    DATA_INTERVAL = "30min"
+    config_30min = AppConfig(data_interval="30min")
     
-    result_30min = run_comprehensive_intraday_fetch()
+    result_30min = run_comprehensive_intraday_fetch(config_30min)
     test_results.append(("30-minute interval", result_30min))
     
     # Test Results Summary
@@ -575,7 +598,7 @@ if __name__ == "__main__":
         logger.info("🧪 Running in TEST mode - will test both 1min and 30min intervals")
         success = run_comprehensive_tests()
     else:
-        logger.info("🚀 Running in NORMAL mode - using current configuration")
+        logger.info("🚀 Running in NORMAL mode - using default configuration")
         success = run_comprehensive_intraday_fetch()
     
     if success:

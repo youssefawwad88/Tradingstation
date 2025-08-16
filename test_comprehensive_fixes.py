@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def test_dynamic_path_setting():
     """
-    Test Issue 1 Fix: Verify that FINAL_CSV_PATH is set dynamically based on DATA_INTERVAL
+    Test Issue 1 Fix: Verify that paths are set dynamically in the config object
     """
     logger.info("🧪 TEST 1: Dynamic File Path Setting")
     logger.info("=" * 50)
@@ -32,35 +32,25 @@ def test_dynamic_path_setting():
     # Import the module
     import comprehensive_intraday_fix as cif
     
-    # Test 1: 1-minute interval
-    cif.DATA_INTERVAL = "1min"
-    cif.TEST_TICKER = "TEST"
-    
-    # Simulate what happens in run_comprehensive_intraday_fetch()
-    if cif.DATA_INTERVAL == "1min":
-        data_folder = "data/intraday"
-        final_csv_path = f"{data_folder}/{cif.TEST_TICKER}_1min.csv"
-    elif cif.DATA_INTERVAL == "30min":
-        data_folder = "data/intraday_30min" 
-        final_csv_path = f"{data_folder}/{cif.TEST_TICKER}_30min.csv"
+    # Test 1: 1-minute interval using config object
+    config_1min = cif.AppConfig(data_interval="1min", test_ticker="TEST")
     
     expected_1min_path = "data/intraday/TEST_1min.csv"
-    assert final_csv_path == expected_1min_path, f"Expected {expected_1min_path}, got {final_csv_path}"
-    logger.info(f"   ✅ 1min interval: {final_csv_path}")
+    assert config_1min.FINAL_CSV_PATH == expected_1min_path, f"Expected {expected_1min_path}, got {config_1min.FINAL_CSV_PATH}"
+    logger.info(f"   ✅ 1min interval: {config_1min.FINAL_CSV_PATH}")
     
-    # Test 2: 30-minute interval  
-    cif.DATA_INTERVAL = "30min"
-    
-    if cif.DATA_INTERVAL == "1min":
-        data_folder = "data/intraday"
-        final_csv_path = f"{data_folder}/{cif.TEST_TICKER}_1min.csv"
-    elif cif.DATA_INTERVAL == "30min":
-        data_folder = "data/intraday_30min" 
-        final_csv_path = f"{data_folder}/{cif.TEST_TICKER}_30min.csv"
+    # Test 2: 30-minute interval using config object
+    config_30min = cif.AppConfig(data_interval="30min", test_ticker="TEST")
     
     expected_30min_path = "data/intraday_30min/TEST_30min.csv"
-    assert final_csv_path == expected_30min_path, f"Expected {expected_30min_path}, got {final_csv_path}"
-    logger.info(f"   ✅ 30min interval: {final_csv_path}")
+    assert config_30min.FINAL_CSV_PATH == expected_30min_path, f"Expected {expected_30min_path}, got {config_30min.FINAL_CSV_PATH}"
+    logger.info(f"   ✅ 30min interval: {config_30min.FINAL_CSV_PATH}")
+    
+    # Test 3: Update interval functionality
+    config_update = cif.AppConfig(data_interval="1min", test_ticker="TEST")
+    config_update.update_interval("30min")
+    assert config_update.FINAL_CSV_PATH == expected_30min_path, f"Expected {expected_30min_path} after update, got {config_update.FINAL_CSV_PATH}"
+    logger.info(f"   ✅ Update interval: {config_update.FINAL_CSV_PATH}")
     
     logger.info("   🎯 RESULT: Dynamic path setting works correctly")
     return True
@@ -74,12 +64,12 @@ def test_cloud_file_size_checking():
     logger.info("=" * 50)
     
     try:
-        from utils.spaces_manager import get_cloud_file_size
+        from utils.spaces_manager import get_cloud_file_size_bytes
         logger.info("   ✅ Cloud file size function imported successfully")
         
         # Test with a non-existent file (should return 0)
         test_object = "test/nonexistent_file.csv"
-        size = get_cloud_file_size(test_object)
+        size = get_cloud_file_size_bytes(test_object)
         logger.info(f"   ✅ Non-existent file size check: {size} bytes (expected 0 when no credentials)")
         
         # Import the new cloud size function from comprehensive_intraday_fix
