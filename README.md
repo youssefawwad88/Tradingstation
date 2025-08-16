@@ -26,11 +26,42 @@ python generate_master_tickerlist.py
 python fetch_daily.py      # Daily data (200 rows)
 python fetch_30min.py      # 30-min data (500 rows)
 
-# Run intraday updates (every minute)
-python fetch_intraday_compact.py
+# Run intraday updates (every minute) - NEW IMPROVED VERSION
+python jobs/intraday_fetcher.py
+
+# Or test both 1min and 30min intervals
+python jobs/intraday_fetcher.py --test
 ```
 
 📖 **Full Documentation**: See [TICKER_MANAGEMENT.md](TICKER_MANAGEMENT.md) for complete details.
+
+---
+
+## 🆕 Improved Intraday Data Fetcher
+
+The new `jobs/intraday_fetcher.py` script provides a comprehensive, intelligent solution for intraday data fetching:
+
+### ✅ Key Features Fixed
+- **No Infinite Loop**: Fixed recursive function call that caused crashes
+- **Intelligent 10KB Rule**: Uses cloud storage file size to determine fetch strategy
+- **Set-and-Forget Configuration**: Edit `QUICK_SETUP` values at the top of the file
+- **Dual Interval Support**: Works with both 1-minute and 30-minute data
+- **Self-Contained**: No external dependencies on utils modules
+
+### 📋 Configuration
+```python
+QUICK_SETUP = {
+    "DATA_INTERVAL": "1min",           # "1min" or "30min" 
+    "TEST_TICKER": "AAPL",             # Stock symbol to fetch
+    "API_KEY": "your_api_key_here",    # Your Alpha Vantage API key
+    "FILE_SIZE_THRESHOLD_KB": 10,      # File size threshold for full vs compact
+}
+```
+
+### 🎯 Smart Fetching Logic
+- **Files ≤ 10KB**: Triggers `outputsize='full'` for complete historical data
+- **Files > 10KB**: Uses `outputsize='compact'` for recent data only
+- **Automatic Merging**: Intelligently combines new and existing data
 
 ---
 
@@ -38,16 +69,16 @@ python fetch_intraday_compact.py
 
 | Folder | Description |
 |--------|-------------|
-| `notebooks/` | Development notebooks for strategy design/testing |
-| `data/` | Price data: daily, intraday, signal outputs |
-| `scripts/` | Modular strategy logic (Gap & Go, AVWAP, etc.) |
-| `orchestrator/` | Master scheduler (e.g., `run_all.py`) |
-| `selectors/` | Ticker discovery (earnings, gainers, custom filters) |
-| `utils/` | Shared config, helpers, and API wrappers |
-| `dashboards/` | Streamlit UI & trade journal exports |
-| `ticker_selectors/` | Pre-filter logic (market cap, float, avg vol) |
+| `jobs/` | **Production-ready data fetchers and core processing scripts** |
+| `core/` | Base screener classes, configuration management, logging |
+| `utils/` | API wrappers, data fetchers, helpers, configuration |
+| `screeners/` | Trading strategy implementations (Gap & Go, AVWAP, ORB, etc.) |
+| `dashboard/` | Streamlit web interface and pages |
+| `orchestrator/` | Master scheduler and job coordination |
+| `data/` | Local data storage (created automatically) |
+| `tests/` | Unit and integration tests (pytest configuration) |
 | `README.md` | You’re reading it |
-| `.gitignore` | Prevents caching/temp data from bloating repo |
+| `ticker_selectors/` | Pre-filter logic (market cap, float, avg vol) |
 
 ---
 
