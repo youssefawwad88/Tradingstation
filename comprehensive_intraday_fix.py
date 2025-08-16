@@ -240,13 +240,49 @@ def get_cloud_file_size_bytes(object_name):
         int: File size in bytes from cloud storage
     """
     try:
-        from utils.spaces_manager import get_cloud_file_size_bytes
-        return get_cloud_file_size_bytes(object_name)
+        # Import dependencies needed for cloud storage access
+        import boto3
+        from botocore.exceptions import ClientError
+        
+        # Get cloud storage configuration
+        spaces_access_key = os.getenv("SPACES_ACCESS_KEY_ID")
+        spaces_secret_key = os.getenv("SPACES_SECRET_ACCESS_KEY") 
+        spaces_bucket = os.getenv("SPACES_BUCKET_NAME")
+        spaces_region = os.getenv("SPACES_REGION", "nyc3")
+        
+        # Check if credentials are available
+        if not all([spaces_access_key, spaces_secret_key, spaces_bucket]):
+            logger.debug("☁️ Cloud storage credentials not configured - returning 0")
+            return 0
+            
+        # Create boto3 client for DigitalOcean Spaces
+        session = boto3.session.Session()
+        client = session.client(
+            "s3",
+            region_name=spaces_region,
+            endpoint_url=f"https://{spaces_region}.digitaloceanspaces.com",
+            aws_access_key_id=spaces_access_key,
+            aws_secret_access_key=spaces_secret_key,
+        )
+        
+        # Use HEAD request to get object metadata without downloading
+        response = client.head_object(Bucket=spaces_bucket, Key=object_name)
+        file_size = response.get('ContentLength', 0)
+        logger.debug(f"☁️ Cloud file size for {object_name}: {file_size} bytes")
+        return file_size
+        
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            logger.debug(f"☁️ Cloud file not found: {object_name}")
+        else:
+            logger.warning(f"☁️ Error checking cloud file size for {object_name}: {e}")
+        return 0
     except ImportError:
-        logger.error("❌ Cannot import cloud file size function")
+        logger.warning("❌ boto3 not available - cannot check cloud file size")
         return 0
     except Exception as e:
-        logger.error(f"❌ Error getting cloud file size for {object_name}: {e}")
+        logger.warning(f"❌ Unexpected error getting cloud file size for {object_name}: {e}")
         return 0
 
 
