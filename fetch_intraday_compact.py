@@ -5,6 +5,11 @@ Intraday Compact Fetcher (Every Minute)
 Fetches only today's 1-minute data and appends new candles only.
 Used for live price action and setup monitoring.
 Reads from master_tickerlist.csv.
+
+Updated with intelligent fetch strategy based on 10KB file size rule:
+- Files ≤ 10KB trigger full historical fetch (outputsize='full')
+- Files > 10KB use compact fetch (outputsize='compact') for real-time updates
+- Supports both 1min and 30min intervals through DATA_INTERVAL configuration
 """
 
 import pandas as pd
@@ -14,6 +19,9 @@ from datetime import datetime, timedelta
 import time
 import logging
 import pytz
+
+# CONFIGURATION: Data interval (can be "1min" or "30min")
+DATA_INTERVAL = "1min"  # Change this to "30min" for 30-minute interval processing
 
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -73,10 +81,16 @@ def append_new_candles_smart(existing_df, new_df):
 
 def fetch_intraday_compact():
     """
-    Fetch today's 1-minute data for all tickers in master_tickerlist.csv.
+    Fetch intraday data for all tickers in master_tickerlist.csv.
     Appends only new candles to existing data.
+    
+    Uses intelligent fetch strategy based on 10KB file size rule:
+    - If file ≤ 10KB or missing: use outputsize='full' for complete historical data
+    - If file > 10KB: use outputsize='compact' for efficient real-time updates
+    
+    Supports both 1min and 30min intervals via DATA_INTERVAL configuration.
     """
-    logger.info("🚀 Starting Intraday Compact Fetch Job (Every Minute)")
+    logger.info(f"🚀 Starting Intraday Compact Fetch Job - {DATA_INTERVAL} interval")
     
     # Check API key availability
     from utils.config import ALPHA_VANTAGE_API_KEY, SPACES_BUCKET_NAME
@@ -100,6 +114,7 @@ def fetch_intraday_compact():
         return False
 
     logger.info(f"📊 Processing {len(tickers)} tickers from master_tickerlist.csv")
+    logger.info(f"🕐 Using {DATA_INTERVAL} interval")
     
     # Check market session
     market_session = detect_market_session()
@@ -113,49 +128,48 @@ def fetch_intraday_compact():
         logger.debug(f"🔄 Processing {ticker}")
 
         try:
+            # Determine file path based on interval
+            if DATA_INTERVAL == "30min":
+                file_path = f'data/intraday_30min/{ticker}_30min.csv'
+            else:
+                file_path = f'data/intraday/{ticker}_1min.csv'
+            
             # Get existing data
-            file_path = f'data/intraday/{ticker}_1min.csv'
             existing_df = read_df_from_s3(file_path)
             
-            # CRITICAL FIX: Check file size to determine outputsize strategy
-            # If file is smaller than 10KB or missing/incomplete, use full fetch
-            outputsize_strategy = 'compact'  # Default to compact for real-time updates
+            # CORE LOGIC: Intelligent Fetch Strategy based on 10KB file size rule
+            # Exactly as specified in the problem statement
             
-            if existing_df.empty:
-                # No existing data - need full historical fetch
-                outputsize_strategy = 'full'
-                logger.info(f"   {ticker}: No existing data found, using full historical fetch")
+            # Get the local file path for size checking
+            local_file_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 
+                file_path
+            )
+            
+            file_exists = os.path.exists(local_file_path)
+            should_do_full_fetch = True  # Assume we need a full fetch by default
+
+            if file_exists:
+                file_size_kb = os.path.getsize(local_file_path) / 1024
+                logger.info(f"💡 File '{file_path}' exists. Size: {file_size_kb:.2f} KB")
+                if file_size_kb >= 10:  # Check against the 10KB threshold
+                    should_do_full_fetch = False
+                    logger.info("✅ Skipping full historical data fetch. File size is sufficient.")
+                else:
+                    logger.info("⚠️ File size is below threshold. Performing full fetch.")
             else:
-                # Check file size to determine if we need full historical data
-                try:
-                    # Try to get actual file size from local filesystem first
-                    local_file_path = os.path.join(
-                        os.path.dirname(os.path.abspath(__file__)), 
-                        file_path
-                    )
-                    
-                    file_size_bytes = 0
-                    if os.path.exists(local_file_path):
-                        file_size_bytes = os.path.getsize(local_file_path)
-                    else:
-                        # Estimate file size from DataFrame (60 bytes per row based on testing)
-                        file_size_bytes = len(existing_df) * 60
-                    
-                    # Apply 10KB threshold as specified in problem statement
-                    min_file_size = 10 * 1024  # 10KB in bytes
-                    if file_size_bytes <= min_file_size:
-                        outputsize_strategy = 'full'
-                        logger.info(f"   {ticker}: File size {file_size_bytes} bytes < {min_file_size} bytes threshold, using full historical fetch")
-                    else:
-                        logger.debug(f"   {ticker}: File size {file_size_bytes} bytes OK, using compact fetch")
-                        
-                except Exception as e:
-                    # If file size check fails, err on side of caution with full fetch
-                    outputsize_strategy = 'full'
-                    logger.warning(f"   {ticker}: Could not verify file size ({e}), using full historical fetch")
+                logger.info(f"💡 File '{file_path}' not found. Performing full fetch.")
+
+            # Determine outputsize strategy based on file size check
+            if should_do_full_fetch:
+                outputsize_strategy = 'full'
+                logger.info(f"   {ticker}: Using outputsize='full' for complete historical fetch")
+            else:
+                outputsize_strategy = 'compact'
+                logger.info(f"   {ticker}: Using outputsize='compact' for real-time updates")
             
-            # Fetch data using determined strategy
-            latest_df = get_intraday_data(ticker, interval='1min', outputsize=outputsize_strategy)
+            # Fetch data using determined strategy and configured interval
+            latest_df = get_intraday_data(ticker, interval=DATA_INTERVAL, outputsize=outputsize_strategy)
             
             if not latest_df.empty:
                 # Normalize column names if needed
@@ -174,7 +188,7 @@ def fetch_intraday_compact():
                     logger.debug(f"   {ticker}: Compact fetch completed, appended new candles")
                 
                 # Keep only last 7 days of data (rolling window)
-                # CRITICAL FIX: Use timezone-aware datetime for proper comparison
+                # Use timezone-aware datetime for proper comparison
                 ny_tz = pytz.timezone('America/New_York')
                 seven_days_ago = datetime.now(ny_tz) - timedelta(days=7)
                 timestamp_col = 'timestamp' if 'timestamp' in combined_df.columns else 'Date'
@@ -213,18 +227,45 @@ def fetch_intraday_compact():
         time.sleep(0.5)
 
     logger.info(f"📋 Intraday Compact Fetch Job Completed")
+    logger.info(f"   Interval: {DATA_INTERVAL}")
     logger.info(f"   Processed: {successful_fetches}/{total_tickers} tickers")
     logger.info(f"   New candles added: {new_candles_added}")
     logger.info(f"   Market session: {market_session}")
     
     return successful_fetches > 0
 
+def run_final_logic():
+    """
+    Main run function implementing the intelligent data fetching logic
+    based on the 10KB file size rule and interval compatibility.
+    
+    This function demonstrates the exact logic requested:
+    - Dynamic fetch strategy based on file size analysis 
+    - Support for both 1min and 30min intervals
+    - Proper API integration with outputsize parameter
+    """
+    logger.info("=" * 80)
+    logger.info(f"🚀 RUNNING FINAL LOGIC - {DATA_INTERVAL} INTERVAL")
+    logger.info("=" * 80)
+    
+    return fetch_intraday_compact()
+
+
 if __name__ == "__main__":
     job_name = "fetch_intraday_compact"
     update_scheduler_status(job_name, "Running")
     
     try:
-        success = fetch_intraday_compact()
+        # Check for interval configuration from command line
+        if len(sys.argv) > 1:
+            if sys.argv[1] == "--30min":
+                DATA_INTERVAL = "30min"
+                logger.info("🔧 Command line override: Using 30-minute interval")
+            elif sys.argv[1] == "--1min":
+                DATA_INTERVAL = "1min"
+                logger.info("🔧 Command line override: Using 1-minute interval")
+        
+        success = run_final_logic()
         if success:
             update_scheduler_status(job_name, "Success")
             logger.info("✅ Intraday compact fetch completed successfully")
