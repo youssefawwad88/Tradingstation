@@ -34,7 +34,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Import core utilities
 from utils.config import ALPHA_VANTAGE_API_KEY, SPACES_BUCKET_NAME, TIMEZONE
 from utils.alpha_vantage_api import get_real_time_price
-from utils.helpers import read_master_tickerlist, save_df_to_s3, read_df_from_s3, update_scheduler_status
+from utils.helpers import read_master_tickerlist, save_df_to_s3, update_scheduler_status
+from utils.data_storage import read_df_from_s3
 from utils.timestamp_standardizer import apply_timestamp_standardization_to_api_data
 
 # Import full_fetch for self-healing logic

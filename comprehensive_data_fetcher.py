@@ -51,7 +51,8 @@ FILE_SIZE_THRESHOLD_KB = 10               # Threshold for full vs compact fetch
 
 from utils.config import ALPHA_VANTAGE_API_KEY
 from utils.spaces_manager import get_cloud_file_size_bytes
-from utils.helpers import read_master_tickerlist, save_df_to_s3, read_df_from_s3, update_scheduler_status
+from utils.helpers import read_master_tickerlist, save_df_to_s3, update_scheduler_status
+from utils.data_storage import read_df_from_s3
 from utils.alpha_vantage_api import get_intraday_data, get_daily_data, get_real_time_price
 
 # Set up logging

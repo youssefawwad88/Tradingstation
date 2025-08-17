@@ -8,7 +8,8 @@ from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 try:
-    from utils.helpers import read_df_from_s3, list_files_in_s3_dir
+    from utils.helpers import list_files_in_s3_dir
+    from utils.data_storage import read_df_from_s3
 except ImportError:
     st.error("Fatal Error: Could not import helper functions. The app cannot function without them.")
     st.stop()

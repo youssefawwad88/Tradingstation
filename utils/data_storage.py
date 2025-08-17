@@ -216,7 +216,7 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
             logger.error(f"Critical error reading local file {local_file}: {e}")
             raise
         except Exception as e:
-            # Log other local file errors and continue to return empty DataFrame
+            # Re-raise other local file errors after logging
             logger.error(f"Error reading local file {local_file}: {e}")
             # Re-raise the exception after logging
             raise

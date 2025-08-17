@@ -34,7 +34,8 @@ from utils.config import (
     ONE_MIN_REQUIRED_DAYS,
     TIMEZONE
 )
-from utils.helpers import read_master_tickerlist, read_df_from_s3, update_scheduler_status
+from utils.helpers import read_master_tickerlist, update_scheduler_status
+from utils.data_storage import read_df_from_s3
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

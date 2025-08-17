@@ -7,7 +7,8 @@ import logging
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_df_from_s3, save_df_to_s3, update_scheduler_status
+from utils.helpers import save_df_to_s3, update_scheduler_status
+from utils.data_storage import read_df_from_s3
 from utils.spaces_manager import spaces_manager
 
 # Set up logging

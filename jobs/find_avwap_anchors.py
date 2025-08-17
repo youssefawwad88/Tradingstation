@@ -5,7 +5,8 @@ import os
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, read_df_from_s3, update_scheduler_status
+from utils.helpers import read_tickerlist_from_s3, save_df_to_s3, update_scheduler_status
+from utils.data_storage import read_df_from_s3
 
 def find_and_save_avwap_anchors():
     """
