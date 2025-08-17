@@ -294,7 +294,17 @@ def update_scheduler_status(job_name, status, error_details=None):
         status_file_path = 'data/logs/scheduler_status.csv'
         try:
             existing_df = read_df_from_s3(status_file_path)
-        except:
+        except FileNotFoundError:
+            logger.debug(f"Scheduler status file not found: {status_file_path}, creating new DataFrame")
+            existing_df = pd.DataFrame()
+        except pd.errors.EmptyDataError:
+            logger.warning(f"Scheduler status file is empty: {status_file_path}, creating new DataFrame")
+            existing_df = pd.DataFrame()
+        except pd.errors.ParserError as e:
+            logger.error(f"Scheduler status file is corrupted: {status_file_path}, creating new DataFrame: {e}")
+            existing_df = pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Unexpected error reading scheduler status file {status_file_path}: {e}")
             existing_df = pd.DataFrame()
         
         # If empty or no existing data, create new DataFrame
@@ -310,13 +320,18 @@ def update_scheduler_status(job_name, status, error_details=None):
                 status_df = existing_df
             else:
                 # Append new job
-                status_df = pd.concat([existing_df, pd.DataFrame([status_entry])], ignore_index=True)
+                existing_df.loc[len(existing_df)] = status_entry
+                status_df = existing_df
         
         # Save updated status file
-        save_df_to_s3(status_df, status_file_path)
+        try:
+            save_df_to_s3(status_df, status_file_path)
+        except Exception as e:
+            logger.warning(f"Failed to write scheduler status CSV file {status_file_path}: {e}")
+            return
         
     except Exception as e:
-        logger.warning(f"Failed to update scheduler status CSV: {e}")
+        logger.warning(f"Failed to update scheduler status CSV due to unexpected error: {e}")
 
 
 def detect_market_session():
