@@ -7,16 +7,16 @@ async operations, caching, and parallel processing for maximum performance.
 
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
-import time
 
 import pandas as pd
 
 from .async_client import AsyncAlphaVantageClient, fetch_multiple_tickers_sync
-from .cache import get_cache, cache_key_for_ticker_data, cached_fetch_wrapper
+from .cache import cache_key_for_ticker_data, cached_fetch_wrapper, get_cache
 from .data_storage import save_df_to_s3
-from .ticker_manager import read_master_tickerlist, clean_ticker_list
+from .ticker_manager import clean_ticker_list, read_master_tickerlist
 
 logger = logging.getLogger(__name__)
 

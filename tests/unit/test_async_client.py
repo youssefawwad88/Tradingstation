@@ -4,6 +4,7 @@ Unit tests for async_client module.
 
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
 
 from utils.async_client import (

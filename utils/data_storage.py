@@ -8,12 +8,13 @@ This module handles all data storage operations including:
 - Path management
 """
 
-import os
 import logging
-from typing import Tuple, Optional
+import os
+from typing import Optional, Tuple
+
 import pandas as pd
 
-from .config import INTRADAY_DATA_DIR, DAILY_DATA_DIR, INTRADAY_30MIN_DATA_DIR
+from .config import DAILY_DATA_DIR, INTRADAY_30MIN_DATA_DIR, INTRADAY_DATA_DIR
 from .spaces_manager import upload_dataframe
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,9 @@ def save_df_to_s3(
             local_path = os.path.join(directory, local_filename)
 
             logger.warning(f"💽 LOCAL FALLBACK: Saving to {local_path}")
-            logger.warning("⚠️ NOTE: Data saved locally but NOT uploaded to cloud storage")
+            logger.warning(
+                "⚠️ NOTE: Data saved locally but NOT uploaded to cloud storage"
+            )
             df.to_csv(local_path, index=False)
 
             # Verify file exists locally
@@ -174,7 +177,7 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
 
     Returns:
         DataFrame if successful, empty DataFrame for FileNotFoundError only
-        
+
     Raises:
         pd.errors.ParserError: When CSV file is corrupted
         pd.errors.EmptyDataError: When CSV file is empty
@@ -184,13 +187,18 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
 
     # Try to read from Spaces first (if credentials available)
     from .spaces_manager import download_dataframe
+
     try:
         cloud_df = download_dataframe(object_name)
         if not cloud_df.empty:
-            logger.info(f"✅ Successfully read {len(cloud_df)} rows from CLOUD STORAGE: {object_name}")
+            logger.info(
+                f"✅ Successfully read {len(cloud_df)} rows from CLOUD STORAGE: {object_name}"
+            )
             return cloud_df
         else:
-            logger.info(f"⚠️ Cloud file exists but is empty or unreadable: {object_name}")
+            logger.info(
+                f"⚠️ Cloud file exists but is empty or unreadable: {object_name}"
+            )
     except FileNotFoundError:
         # File not found in cloud - continue to local fallback
         logger.debug(f"File not found in cloud storage: {object_name}")
@@ -209,14 +217,16 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
     if os.path.exists(local_file):
         try:
             df = pd.read_csv(local_file)
-            logger.info(f"📁 Successfully read {len(df)} rows from LOCAL FILE: {local_file}")
+            logger.info(
+                f"📁 Successfully read {len(df)} rows from LOCAL FILE: {local_file}"
+            )
             return df
         except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
             # Re-raise critical parsing errors after logging
             logger.error(f"Critical error reading local file {local_file}: {e}")
             raise
         except Exception as e:
-            # Log other local file errors and continue to return empty DataFrame
+            # Re-raise other local file errors after logging
             logger.error(f"Error reading local file {local_file}: {e}")
             # Re-raise the exception after logging
             raise

@@ -1,5 +1,7 @@
-import streamlit as st
 from datetime import datetime
+
+import streamlit as st
+
 
 def load_css():
     """Injects custom CSS to style the app according to the design guidelines."""
@@ -55,6 +57,7 @@ def load_css():
     """
     st.markdown(css, unsafe_allow_html=True)
 
+
 def main():
     """
     Main function to run the Streamlit landing page.
@@ -65,7 +68,7 @@ def main():
         page_title="Trading Station Home",
         page_icon="🏠",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="expanded",
     )
 
     # --- Load Custom CSS ---
@@ -85,8 +88,9 @@ def main():
         "**Quick Start:**\n\n"
         "1.  **`Scheduler Monitor`**: Check the real-time status of your backend data jobs.\n"
         "2.  **`System Settings`**: Manage your master ticker list and other configurations.\n"
-        "3.  **`Master Screener Hub`**: View consolidated trading signals once the market is active."
-    , icon="💡")
+        "3.  **`Master Screener Hub`**: View consolidated trading signals once the market is active.",
+        icon="💡",
+    )
 
     st.sidebar.success("Select a dashboard page above.")
     st.sidebar.markdown("---")

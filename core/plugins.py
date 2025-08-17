@@ -10,11 +10,11 @@ import inspect
 import logging
 import os
 import pkgutil
-from typing import Dict, List, Type, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Type
 
-from core.interfaces import Screener
 from core.di_container import get_container
+from core.interfaces import Screener
 
 logger = logging.getLogger(__name__)
 

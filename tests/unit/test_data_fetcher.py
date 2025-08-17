@@ -3,14 +3,15 @@ Unit tests for data_fetcher module.
 """
 
 from unittest.mock import Mock, patch
+
 import pandas as pd
 import requests
 
 from utils.data_fetcher import (
-    fetch_intraday_data,
     fetch_daily_data,
-    validate_api_response,
+    fetch_intraday_data,
     get_api_rate_limit_delay,
+    validate_api_response,
 )
 
 
@@ -138,4 +139,6 @@ class TestDataFetcher:
             df, success = fetch_intraday_data("AAPL")
             # Verify that the function handles cases appropriately
             # The actual warning/error logging is tested in integration tests
-            assert df is not None or success is False  # Either success or graceful failure
+            assert (
+                df is not None or success is False
+            )  # Either success or graceful failure

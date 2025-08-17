@@ -1,27 +1,29 @@
-import os
-import pandas as pd
-import requests
-import logging
-from datetime import datetime
-import time
 import json
+import logging
+import os
+import time
+from datetime import datetime
+
+import pandas as pd
 import pytz
+import requests
+
 from utils.config import (
     ALPHA_VANTAGE_API_KEY,
-    INTRADAY_DATA_DIR,
     DEBUG_MODE,
-    INTRADAY_TRIM_DAYS,
+    INTRADAY_DATA_DIR,
     INTRADAY_EXCLUDE_TODAY,
-    INTRADAY_INCLUDE_PREMARKET,
     INTRADAY_INCLUDE_AFTERHOURS,
+    INTRADAY_INCLUDE_PREMARKET,
+    INTRADAY_TRIM_DAYS,
     TIMEZONE,
 )
 from utils.spaces_manager import upload_dataframe
 
 # Import from new modular components
-from .data_fetcher import fetch_intraday_data, fetch_daily_data
-from .data_storage import save_df_to_local, save_df_to_s3, read_df_from_s3
-from .market_time import detect_market_session, is_weekend, get_last_market_day
+from .data_fetcher import fetch_daily_data, fetch_intraday_data
+from .data_storage import read_df_from_s3, save_df_to_local, save_df_to_s3
+from .market_time import detect_market_session, get_last_market_day, is_weekend
 from .ticker_manager import (
     load_manual_tickers,
     read_master_tickerlist,
@@ -57,7 +59,7 @@ def fetch_intraday_data(ticker, interval="1min", outputsize="compact"):
     }
 
     try:
-        response = requests.get(endpoint, params=params)
+        response = requests.get(endpoint, params=params, timeout=30)
         data = response.json()
 
         if "Error Message" in data:
@@ -284,51 +286,65 @@ def update_scheduler_status(job_name, status, error_details=None):
     try:
         # Create status entry
         status_entry = {
-            'job_name': job_name,
-            'status': status,
-            'last_run_timestamp': timestamp,
-            'error_details': error_details if error_details else ''
+            "job_name": job_name,
+            "status": status,
+            "last_run_timestamp": timestamp,
+            "error_details": error_details if error_details else "",
         }
-        
+
         # Read existing status file or create new DataFrame
-        status_file_path = 'data/logs/scheduler_status.csv'
+        status_file_path = "data/logs/scheduler_status.csv"
         try:
             existing_df = read_df_from_s3(status_file_path)
         except pd.errors.EmptyDataError:
-            logger.warning(f"Scheduler status file is empty: {status_file_path}, creating new DataFrame")
+            logger.warning(
+                f"Scheduler status file is empty: {status_file_path}, creating new DataFrame"
+            )
             existing_df = pd.DataFrame()
         except pd.errors.ParserError as e:
-            logger.error(f"Scheduler status file is corrupted: {status_file_path}, creating new DataFrame: {e}")
+            logger.error(
+                f"Scheduler status file is corrupted: {status_file_path}, creating new DataFrame: {e}"
+            )
             existing_df = pd.DataFrame()
         except Exception as e:
-            logger.error(f"Unexpected error reading scheduler status file {status_file_path}: {e}")
+            logger.error(
+                f"Unexpected error reading scheduler status file {status_file_path}: {e}"
+            )
             existing_df = pd.DataFrame()
-        
+
         # If empty or no existing data, create new DataFrame
         if existing_df.empty:
             status_df = pd.DataFrame([status_entry])
         else:
             # Update existing job status or append new job
-            if job_name in existing_df['job_name'].values:
+            if job_name in existing_df["job_name"].values:
                 # Update existing job
-                existing_df.loc[existing_df['job_name'] == job_name, 'status'] = status
-                existing_df.loc[existing_df['job_name'] == job_name, 'last_run_timestamp'] = timestamp
-                existing_df.loc[existing_df['job_name'] == job_name, 'error_details'] = error_details if error_details else ''
+                existing_df.loc[existing_df["job_name"] == job_name, "status"] = status
+                existing_df.loc[
+                    existing_df["job_name"] == job_name, "last_run_timestamp"
+                ] = timestamp
+                existing_df.loc[
+                    existing_df["job_name"] == job_name, "error_details"
+                ] = (error_details if error_details else "")
                 status_df = existing_df
             else:
                 # Append new job
                 existing_df.loc[len(existing_df)] = status_entry
                 status_df = existing_df
-        
+
         # Save updated status file
         try:
             save_df_to_s3(status_df, status_file_path)
         except Exception as e:
-            logger.warning(f"Failed to write scheduler status CSV file {status_file_path}: {e}")
+            logger.warning(
+                f"Failed to write scheduler status CSV file {status_file_path}: {e}"
+            )
             return
-        
+
     except Exception as e:
-        logger.warning(f"Failed to update scheduler status CSV due to unexpected error: {e}")
+        logger.warning(
+            f"Failed to update scheduler status CSV due to unexpected error: {e}"
+        )
 
 
 def detect_market_session():
@@ -460,71 +476,6 @@ def read_master_tickerlist():
         return DEFAULT_TICKERS
 
 
-def read_df_from_s3(object_name):
-    """
-    Read DataFrame from S3/Spaces with cloud-first approach and local fallback.
-    
-    NOTE: This is a duplicate function that should be removed. The main implementation
-    is in data_storage.py and is imported at the top of this file.
-
-    Args:
-        object_name (str): Object name/path in S3
-
-    Returns:
-        pandas.DataFrame: DataFrame if successful, empty DataFrame for FileNotFoundError only
-        
-    Raises:
-        pd.errors.ParserError: When CSV file is corrupted
-        pd.errors.EmptyDataError: When CSV file is empty
-        Other exceptions: Re-raised after logging for proper error handling
-    """
-    logger.info(f"Attempting to read DataFrame from {object_name}")
-
-    # Try to read from Spaces first (if credentials available)
-    from utils.spaces_manager import download_dataframe
-    try:
-        cloud_df = download_dataframe(object_name)
-        if not cloud_df.empty:
-            logger.info(f"✅ Successfully read {len(cloud_df)} rows from CLOUD STORAGE: {object_name}")
-            return cloud_df
-        else:
-            logger.info(f"⚠️ Cloud file exists but is empty or unreadable: {object_name}")
-    except FileNotFoundError:
-        # File not found in cloud - continue to local fallback
-        logger.debug(f"File not found in cloud storage: {object_name}")
-    except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
-        # Re-raise critical parsing errors after logging
-        logger.error(f"Critical error reading from cloud storage {object_name}: {e}")
-        raise
-    except Exception as e:
-        # Log other cloud errors but continue to local fallback
-        logger.warning(f"⚠️ Could not read from cloud storage: {e}")
-
-    # Fallback to local file
-    local_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), object_name
-    )
-    if os.path.exists(local_file):
-        try:
-            df = pd.read_csv(local_file)
-            logger.info(f"📁 Successfully read {len(df)} rows from LOCAL FILE: {local_file}")
-            return df
-        except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
-            # Re-raise critical parsing errors after logging
-            logger.error(f"Critical error reading local file {local_file}: {e}")
-            raise
-        except Exception as e:
-            # Log other local file errors and re-raise
-            logger.error(f"Error reading local file {local_file}: {e}")
-            raise
-
-    # Return empty DataFrame only if file doesn't exist (FileNotFoundError case)
-    logger.warning(
-        f"File not found in cloud or locally: {object_name} - returning empty DataFrame"
-    )
-    return pd.DataFrame()
-
-
 def load_manual_tickers():
     """
     Load manual ticker list from tickerlist.txt with enhanced diagnostics (Phase 2 implementation).
@@ -611,7 +562,7 @@ def load_manual_tickers():
     return DEFAULT_TICKERS
 
 
-def is_today_present(df, timestamp_col='datetime'):
+def is_today_present(df, timestamp_col="datetime"):
     """
     Check if today's data is present in the DataFrame.
 
@@ -630,14 +581,14 @@ def is_today_present(df, timestamp_col='datetime'):
         today = datetime.now(ny_tz).date()
 
         # Check multiple possible column names
-        possible_cols = [timestamp_col, 'datetime', 'timestamp', 'Date', 'date']
+        possible_cols = [timestamp_col, "datetime", "timestamp", "Date", "date"]
         date_col = None
-        
+
         for col in possible_cols:
             if col in df.columns:
                 date_col = col
                 break
-        
+
         if date_col:
             df_dates = pd.to_datetime(df[date_col]).dt.date
             return today in df_dates.values
@@ -715,12 +666,12 @@ def apply_data_retention(df, trim_days=None):
 
     try:
         from utils.config import (
-            INTRADAY_TRIM_DAYS,
-            INTRADAY_EXCLUDE_TODAY,
-            INTRADAY_INCLUDE_PREMARKET,
-            INTRADAY_INCLUDE_AFTERHOURS,
-            TIMEZONE,
             DEBUG_MODE,
+            INTRADAY_EXCLUDE_TODAY,
+            INTRADAY_INCLUDE_AFTERHOURS,
+            INTRADAY_INCLUDE_PREMARKET,
+            INTRADAY_TRIM_DAYS,
+            TIMEZONE,
         )
 
         # Log initial state
@@ -987,6 +938,7 @@ def is_weekend():
         bool: True if it's weekend (Saturday=5, Sunday=6)
     """
     import datetime
+
     import pytz
 
     ny_tz = pytz.timezone("America/New_York")
@@ -1009,6 +961,7 @@ def should_use_test_mode():
         bool: True if test mode should be active
     """
     import os
+
     from utils.config import TEST_MODE, WEEKEND_TEST_MODE_ENABLED
 
     # Get MODE from environment dynamically (not from config cache)
@@ -1042,10 +995,12 @@ def get_test_mode_reason():
     Returns:
         tuple: (is_test_mode, reason_string)
     """
-    import os
-    from utils.config import TEST_MODE, WEEKEND_TEST_MODE_ENABLED
     import datetime
+    import os
+
     import pytz
+
+    from utils.config import TEST_MODE, WEEKEND_TEST_MODE_ENABLED
 
     # Get MODE from environment dynamically (not from config cache)
     mode = os.getenv("MODE", "").lower() if os.getenv("MODE") else None
@@ -1246,9 +1201,9 @@ def check_spaces_connectivity():
 
     from utils.config import (
         SPACES_ACCESS_KEY_ID,
-        SPACES_SECRET_ACCESS_KEY,
         SPACES_BUCKET_NAME,
         SPACES_ENDPOINT_URL,
+        SPACES_SECRET_ACCESS_KEY,
     )
 
     result = {
@@ -1347,6 +1302,7 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
         tuple: (cleaned_daily_df, cleaned_30min_df, cleaned_1min_df)
     """
     import datetime
+
     import pandas as pd
 
     start_time = datetime.datetime.now()
@@ -1380,15 +1336,19 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
                 ny_tz = pytz.timezone(TIMEZONE)
                 now_et = datetime.datetime.now(ny_tz)
                 seven_days_ago = now_et - datetime.timedelta(days=7)
-                
+
                 # Ensure timestamps are timezone-aware for proper comparison
                 if cleaned_1min["timestamp"].dt.tz is None:
                     # If naive, localize to NY timezone first
-                    cleaned_1min["timestamp"] = cleaned_1min["timestamp"].dt.tz_localize(ny_tz)
+                    cleaned_1min["timestamp"] = cleaned_1min[
+                        "timestamp"
+                    ].dt.tz_localize(ny_tz)
                 elif cleaned_1min["timestamp"].dt.tz != ny_tz:
                     # If different timezone, convert to NY timezone
-                    cleaned_1min["timestamp"] = cleaned_1min["timestamp"].dt.tz_convert(ny_tz)
-                
+                    cleaned_1min["timestamp"] = cleaned_1min["timestamp"].dt.tz_convert(
+                        ny_tz
+                    )
+
                 # Apply 7-day filter with timezone-aware comparison
                 mask = cleaned_1min["timestamp"] >= seven_days_ago
                 cleaned_1min = cleaned_1min[mask]
@@ -1419,46 +1379,49 @@ def cleanup_data_retention(ticker, daily_df, intraday_30min_df, intraday_1min_df
 def save_list_to_s3(ticker_list, filename):
     """
     Save a list of tickers to S3/Spaces and local file.
-    
+
     Args:
         ticker_list (list): List of ticker symbols
         filename (str): Filename to save to
-        
+
     Returns:
         bool: True if successful
     """
     try:
         # Create DataFrame for CSV format if the filename suggests CSV
-        if filename.endswith('.csv'):
+        if filename.endswith(".csv"):
             # For master_tickerlist.csv format
-            if 'master_tickerlist' in filename:
-                df = pd.DataFrame({
-                    'ticker': ticker_list,
-                    'source': ['manual'] * len(ticker_list),
-                    'generated_at': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')] * len(ticker_list)
-                })
+            if "master_tickerlist" in filename:
+                df = pd.DataFrame(
+                    {
+                        "ticker": ticker_list,
+                        "source": ["manual"] * len(ticker_list),
+                        "generated_at": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                        * len(ticker_list),
+                    }
+                )
                 # Save to local file
                 local_file = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                    filename
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    filename,
                 )
                 df.to_csv(local_file, index=False)
                 logger.info(f"✅ Saved {len(ticker_list)} tickers to {local_file}")
-                
+
                 # Try to save to S3/Spaces as well
                 try:
                     save_df_to_s3(df, filename)
                     logger.info(f"✅ Also saved to S3/Spaces: {filename}")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to save to S3/Spaces: {e}")
-                
+
                 return True
             else:
                 # For other CSV files, simple format
-                df = pd.DataFrame({'ticker': ticker_list})
+                df = pd.DataFrame({"ticker": ticker_list})
                 local_file = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                    filename
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    filename,
                 )
                 df.to_csv(local_file, index=False)
                 logger.info(f"✅ Saved {len(ticker_list)} tickers to {local_file}")
@@ -1466,15 +1429,14 @@ def save_list_to_s3(ticker_list, filename):
         else:
             # For .txt files, save as plain text
             local_file = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                filename
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), filename
             )
-            with open(local_file, 'w') as f:
+            with open(local_file, "w") as f:
                 for ticker in ticker_list:
                     f.write(f"{ticker}\n")
             logger.info(f"✅ Saved {len(ticker_list)} tickers to {local_file}")
             return True
-            
+
     except Exception as e:
         logger.error(f"❌ Error saving ticker list to {filename}: {e}")
         return False
@@ -1483,30 +1445,30 @@ def save_list_to_s3(ticker_list, filename):
 def read_config_from_s3(config_filename):
     """
     Read configuration from S3/Spaces or local file.
-    
+
     Args:
         config_filename (str): Configuration filename
-        
+
     Returns:
         dict: Configuration dictionary or None if not found
     """
     try:
         # Try local file first
         local_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-            config_filename
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), config_filename
         )
-        
+
         if os.path.exists(local_file):
-            with open(local_file, 'r') as f:
+            with open(local_file, "r") as f:
                 import json
+
                 config = json.load(f)
                 logger.info(f"✅ Read configuration from local file: {local_file}")
                 return config
-        
+
         logger.info(f"⚠️ Configuration file not found: {config_filename}")
         return None
-        
+
     except Exception as e:
         logger.error(f"❌ Error reading configuration from {config_filename}: {e}")
         return None
@@ -1515,28 +1477,28 @@ def read_config_from_s3(config_filename):
 def save_config_to_s3(config_dict, config_filename):
     """
     Save configuration to S3/Spaces and local file.
-    
+
     Args:
         config_dict (dict): Configuration dictionary
         config_filename (str): Configuration filename
-        
+
     Returns:
         bool: True if successful
     """
     try:
         # Save to local file
         local_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-            config_filename
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), config_filename
         )
-        
-        with open(local_file, 'w') as f:
+
+        with open(local_file, "w") as f:
             import json
+
             json.dump(config_dict, f, indent=2)
-        
+
         logger.info(f"✅ Saved configuration to local file: {local_file}")
         return True
-        
+
     except Exception as e:
         logger.error(f"❌ Error saving configuration to {config_filename}: {e}")
         return False

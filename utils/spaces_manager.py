@@ -1,16 +1,18 @@
-import boto3
-import pandas as pd
 import io
 import logging
 import os
+
+import boto3
+import pandas as pd
 from botocore.exceptions import ClientError
+
 from utils.config import (
+    DEBUG_MODE,
     SPACES_ACCESS_KEY_ID,
-    SPACES_SECRET_ACCESS_KEY,
     SPACES_BUCKET_NAME,
     SPACES_ENDPOINT_URL,
     SPACES_REGION,
-    DEBUG_MODE,
+    SPACES_SECRET_ACCESS_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,12 +21,12 @@ logger = logging.getLogger(__name__)
 def get_spaces_credentials_status():
     """
     Check the status of all required Spaces credentials.
-    
+
     Returns:
         dict: Contains 'all_present' boolean and 'missing' list of missing credential names
     """
     missing_vars = []
-    
+
     if not SPACES_ACCESS_KEY_ID:
         missing_vars.append("SPACES_ACCESS_KEY_ID")
     if not SPACES_SECRET_ACCESS_KEY:
@@ -33,16 +35,18 @@ def get_spaces_credentials_status():
         missing_vars.append("SPACES_BUCKET_NAME")
     if not SPACES_REGION:
         missing_vars.append("SPACES_REGION")
-    
+
     return {
-        'all_present': len(missing_vars) == 0,
-        'missing': missing_vars,
-        'status_details': {
-            'SPACES_ACCESS_KEY_ID': '✅ Set' if SPACES_ACCESS_KEY_ID else '❌ Missing',
-            'SPACES_SECRET_ACCESS_KEY': '✅ Set' if SPACES_SECRET_ACCESS_KEY else '❌ Missing',
-            'SPACES_BUCKET_NAME': '✅ Set' if SPACES_BUCKET_NAME else '❌ Missing',
-            'SPACES_REGION': '✅ Set' if SPACES_REGION else '❌ Missing'
-        }
+        "all_present": len(missing_vars) == 0,
+        "missing": missing_vars,
+        "status_details": {
+            "SPACES_ACCESS_KEY_ID": "✅ Set" if SPACES_ACCESS_KEY_ID else "❌ Missing",
+            "SPACES_SECRET_ACCESS_KEY": (
+                "✅ Set" if SPACES_SECRET_ACCESS_KEY else "❌ Missing"
+            ),
+            "SPACES_BUCKET_NAME": "✅ Set" if SPACES_BUCKET_NAME else "❌ Missing",
+            "SPACES_REGION": "✅ Set" if SPACES_REGION else "❌ Missing",
+        },
     }
 
 
@@ -52,22 +56,25 @@ def get_spaces_client():
     """
     # Check credential status using helper function
     creds_status = get_spaces_credentials_status()
-    
+
     # Check if core credentials are present (region gets fallback)
     if not all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME]):
         # Get missing core credentials (excluding SPACES_REGION which has fallback)
-        core_missing = [var for var in creds_status['missing'] 
-                       if var != 'SPACES_REGION']
-        
+        core_missing = [
+            var for var in creds_status["missing"] if var != "SPACES_REGION"
+        ]
+
         if core_missing:
-            status_list = [f"{var}: {creds_status['status_details'][var]}" 
-                          for var in creds_status['status_details']]
+            status_list = [
+                f"{var}: {creds_status['status_details'][var]}"
+                for var in creds_status["status_details"]
+            ]
             logger.warning(
                 f"⚠️ Cannot create Spaces client - Missing required environment variables: {', '.join(core_missing)}. "
                 f"Please set the following environment variables: "
                 f"{', '.join(status_list)}"
             )
-            
+
             if DEBUG_MODE:
                 print(
                     f"🔑 Missing Spaces credentials: "
@@ -81,10 +88,12 @@ def get_spaces_client():
     try:
         # Validate SPACES_REGION and provide fallback
         validated_region = SPACES_REGION if SPACES_REGION else "nyc3"
-        
+
         if not SPACES_REGION:
-            logger.info(f"SPACES_REGION not set, using default fallback: {validated_region}")
-        
+            logger.info(
+                f"SPACES_REGION not set, using default fallback: {validated_region}"
+            )
+
         session = boto3.session.Session()
         client = session.client(
             "s3",
@@ -163,8 +172,8 @@ def download_dataframe(object_name, file_format="csv"):
     try:
         # Download the object
         response = client.get_object(Bucket=SPACES_BUCKET_NAME, Key=object_name)
-        content = response['Body'].read()
-        
+        content = response["Body"].read()
+
         if file_format.lower() == "csv":
             df = pd.read_csv(io.BytesIO(content))
         elif file_format.lower() == "parquet":
@@ -173,7 +182,9 @@ def download_dataframe(object_name, file_format="csv"):
             logger.error(f"Unsupported file format: {file_format}")
             return pd.DataFrame()
 
-        logger.info(f"Downloaded DataFrame from {SPACES_BUCKET_NAME}/{object_name}: {len(df)} rows")
+        logger.info(
+            f"Downloaded DataFrame from {SPACES_BUCKET_NAME}/{object_name}: {len(df)} rows"
+        )
         if DEBUG_MODE:
             print(
                 f"☁️ Successfully downloaded from Spaces: {SPACES_BUCKET_NAME}/{object_name} - {len(df)} rows"
@@ -186,14 +197,13 @@ def download_dataframe(object_name, file_format="csv"):
         return pd.DataFrame()
 
 
-
 def get_cloud_file_size_bytes(object_name):
     """
     Get the size of a file in cloud storage (DigitalOcean Spaces) without downloading it.
-    
+
     Args:
         object_name (str): Object name/path in the cloud storage bucket
-        
+
     Returns:
         int: File size in bytes, or 0 if file doesn't exist or error occurs
     """
@@ -201,22 +211,24 @@ def get_cloud_file_size_bytes(object_name):
     if not client:
         logger.warning("Cannot check cloud file size - no client available")
         return 0
-    
+
     try:
         # Use HEAD request to get object metadata without downloading
         response = client.head_object(Bucket=SPACES_BUCKET_NAME, Key=object_name)
-        file_size = response.get('ContentLength', 0)
+        file_size = response.get("ContentLength", 0)
         logger.debug(f"☁️ Cloud file size for {object_name}: {file_size} bytes")
         return file_size
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == '404':
+        error_code = e.response["Error"]["Code"]
+        if error_code == "404":
             logger.debug(f"☁️ Cloud file not found: {object_name}")
         else:
             logger.warning(f"☁️ Error checking cloud file size for {object_name}: {e}")
         return 0
     except Exception as e:
-        logger.warning(f"☁️ Unexpected error checking cloud file size for {object_name}: {e}")
+        logger.warning(
+            f"☁️ Unexpected error checking cloud file size for {object_name}: {e}"
+        )
         return 0
 
 

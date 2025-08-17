@@ -2,6 +2,8 @@
 
 A professional-grade, fully automated trading platform for intraday and swing strategies, combining real-time data, advanced screeners, and a dynamic Streamlit dashboard — all hosted on DigitalOcean.
 
+> **🎉 Latest Update**: Comprehensive codebase audit completed with security hardening, performance optimization, and enhanced documentation.
+
 ---
 
 ## 🎯 Project Vision
@@ -9,6 +11,28 @@ A professional-grade, fully automated trading platform for intraday and swing st
 To build an autonomous, institutional-style trade discovery and execution system that removes the need for manual charting. Inspired by Umar Ashraf and Brian Shannon, this platform scans, validates, and executes trade ideas with clean risk/reward logic.
 
 ---
+
+## 📚 Documentation
+
+### Complete Documentation Suite
+- **[📖 Full Documentation](docs/README.md)** - Comprehensive setup and usage guide
+- **[🔧 API Optimization](docs/api-optimization.md)** - Performance optimization strategies  
+- **[🔒 Security Guide](docs/security.md)** - Security best practices and audit results
+
+### Quick Links
+- [Installation Guide](docs/README.md#-quick-start)
+- [Trading Strategies](docs/README.md#-trading-strategies)
+- [Configuration](docs/README.md#-configuration)
+- [Troubleshooting](docs/README.md#-troubleshooting)
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.9+ (tested with Python 3.12.3)
+- Alpha Vantage API key
+- DigitalOcean Spaces credentials (optional)
 
 ## 🚀 New: Unified Ticker Management System
 

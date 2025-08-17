@@ -7,9 +7,10 @@ This module handles all ticker-related operations including:
 - Managing manual and automated ticker lists
 """
 
-import os
 import logging
+import os
 from typing import List, Optional
+
 import pandas as pd
 
 from .config import DEFAULT_TICKERS
@@ -140,7 +141,9 @@ def read_master_tickerlist() -> List[str]:
     Returns:
         List of ticker symbols from master list
     """
-    logger.info("Reading master ticker list from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)")
+    logger.info(
+        "Reading master ticker list from master_tickerlist.csv (SINGLE SOURCE OF TRUTH)"
+    )
 
     try:
         # Try local file first
@@ -170,23 +173,30 @@ def read_master_tickerlist() -> List[str]:
         logger.warning(
             "⚠️ master_tickerlist.csv not found - creating from DEFAULT_TICKERS"
         )
-        
+
         # Create master tickerlist from defaults
-        default_df = pd.DataFrame({
-            'ticker': DEFAULT_TICKERS,
-            'source': ['default'] * len(DEFAULT_TICKERS),
-            'generated_at': [pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')] * len(DEFAULT_TICKERS)
-        })
-        
+        default_df = pd.DataFrame(
+            {
+                "ticker": DEFAULT_TICKERS,
+                "source": ["default"] * len(DEFAULT_TICKERS),
+                "generated_at": [pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")]
+                * len(DEFAULT_TICKERS),
+            }
+        )
+
         # Save to local file
         default_df.to_csv(local_file, index=False)
-        logger.info(f"✅ Created master_tickerlist.csv with {len(DEFAULT_TICKERS)} default tickers")
-        
+        logger.info(
+            f"✅ Created master_tickerlist.csv with {len(DEFAULT_TICKERS)} default tickers"
+        )
+
         return DEFAULT_TICKERS
 
     except Exception as e:
         logger.error(f"❌ Error reading master ticker list: {e}")
-        logger.warning(f"🔄 Using DEFAULT_TICKERS as emergency fallback: {DEFAULT_TICKERS}")
+        logger.warning(
+            f"🔄 Using DEFAULT_TICKERS as emergency fallback: {DEFAULT_TICKERS}"
+        )
         return DEFAULT_TICKERS
 
 

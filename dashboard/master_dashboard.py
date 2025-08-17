@@ -1,18 +1,21 @@
-import sys
+import logging
 import os
+import sys
+
 import pandas as pd
 from tqdm import tqdm
-import logging
 
 # Add project root to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.helpers import read_df_from_s3, save_df_to_s3, update_scheduler_status
+from utils.data_storage import read_df_from_s3
+from utils.helpers import save_df_to_s3, update_scheduler_status
 from utils.spaces_manager import spaces_manager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def run_master_dashboard_consolidation():
     """
@@ -21,9 +24,9 @@ def run_master_dashboard_consolidation():
     This script is designed to be robust and handle missing files gracefully.
     """
     logger.info("Starting Master Dashboard Signal Consolidation")
-    
-    signal_dir = 'data/signals/'
-    
+
+    signal_dir = "data/signals/"
+
     logger.info(f"Scanning for signal files in '{signal_dir}'")
     try:
         signal_files = spaces_manager.list_objects(signal_dir)
@@ -35,7 +38,7 @@ def run_master_dashboard_consolidation():
         return
 
     logger.info(f"Found {len(signal_files)} signal files to process.")
-    
+
     all_signals = []
 
     for file_name in tqdm(signal_files, desc="Consolidating Signals"):
@@ -46,22 +49,26 @@ def run_master_dashboard_consolidation():
             if signal_df.empty:
                 tqdm.write(f"Skipping empty signal file: {file_name}")
                 continue
-            
+
             # --- Standardize and add strategy name ---
             # Extract strategy name from filename (e.g., 'gapgo_signals.csv' -> 'Gap & Go')
-            strategy_name = file_name.replace('_signals.csv', '').replace('_', ' ').title()
-            signal_df['Strategy'] = strategy_name
-            
+            strategy_name = (
+                file_name.replace("_signals.csv", "").replace("_", " ").title()
+            )
+            signal_df["Strategy"] = strategy_name
+
             all_signals.append(signal_df)
-            
+
         except Exception as e:
             tqdm.write(f"Error processing file {file_name}: {e}")
 
     if not all_signals:
         logger.info("No valid signals found after processing all files.")
         # Create an empty placeholder file so the dashboard doesn't error
-        empty_df = pd.DataFrame(columns=['Ticker', 'Strategy', 'Direction', 'Entry', 'Stop', 'Valid?'])
-        save_df_to_s3(empty_df, 'data/trade_signals.csv')
+        empty_df = pd.DataFrame(
+            columns=["Ticker", "Strategy", "Direction", "Entry", "Stop", "Valid?"]
+        )
+        save_df_to_s3(empty_df, "data/trade_signals.csv")
         return
 
     # Concatenate all dataframes into one
@@ -69,27 +76,35 @@ def run_master_dashboard_consolidation():
 
     # --- Data Cleaning and Filtering ---
     # We only want to see signals that are marked as valid
-    if 'Setup Valid?' in master_df.columns:
-        master_df = master_df[master_df['Setup Valid?'] == True].copy()
-    
+    if "Setup Valid?" in master_df.columns:
+        master_df = master_df[master_df["Setup Valid?"] == True].copy()
+
     # Define a standard column order for the final output
     final_columns = [
-        'Ticker', 'Strategy', 'Direction', 'Entry', 'Stop', 
-        'Target 2R', 'Target 3R', 'Risk/Share', 'Close', 'Volume'
+        "Ticker",
+        "Strategy",
+        "Direction",
+        "Entry",
+        "Stop",
+        "Target 2R",
+        "Target 3R",
+        "Risk/Share",
+        "Close",
+        "Volume",
     ]
-    
+
     # Ensure all required columns exist, adding them with None if they don't
     for col in final_columns:
         if col not in master_df.columns:
             master_df[col] = None
-            
+
     # Reorder and select only the final columns
     master_df = master_df[final_columns]
 
     logger.info(f"\nConsolidation complete. Found {len(master_df)} valid trade plans.")
-    
+
     # Save the final, consolidated file
-    save_path = 'data/trade_signals.csv'
+    save_path = "data/trade_signals.csv"
     save_df_to_s3(master_df, save_path)
     logger.info(f"Successfully saved master trade signals to '{save_path}'.")
 

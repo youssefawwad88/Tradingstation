@@ -2,22 +2,23 @@
 Unit tests for market_time module.
 """
 
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch
+
+import pytest
 import pytz
 
 from utils.market_time import (
     detect_market_session,
-    is_market_open,
-    is_extended_hours,
-    is_weekend,
     get_last_market_day,
-    get_market_open_time,
     get_market_close_time,
-    is_trading_day,
-    time_until_market_open,
+    get_market_open_time,
     get_trading_minutes_elapsed_today,
+    is_extended_hours,
+    is_market_open,
+    is_trading_day,
+    is_weekend,
+    time_until_market_open,
 )
 
 

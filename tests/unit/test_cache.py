@@ -5,17 +5,18 @@ Unit tests for cache module.
 import tempfile
 import time
 from unittest.mock import patch
+
 import pandas as pd
 import pytest
 
 from utils.cache import (
     CacheEntry,
-    InMemoryCache,
     DiskCache,
+    InMemoryCache,
     TieredCache,
-    get_cache,
     cache_key_for_ticker_data,
     cached_fetch_wrapper,
+    get_cache,
 )
 
 

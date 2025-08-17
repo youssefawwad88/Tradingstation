@@ -2,18 +2,19 @@
 Unit tests for ticker_manager module.
 """
 
-import pytest
-from unittest.mock import patch, mock_open
-import tempfile
 import os
+import tempfile
+from unittest.mock import mock_open, patch
+
+import pytest
 
 from utils.ticker_manager import (
-    validate_ticker_symbol,
     clean_ticker_list,
+    get_sp500_tickers,
     load_manual_tickers,
     merge_ticker_sources,
-    get_sp500_tickers,
     save_ticker_list,
+    validate_ticker_symbol,
 )
 
 
