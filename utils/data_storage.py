@@ -187,7 +187,7 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
         else:
             logger.info(f"⚠️ Cloud file exists but is empty or unreadable: {object_name}")
     except Exception as e:
-        logger.info(f"⚠️ Could not read from cloud storage: {e}")
+        logger.warning(f"⚠️ Could not read from cloud storage: {e}")
 
     # Fallback to local file
     local_file = os.path.join(
