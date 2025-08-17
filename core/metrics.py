@@ -5,12 +5,12 @@ This module provides comprehensive metrics collection for performance
 monitoring, alerting, and system optimization.
 """
 
+import json
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
 from threading import Lock
-import json
+from typing import Any, Callable, Dict, List, Optional
 
 from core.logging_system import get_logger
 

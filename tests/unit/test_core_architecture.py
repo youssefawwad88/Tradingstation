@@ -2,14 +2,15 @@
 Unit tests for the core architecture components.
 """
 
-from unittest.mock import Mock, AsyncMock
-import pytest
-import pandas as pd
+from unittest.mock import AsyncMock, Mock
 
-from core.interfaces import Screener, DataFetcher
-from core.di_container import DIContainer, injectable
-from core.plugins import PluginRegistry, screener_plugin
+import pandas as pd
+import pytest
+
 from core.base_screener import BaseScreener
+from core.di_container import DIContainer, injectable
+from core.interfaces import DataFetcher, Screener
+from core.plugins import PluginRegistry, screener_plugin
 
 
 class MockDataFetcher:
@@ -131,9 +132,10 @@ class TestDIContainer:
         """Test the injectable decorator."""
         # Use the global container for this test
         from core.di_container import get_container
+
         container = get_container()
         container.clear()  # Clear any existing registrations
-        
+
         mock_dependency = Mock()
         container.register_singleton(Mock, mock_dependency)
 
@@ -254,9 +256,8 @@ class TestBaseScreener:
 
         # Mock market session
         from unittest.mock import patch
-        with patch(
-            "core.base_screener.detect_market_session", return_value="REGULAR"
-        ):
+
+        with patch("core.base_screener.detect_market_session", return_value="REGULAR"):
             signals = await screener.scan(["AAPL", "MSFT"])
 
         assert len(signals) == 1

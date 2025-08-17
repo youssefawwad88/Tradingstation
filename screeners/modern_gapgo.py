@@ -6,10 +6,11 @@ separation of concerns and dependency injection.
 """
 
 import logging
-from typing import Dict, List, Any, Optional
 from datetime import datetime, time
-import pandas as pd
+from typing import Any, Dict, List, Optional
+
 import numpy as np
+import pandas as pd
 import pytz
 
 from core.base_screener import BaseScreener

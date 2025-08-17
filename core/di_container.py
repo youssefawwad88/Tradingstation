@@ -5,10 +5,10 @@ This module provides a simple but powerful dependency injection system
 that allows for loose coupling between components and easier testing.
 """
 
-import logging
-from typing import Any, Callable, Dict, Optional, Type, TypeVar, Union
 import inspect
+import logging
 from functools import wraps
+from typing import Any, Callable, Dict, Optional, Type, TypeVar, Union
 
 logger = logging.getLogger(__name__)
 
@@ -277,10 +277,10 @@ def configure_default_services():
 
     # Import and register concrete implementations
     try:
+        from core.interfaces import DataFetcher
         from utils.async_client import AsyncAlphaVantageClient
         from utils.cache import TieredCache
         from utils.pipeline import DataPipeline
-        from core.interfaces import DataFetcher
 
         # Register services
         container.register_class(DataFetcher, AsyncAlphaVantageClient, singleton=False)

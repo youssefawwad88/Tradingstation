@@ -4,7 +4,7 @@ Pytest configuration and shared fixtures for all tests.
 
 import os
 import tempfile
-from typing import Generator, Dict, Any
+from typing import Any, Dict, Generator
 from unittest.mock import Mock
 
 import pandas as pd

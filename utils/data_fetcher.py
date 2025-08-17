@@ -8,10 +8,10 @@ This module handles all data fetching operations including:
 - Timestamp standardization per requirements
 """
 
+import json
 import logging
 import time
-from typing import Tuple, Optional, Dict, Any
-import json
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 import requests
@@ -89,10 +89,12 @@ def fetch_intraday_data(
         df.rename(columns={"index": "timestamp"}, inplace=True)
         df["ticker"] = ticker
 
-        logger.info(f"📊 Raw intraday data fetched for {ticker} ({interval}): {len(df)} rows")
-        
+        logger.info(
+            f"📊 Raw intraday data fetched for {ticker} ({interval}): {len(df)} rows"
+        )
+
         # Apply rigorous timestamp standardization
-        df = apply_timestamp_standardization_to_api_data(df, data_type='intraday')
+        df = apply_timestamp_standardization_to_api_data(df, data_type="intraday")
 
         logger.info(
             f"✅ Intraday data standardized for {ticker} ({interval}): {len(df)} records with UTC timestamps"
@@ -176,11 +178,13 @@ def fetch_daily_data(
         df["ticker"] = ticker
 
         logger.info(f"📊 Raw daily data fetched for {ticker}: {len(df)} rows")
-        
-        # Apply rigorous timestamp standardization  
-        df = apply_timestamp_standardization_to_api_data(df, data_type='daily')
 
-        logger.info(f"✅ Daily data standardized for {ticker}: {len(df)} records with UTC timestamps")
+        # Apply rigorous timestamp standardization
+        df = apply_timestamp_standardization_to_api_data(df, data_type="daily")
+
+        logger.info(
+            f"✅ Daily data standardized for {ticker}: {len(df)} records with UTC timestamps"
+        )
         return df, True
 
     except requests.RequestException as e:

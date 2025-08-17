@@ -11,10 +11,10 @@ import logging
 import os
 import pickle
 import tempfile
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple, Union
-import threading
 
 import pandas as pd
 
