@@ -9,11 +9,11 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 try:
-    # We will use the same helper function you defined in your script
-    from utils.helpers import load_from_spaces
+    # Import the correct function from spaces_manager
+    from utils.spaces_manager import download_dataframe as load_from_spaces
 except ImportError:
     # A fallback for graceful error handling if the helper isn't found
-    st.error("Could not import `load_from_spaces` from `utils.helpers`. Please ensure the file and function exist.")
+    st.error("Could not import `download_dataframe` from `utils.spaces_manager`. Please ensure the file and function exist.")
     # Define a dummy function to prevent the app from crashing completely
     def load_from_spaces(path):
         return None

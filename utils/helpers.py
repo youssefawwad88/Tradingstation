@@ -280,6 +280,44 @@ def update_scheduler_status(job_name, status, error_details=None):
     else:
         logger.warning(f"[{timestamp}] Job '{job_name}' status unknown: {status}")
 
+    # Also write to CSV file for dashboard monitoring
+    try:
+        # Create status entry
+        status_entry = {
+            'job_name': job_name,
+            'status': status,
+            'last_run_timestamp': timestamp,
+            'error_details': error_details if error_details else ''
+        }
+        
+        # Read existing status file or create new DataFrame
+        status_file_path = 'data/logs/scheduler_status.csv'
+        try:
+            existing_df = read_df_from_s3(status_file_path)
+        except:
+            existing_df = pd.DataFrame()
+        
+        # If empty or no existing data, create new DataFrame
+        if existing_df.empty:
+            status_df = pd.DataFrame([status_entry])
+        else:
+            # Update existing job status or append new job
+            if job_name in existing_df['job_name'].values:
+                # Update existing job
+                existing_df.loc[existing_df['job_name'] == job_name, 'status'] = status
+                existing_df.loc[existing_df['job_name'] == job_name, 'last_run_timestamp'] = timestamp
+                existing_df.loc[existing_df['job_name'] == job_name, 'error_details'] = error_details if error_details else ''
+                status_df = existing_df
+            else:
+                # Append new job
+                status_df = pd.concat([existing_df, pd.DataFrame([status_entry])], ignore_index=True)
+        
+        # Save updated status file
+        save_df_to_s3(status_df, status_file_path)
+        
+    except Exception as e:
+        logger.warning(f"Failed to update scheduler status CSV: {e}")
+
 
 def detect_market_session():
     """

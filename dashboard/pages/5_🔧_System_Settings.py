@@ -149,7 +149,7 @@ with st.expander("🔬 Raw Data Viewer", expanded=False):
 
         if selected_ticker:
             st.write(f"#### Displaying data for: **{selected_ticker}**")
-            daily_file_path = f"data/daily/{selected_ticker}.csv"
+            daily_file_path = f"data/daily/{selected_ticker}_daily.csv"
             intraday_file_path = f"data/intraday/{selected_ticker}_1min.csv"
 
             st.subheader("Daily Data")
