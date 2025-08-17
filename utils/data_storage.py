@@ -173,7 +173,12 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
         object_name: Object name/path in S3
 
     Returns:
-        DataFrame if successful, empty DataFrame otherwise
+        DataFrame if successful, empty DataFrame for FileNotFoundError only
+        
+    Raises:
+        pd.errors.ParserError: When CSV file is corrupted
+        pd.errors.EmptyDataError: When CSV file is empty
+        Other exceptions: Re-raised after logging for proper error handling
     """
     logger.info(f"Attempting to read DataFrame from {object_name}")
 
@@ -186,7 +191,15 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
             return cloud_df
         else:
             logger.info(f"⚠️ Cloud file exists but is empty or unreadable: {object_name}")
+    except FileNotFoundError:
+        # File not found in cloud - continue to local fallback
+        logger.debug(f"File not found in cloud storage: {object_name}")
+    except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
+        # Re-raise critical parsing errors after logging
+        logger.error(f"Critical error reading from cloud storage {object_name}: {e}")
+        raise
     except Exception as e:
+        # Log other cloud errors but continue to local fallback
         logger.warning(f"⚠️ Could not read from cloud storage: {e}")
 
     # Fallback to local file
@@ -198,10 +211,17 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
             df = pd.read_csv(local_file)
             logger.info(f"📁 Successfully read {len(df)} rows from LOCAL FILE: {local_file}")
             return df
+        except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
+            # Re-raise critical parsing errors after logging
+            logger.error(f"Critical error reading local file {local_file}: {e}")
+            raise
         except Exception as e:
+            # Log other local file errors and continue to return empty DataFrame
             logger.error(f"Error reading local file {local_file}: {e}")
+            # Re-raise the exception after logging
+            raise
 
-    # Return empty DataFrame if file doesn't exist or can't be read
+    # Return empty DataFrame only if file doesn't exist (FileNotFoundError case)
     logger.warning(
         f"File not found in cloud or locally: {object_name} - returning empty DataFrame"
     )
