@@ -65,7 +65,8 @@ class InMemoryCache:
         """Generate a cache key from arguments."""
         key_data = {"args": args, "kwargs": sorted(kwargs.items())}
         key_string = json.dumps(key_data, sort_keys=True, default=str)
-        return hashlib.md5(key_string.encode()).hexdigest()
+        # Use SHA-256 instead of MD5 for better security
+        return hashlib.sha256(key_string.encode()).hexdigest()
 
     def _evict_lru(self) -> None:
         """Evict least recently used items to free space."""

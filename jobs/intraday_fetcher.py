@@ -26,7 +26,7 @@ USAGE EXAMPLES:
     # Configure at the top of this file by editing the DEFAULT_CONFIG:
     DATA_INTERVAL = "1min" or "30min"
     TEST_TICKER = "AAPL"
-    API_KEY = "your_alpha_vantage_key"
+    API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "")  # Load from environment
     FILE_SIZE_THRESHOLD_KB = 10
 
 Key Features:
@@ -58,7 +58,7 @@ import requests
 QUICK_SETUP = {
     "DATA_INTERVAL": "1min",  # "1min" or "30min"
     "TEST_TICKER": "AAPL",  # Stock symbol to fetch
-    "API_KEY": "LF4A4K5UCTYB93VZ",  # Your Alpha Vantage API key
+    "API_KEY": os.getenv("ALPHA_VANTAGE_API_KEY", ""),  # Load from environment
     "FILE_SIZE_THRESHOLD_KB": 10,  # File size threshold for full vs compact fetch
 }
 
@@ -77,12 +77,13 @@ class AppConfig:
         self,
         data_interval="1min",
         test_ticker="AAPL",
-        api_key="LF4A4K5UCTYB93VZ",
+        api_key=None,  # Will be loaded from environment
         file_size_threshold_kb=10,
     ):
         # Core configuration
         self.DATA_INTERVAL = data_interval
         self.TEST_TICKER = test_ticker
+        self.ALPHA_VANTAGE_API_KEY = api_key or os.getenv("ALPHA_VANTAGE_API_KEY", "")
         self.ALPHA_VANTAGE_API_KEY = api_key
 
         # File size threshold

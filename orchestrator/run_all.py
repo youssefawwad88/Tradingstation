@@ -21,10 +21,16 @@ from utils.helpers import (
 )
 
 # Set up logging
+import tempfile
+
+# Create secure temp directory for logs
+TEMP_DIR = tempfile.gettempdir()
+LOG_FILE = os.path.join(TEMP_DIR, "orchestrator.log")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("/tmp/orchestrator.log")],
+    handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE)],
 )
 logger = logging.getLogger(__name__)
 

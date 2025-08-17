@@ -59,7 +59,7 @@ def fetch_intraday_data(ticker, interval="1min", outputsize="compact"):
     }
 
     try:
-        response = requests.get(endpoint, params=params)
+        response = requests.get(endpoint, params=params, timeout=30)
         data = response.json()
 
         if "Error Message" in data:
