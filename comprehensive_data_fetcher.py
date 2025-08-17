@@ -44,7 +44,6 @@ TICKER_SYMBOL = "AAPL"                    # Stock ticker to fetch data for
 DATA_INTERVAL = "1min"                    # "1min" or "30min" (ignored for DAILY)
 DATA_TYPE = "INTRADAY"                    # "INTRADAY" or "DAILY"
 FILE_SIZE_THRESHOLD_KB = 10               # Threshold for full vs compact fetch
-API_KEY = None                            # Uses environment variable if None
 
 # =============================================================================
 # IMPORTS AND SETUP
@@ -266,6 +265,33 @@ def handle_daily_data(symbol):
         return False
 
 
+def sanitize_for_job_name(s):
+    """
+    Sanitize a string for use in job names by converting to lowercase
+    and replacing invalid characters with underscores.
+    
+    Args:
+        s (str): Input string to sanitize
+        
+    Returns:
+        str: Sanitized string safe for job names
+    """
+    if not s:
+        return ""
+    
+    # Convert to lowercase and replace invalid characters with underscores
+    import re
+    sanitized = re.sub(r'[^a-z0-9_]', '_', str(s).lower())
+    
+    # Remove multiple consecutive underscores
+    sanitized = re.sub(r'_+', '_', sanitized)
+    
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip('_')
+    
+    return sanitized
+
+
 def main():
     """
     Main execution function implementing the strategic data fetching logic.
@@ -281,11 +307,10 @@ def main():
     logger.info(f"   DATA_TYPE: {DATA_TYPE}")
     logger.info(f"   DATA_INTERVAL: {DATA_INTERVAL}")
     logger.info(f"   FILE_SIZE_THRESHOLD_KB: {FILE_SIZE_THRESHOLD_KB}")
-    logger.info(f"   API_KEY: {'✅ Available' if (API_KEY or ALPHA_VANTAGE_API_KEY) else '❌ Missing'}")
+    logger.info(f"   Authentication: {'✅ Configured' if os.getenv('ALPHA_VANTAGE_API_KEY') else '❌ Not configured'}")
     
     # Validate configuration
-    effective_api_key = API_KEY or ALPHA_VANTAGE_API_KEY
-    if not effective_api_key:
+    if not os.getenv('ALPHA_VANTAGE_API_KEY'):
         logger.warning("⚠️ No API key configured - running in test mode")
     
     # Execute based on DATA_TYPE using simple if-elif-else logic
@@ -317,7 +342,7 @@ def main():
 
 if __name__ == "__main__":
     # Update job status for scheduler integration
-    job_name = f"comprehensive_fetch_{DATA_TYPE.lower()}_{TICKER_SYMBOL}"
+    job_name = f"comprehensive_fetch_{sanitize_for_job_name(DATA_TYPE)}_{sanitize_for_job_name(TICKER_SYMBOL)}"
     update_scheduler_status(job_name, "Running")
     
     try:
