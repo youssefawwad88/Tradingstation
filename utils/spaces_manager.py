@@ -73,8 +73,8 @@ def get_spaces_client():
                     f"🔑 Missing Spaces credentials: "
                     f"Key ID: {creds_status['status_details']['SPACES_ACCESS_KEY_ID']}, "
                     f"Secret: {creds_status['status_details']['SPACES_SECRET_ACCESS_KEY']}, "
-                    f"Bucket: {SPACES_BUCKET_NAME or '❌ Missing'}, "
-                    f"Region: {SPACES_REGION or '❌ Missing'}"
+                    f"Bucket: {creds_status['status_details']['SPACES_BUCKET_NAME']}, "
+                    f"Region: {creds_status['status_details']['SPACES_REGION']}"
                 )
             return None
 
