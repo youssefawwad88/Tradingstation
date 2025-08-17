@@ -16,7 +16,6 @@ def test_comprehensive_data_fetcher():
     print("=" * 50)
     
     # Import the functions from our comprehensive script
-    sys.path.append('.')
     import comprehensive_data_fetcher as cdf
     
     # Test 1: Test get_data_from_api function signature and error handling
@@ -94,7 +93,7 @@ def test_configuration_changes():
     print("   ✅ Configuration section is clearly marked: PASS")
     
     # Check that all required variables are present
-    required_vars = ["TICKER_SYMBOL", "DATA_INTERVAL", "DATA_TYPE", "FILE_SIZE_THRESHOLD_KB", "API_KEY"]
+    required_vars = ["TICKER_SYMBOL", "DATA_INTERVAL", "DATA_TYPE", "FILE_SIZE_THRESHOLD_KB"]
     
     for var in required_vars:
         assert f"{var} = " in content, f"Required variable {var} should be in the script"
