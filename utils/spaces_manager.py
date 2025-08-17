@@ -9,6 +9,7 @@ from utils.config import (
     SPACES_SECRET_ACCESS_KEY,
     SPACES_BUCKET_NAME,
     SPACES_ENDPOINT_URL,
+    SPACES_REGION,
     DEBUG_MODE,
 )
 
@@ -20,13 +21,31 @@ def get_spaces_client():
     Create and return a boto3 client for DigitalOcean Spaces.
     """
     if not all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME]):
-        logger.error("Missing required Spaces credentials or bucket name")
+        # Enhanced error reporting with specific missing variables
+        missing_vars = []
+        if not SPACES_ACCESS_KEY_ID:
+            missing_vars.append("SPACES_ACCESS_KEY_ID")
+        if not SPACES_SECRET_ACCESS_KEY:
+            missing_vars.append("SPACES_SECRET_ACCESS_KEY")
+        if not SPACES_BUCKET_NAME:
+            missing_vars.append("SPACES_BUCKET_NAME")
+        
+        logger.warning(
+            f"⚠️ Cannot create Spaces client - Missing required environment variables: {', '.join(missing_vars)}. "
+            f"Please set the following environment variables: "
+            f"SPACES_ACCESS_KEY_ID: {'✅ Set' if SPACES_ACCESS_KEY_ID else '❌ Missing'}, "
+            f"SPACES_SECRET_ACCESS_KEY: {'✅ Set' if SPACES_SECRET_ACCESS_KEY else '❌ Missing'}, "
+            f"SPACES_BUCKET_NAME: {'✅ Set' if SPACES_BUCKET_NAME else '❌ Missing'}, "
+            f"SPACES_REGION: {'✅ Set' if SPACES_REGION else '❌ Missing'}"
+        )
+        
         if DEBUG_MODE:
             print(
                 f"🔑 Missing Spaces credentials: "
                 f"Key ID: {'✅ Set' if SPACES_ACCESS_KEY_ID else '❌ Missing'}, "
                 f"Secret: {'✅ Set' if SPACES_SECRET_ACCESS_KEY else '❌ Missing'}, "
-                f"Bucket: {SPACES_BUCKET_NAME or '❌ Missing'}"
+                f"Bucket: {SPACES_BUCKET_NAME or '❌ Missing'}, "
+                f"Region: {SPACES_REGION or '❌ Missing'}"
             )
         return None
 
@@ -34,7 +53,7 @@ def get_spaces_client():
         session = boto3.session.Session()
         client = session.client(
             "s3",
-            region_name="nyc3",
+            region_name=SPACES_REGION,
             endpoint_url=SPACES_ENDPOINT_URL,
             aws_access_key_id=SPACES_ACCESS_KEY_ID,
             aws_secret_access_key=SPACES_SECRET_ACCESS_KEY,
