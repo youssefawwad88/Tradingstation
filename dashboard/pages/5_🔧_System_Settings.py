@@ -23,6 +23,20 @@ except ImportError:
     st.error(
         "Fatal Error: Could not import helper functions from `utils.helpers`. The app cannot function without them."
     )
+
+# Create cached wrapper for data loading functions to improve performance
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def cached_read_df_from_s3(object_name: str) -> pd.DataFrame:
+    """
+    Cached wrapper for read_df_from_s3 to improve dashboard performance.
+    
+    Args:
+        object_name: Object name/path in S3
+        
+    Returns:
+        DataFrame if successful, empty DataFrame otherwise
+    """
+    return read_df_from_s3(object_name)
     st.stop()
 
 # --- Page Configuration ---
@@ -216,7 +230,7 @@ with st.expander("🔬 Raw Data Viewer", expanded=False):
             # Daily Data Section with enhanced error handling
             st.subheader("📈 Daily Data")
             with st.spinner(f"Loading daily data for {selected_ticker}..."):
-                daily_df = read_df_from_s3(daily_file_path)
+                daily_df = cached_read_df_from_s3(daily_file_path)
                 
             if daily_df is not None and not daily_df.empty:
                 st.success(f"✅ Found daily data: {len(daily_df)} records")
@@ -244,7 +258,7 @@ with st.expander("🔬 Raw Data Viewer", expanded=False):
             # Intraday Data Section with enhanced error handling  
             st.subheader("⚡ Intraday (1-min) Data")
             with st.spinner(f"Loading intraday data for {selected_ticker}..."):
-                intraday_df = read_df_from_s3(intraday_file_path)
+                intraday_df = cached_read_df_from_s3(intraday_file_path)
                 
             if intraday_df is not None and not intraday_df.empty:
                 st.success(f"✅ Found intraday data: {len(intraday_df)} records") 

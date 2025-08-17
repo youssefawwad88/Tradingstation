@@ -11,7 +11,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 
 try:
     # Import the correct function from spaces_manager
-    from utils.spaces_manager import download_dataframe as load_from_spaces
+    from utils.spaces_manager import download_dataframe as _load_from_spaces
+    
+    # Create cached wrapper for better performance
+    @st.cache_data(ttl=60)  # Cache for 1 minute (logs change frequently)
+    def load_from_spaces(object_name):
+        """Cached wrapper for download_dataframe to improve scheduler monitor performance."""
+        return _load_from_spaces(object_name)
+        
 except ImportError:
     # A fallback for graceful error handling if the helper isn't found
     st.error(

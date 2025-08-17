@@ -174,9 +174,7 @@ class DiskCache:
     """Persistent disk cache for larger datasets."""
 
     def __init__(self, cache_dir: Optional[str] = None, max_size_gb: float = 1.0):
-        self.cache_dir = cache_dir or os.path.join(
-            tempfile.gettempdir(), "tradingstation_cache"
-        )
+        self.cache_dir = cache_dir or tempfile.mkdtemp(prefix="tradingstation-cache-")
         self.max_size_bytes = int(max_size_gb * 1024 * 1024 * 1024)
         os.makedirs(self.cache_dir, exist_ok=True)
 
