@@ -110,6 +110,39 @@ def get_spaces_client():
         return None
 
 
+def file_exists_in_spaces(object_name):
+    """
+    Check if a file exists in DigitalOcean Spaces without downloading it.
+    
+    Args:
+        object_name (str): Object name in the Spaces bucket
+    
+    Returns:
+        bool: True if file exists, False otherwise
+    """
+    client = get_spaces_client()
+    if not client:
+        logger.warning(f"Cannot check file existence - no client available")
+        return False
+        
+    try:
+        # Use HEAD request to check if object exists
+        client.head_object(Bucket=SPACES_BUCKET_NAME, Key=object_name)
+        logger.debug(f"File exists in Spaces: {object_name}")
+        return True
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            logger.debug(f"File not found in Spaces: {object_name}")
+            return False
+        else:
+            logger.warning(f"Error checking file existence in Spaces {object_name}: {e}")
+            return False
+    except Exception as e:
+        logger.warning(f"Unexpected error checking file existence in Spaces {object_name}: {e}")
+        return False
+
+
 def upload_dataframe(df, object_name, file_format="csv"):
     """
     Upload a pandas DataFrame directly to DigitalOcean Spaces.
@@ -167,6 +200,11 @@ def download_dataframe(object_name, file_format="csv"):
     client = get_spaces_client()
     if not client:
         logger.warning(f"Cannot download from Spaces - no client available")
+        return pd.DataFrame()
+
+    # First check if file exists to avoid unnecessary download attempts
+    if not file_exists_in_spaces(object_name):
+        logger.debug(f"File does not exist in Spaces, skipping download: {object_name}")
         return pd.DataFrame()
 
     try:

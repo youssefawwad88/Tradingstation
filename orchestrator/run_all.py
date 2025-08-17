@@ -24,7 +24,7 @@ from utils.helpers import (
 import tempfile
 
 # Create secure temp directory for logs
-TEMP_DIR = tempfile.gettempdir()
+TEMP_DIR = tempfile.mkdtemp(prefix="orchestrator-")
 LOG_FILE = os.path.join(TEMP_DIR, "orchestrator.log")
 
 logging.basicConfig(
