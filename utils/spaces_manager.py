@@ -16,44 +16,79 @@ from utils.config import (
 logger = logging.getLogger(__name__)
 
 
+def get_spaces_credentials_status():
+    """
+    Check the status of all required Spaces credentials.
+    
+    Returns:
+        dict: Contains 'all_present' boolean and 'missing' list of missing credential names
+    """
+    missing_vars = []
+    
+    if not SPACES_ACCESS_KEY_ID:
+        missing_vars.append("SPACES_ACCESS_KEY_ID")
+    if not SPACES_SECRET_ACCESS_KEY:
+        missing_vars.append("SPACES_SECRET_ACCESS_KEY")
+    if not SPACES_BUCKET_NAME:
+        missing_vars.append("SPACES_BUCKET_NAME")
+    if not SPACES_REGION:
+        missing_vars.append("SPACES_REGION")
+    
+    return {
+        'all_present': len(missing_vars) == 0,
+        'missing': missing_vars,
+        'status_details': {
+            'SPACES_ACCESS_KEY_ID': '✅ Set' if SPACES_ACCESS_KEY_ID else '❌ Missing',
+            'SPACES_SECRET_ACCESS_KEY': '✅ Set' if SPACES_SECRET_ACCESS_KEY else '❌ Missing',
+            'SPACES_BUCKET_NAME': '✅ Set' if SPACES_BUCKET_NAME else '❌ Missing',
+            'SPACES_REGION': '✅ Set' if SPACES_REGION else '❌ Missing'
+        }
+    }
+
+
 def get_spaces_client():
     """
     Create and return a boto3 client for DigitalOcean Spaces.
     """
+    # Check credential status using helper function
+    creds_status = get_spaces_credentials_status()
+    
+    # Check if core credentials are present (region gets fallback)
     if not all([SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY, SPACES_BUCKET_NAME]):
-        # Enhanced error reporting with specific missing variables
-        missing_vars = []
-        if not SPACES_ACCESS_KEY_ID:
-            missing_vars.append("SPACES_ACCESS_KEY_ID")
-        if not SPACES_SECRET_ACCESS_KEY:
-            missing_vars.append("SPACES_SECRET_ACCESS_KEY")
-        if not SPACES_BUCKET_NAME:
-            missing_vars.append("SPACES_BUCKET_NAME")
+        # Get missing core credentials (excluding SPACES_REGION which has fallback)
+        core_missing = [var for var in creds_status['missing'] 
+                       if var != 'SPACES_REGION']
         
-        logger.warning(
-            f"⚠️ Cannot create Spaces client - Missing required environment variables: {', '.join(missing_vars)}. "
-            f"Please set the following environment variables: "
-            f"SPACES_ACCESS_KEY_ID: {'✅ Set' if SPACES_ACCESS_KEY_ID else '❌ Missing'}, "
-            f"SPACES_SECRET_ACCESS_KEY: {'✅ Set' if SPACES_SECRET_ACCESS_KEY else '❌ Missing'}, "
-            f"SPACES_BUCKET_NAME: {'✅ Set' if SPACES_BUCKET_NAME else '❌ Missing'}, "
-            f"SPACES_REGION: {'✅ Set' if SPACES_REGION else '❌ Missing'}"
-        )
-        
-        if DEBUG_MODE:
-            print(
-                f"🔑 Missing Spaces credentials: "
-                f"Key ID: {'✅ Set' if SPACES_ACCESS_KEY_ID else '❌ Missing'}, "
-                f"Secret: {'✅ Set' if SPACES_SECRET_ACCESS_KEY else '❌ Missing'}, "
-                f"Bucket: {SPACES_BUCKET_NAME or '❌ Missing'}, "
-                f"Region: {SPACES_REGION or '❌ Missing'}"
+        if core_missing:
+            status_list = [f"{var}: {creds_status['status_details'][var]}" 
+                          for var in creds_status['status_details']]
+            logger.warning(
+                f"⚠️ Cannot create Spaces client - Missing required environment variables: {', '.join(core_missing)}. "
+                f"Please set the following environment variables: "
+                f"{', '.join(status_list)}"
             )
-        return None
+            
+            if DEBUG_MODE:
+                print(
+                    f"🔑 Missing Spaces credentials: "
+                    f"Key ID: {creds_status['status_details']['SPACES_ACCESS_KEY_ID']}, "
+                    f"Secret: {creds_status['status_details']['SPACES_SECRET_ACCESS_KEY']}, "
+                    f"Bucket: {SPACES_BUCKET_NAME or '❌ Missing'}, "
+                    f"Region: {SPACES_REGION or '❌ Missing'}"
+                )
+            return None
 
     try:
+        # Validate SPACES_REGION and provide fallback
+        validated_region = SPACES_REGION if SPACES_REGION else "nyc3"
+        
+        if not SPACES_REGION:
+            logger.info(f"SPACES_REGION not set, using default fallback: {validated_region}")
+        
         session = boto3.session.Session()
         client = session.client(
             "s3",
-            region_name=SPACES_REGION,
+            region_name=validated_region,
             endpoint_url=SPACES_ENDPOINT_URL,
             aws_access_key_id=SPACES_ACCESS_KEY_ID,
             aws_secret_access_key=SPACES_SECRET_ACCESS_KEY,

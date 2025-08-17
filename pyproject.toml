@@ -31,6 +31,7 @@ markers = [
     "integration: Integration tests", 
     "slow: Slow tests that may take time",
     "api: Tests that require API calls",
+    "asyncio: Async tests",
 ]
 
 [tool.black]
