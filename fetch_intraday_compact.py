@@ -284,6 +284,57 @@ def fetch_intraday_compact():
                 # LOGGING: Log the final file path where script is attempting to save (Phase 1.2 requirement)
                 logger.info(f"💾 TICKER {ticker}: Attempting to save to final path: {file_path}")
 
+                # CRITICAL VALIDATION: Check if today's data is present before declaring success
+                # This is the core fix for the compact fetch issue described in the problem statement
+                ny_tz = pytz.timezone("America/New_York")
+                today_et = datetime.now(ny_tz).date()
+                
+                # Validate that final combined data contains today's candles
+                today_data_present = False
+                if not combined_df.empty and timestamp_col in combined_df.columns:
+                    try:
+                        # Convert timestamps to ET for today's data check
+                        df_timestamps = pd.to_datetime(combined_df[timestamp_col])
+                        if df_timestamps.dt.tz is None:
+                            df_timestamps_et = df_timestamps.dt.tz_localize(ny_tz)
+                        else:
+                            df_timestamps_et = df_timestamps.dt.tz_convert(ny_tz)
+                        
+                        today_rows = (df_timestamps_et.dt.date == today_et).sum()
+                        today_data_present = today_rows > 0
+                        
+                        logger.info(f"🗓️ TICKER {ticker}: Today's data validation:")
+                        logger.info(f"   📅 Today's date (ET): {today_et}")
+                        logger.info(f"   📊 Rows with today's data: {today_rows}")
+                        logger.info(f"   ✅ Today's data present: {today_data_present}")
+                        
+                        if today_data_present:
+                            # Log the time range of today's data for debugging
+                            today_data = df_timestamps_et[df_timestamps_et.dt.date == today_et]
+                            if not today_data.empty:
+                                logger.info(f"   🕐 Today's data range: {today_data.min()} to {today_data.max()}")
+                        
+                    except Exception as e:
+                        logger.error(f"❌ TICKER {ticker}: Error validating today's data: {e}")
+                        today_data_present = False
+
+                # HARDENED VALIDATION: Only declare success if today's data is present OR it's a weekend/holiday
+                is_weekend = datetime.now(ny_tz).weekday() >= 5  # Saturday=5, Sunday=6
+                market_closed = is_weekend  # Simplified check for now
+                
+                if not today_data_present and not market_closed:
+                    # FAIL THE FETCH: Today's data is missing during market hours
+                    logger.error(f"❌ TICKER {ticker}: COMPACT FETCH VALIDATION FAILED")
+                    logger.error(f"   💡 This is the exact issue described in the problem statement!")
+                    logger.error(f"   📊 Final data contains {len(combined_df)} rows but NO today's candles")
+                    logger.error(f"   🗓️ Expected data for: {today_et}")
+                    logger.error(f"   ⚠️ Script will NOT declare this ticker as successful")
+                    # Do not increment successful_fetches - this is a failed fetch
+                    continue
+                elif not today_data_present and market_closed:
+                    logger.info(f"⚠️ TICKER {ticker}: No today's data, but market is closed (weekend/holiday)")
+                    logger.info(f"   📅 This is acceptable during non-market hours")
+
                 # Save updated data
                 upload_success = save_df_to_s3(combined_df, file_path)
 
@@ -301,11 +352,24 @@ def fetch_intraday_compact():
                     logger.info(f"✅ TICKER {ticker}: Successfully saved to {file_path}")
                     logger.info(f"📊 TICKER {ticker}: Total rows in final file: {len(combined_df)}")
                     logger.info(f"🆕 TICKER {ticker}: New candles added: {new_candles_count}")
+                    if today_data_present:
+                        logger.info(f"🎯 TICKER {ticker}: VALIDATION PASSED - Today's data confirmed present")
                 else:
                     logger.error(f"❌ TICKER {ticker}: Failed to upload to Spaces at {file_path}")
             else:
-                logger.warning(f"⚠️ TICKER {ticker}: No new data from API")
-                successful_fetches += 1  # Not an error if no new data
+                # CRITICAL: No new data from API is now treated as a failure during market hours
+                ny_tz = pytz.timezone("America/New_York")
+                is_weekend = datetime.now(ny_tz).weekday() >= 5
+                market_closed = is_weekend
+                
+                if not market_closed:
+                    logger.error(f"❌ TICKER {ticker}: No new data from API during market hours")
+                    logger.error(f"   💡 This indicates a potential API or connectivity issue")
+                    logger.error(f"   ⚠️ Script will NOT declare this ticker as successful")
+                    # Do not increment successful_fetches - this is a failed fetch during market hours
+                else:
+                    logger.warning(f"⚠️ TICKER {ticker}: No new data from API (acceptable during market closure)")
+                    successful_fetches += 1  # Acceptable during market closure
 
         except Exception as e:
             logger.error(f"❌ TICKER {ticker}: Error processing - {e}")

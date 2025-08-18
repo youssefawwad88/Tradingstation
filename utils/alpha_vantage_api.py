@@ -51,17 +51,12 @@ def _make_api_request_with_retry(params, max_retries=5, base_delay=2.0):
     symbol = params.get('symbol', 'unknown')
     outputsize = params.get('outputsize', 'compact')
     
-    # PHASE 2: Increase retries for compact fetches of problematic tickers
+    # ENHANCED RETRY: Use consistent aggressive retry strategy for all compact fetches
+    # Problem statement identified this as a systemic issue, not ticker-specific
     if outputsize == 'compact':
-        # These are the tickers mentioned in the problem statement as non-working
-        problematic_tickers = ["AAPL", "PLTR"]
-        if symbol in problematic_tickers:
-            max_retries = 8  # More aggressive retry for known problematic tickers
-            base_delay = 3.0  # Longer delays for these tickers
-            logger.info(f"🎯 PROBLEMATIC TICKER DETECTED: {symbol} - Using aggressive retry (max: {max_retries})")
-        else:
-            max_retries = 6  # Increased retries for all compact fetches
-            logger.info(f"💪 COMPACT FETCH: {symbol} - Using enhanced retry (max: {max_retries})")
+        max_retries = 6  # Enhanced retries for all compact fetches
+        base_delay = 2.5  # Consistent delay for better reliability
+        logger.info(f"💪 COMPACT FETCH: {symbol} - Using enhanced retry strategy (max: {max_retries})")
     
     for attempt in range(max_retries + 1):
         try:
