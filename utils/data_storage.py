@@ -56,6 +56,8 @@ def save_df_to_s3(
     """
     Save DataFrame to DigitalOcean Spaces with enhanced logging and path verification.
     STANDARDIZES on data/ prefix for all storage and logs exact paths used.
+    
+    ENHANCED for Phase 1.3 Cloud Storage Audit with verification of actual upload paths.
 
     Args:
         df: DataFrame to save
@@ -95,8 +97,8 @@ def save_df_to_s3(
             interval_part = "1min"  # default
         logger.info(f"💾 SAVE_DF_TO_S3: Processing direct object name")
 
-    # LOG the exact path used for each save operation as required
-    logger.info(f"📂 Saving to Spaces path: {object_name}")
+    # PHASE 1.3: LOG the exact path used for each save operation as required
+    logger.info(f"📂 PHASE 1.3 AUDIT: Saving to Spaces path: {object_name}")
     logger.info(f"   Data rows: {len(df)}")
     if not df.empty:
         date_col = (
@@ -112,9 +114,39 @@ def save_df_to_s3(
     # Try Spaces upload first
     success = upload_dataframe(df, object_name)
     if success:
-        # CONFIRM the file exists after saving as required
+        # PHASE 1.3: CONFIRM the file exists after saving as required
         logger.info(f"✅ File saved successfully to CLOUD STORAGE: {object_name}")
         logger.info(f"☁️ Spaces upload confirmed for {ticker}")
+        
+        # PHASE 1.3: Verify upload by checking if file exists and getting its size
+        from .spaces_manager import file_exists_in_spaces, get_cloud_file_size_bytes
+        
+        if file_exists_in_spaces(object_name):
+            cloud_file_size = get_cloud_file_size_bytes(object_name)
+            logger.info(f"🔍 PHASE 1.3 VERIFICATION: Cloud file exists at {object_name}")
+            logger.info(f"🔍 PHASE 1.3 VERIFICATION: Cloud file size: {cloud_file_size} bytes")
+            
+            # Additional verification: ensure the cloud file size matches expectations
+            # Calculate expected size based on DataFrame
+            import io
+            temp_buffer = io.StringIO()
+            df.to_csv(temp_buffer, index=False)
+            expected_size = len(temp_buffer.getvalue().encode('utf-8'))
+            temp_buffer.close()
+            
+            logger.info(f"🔍 PHASE 1.3 VERIFICATION: Expected size: {expected_size} bytes")
+            
+            # Allow for small differences due to encoding/formatting
+            size_difference = abs(cloud_file_size - expected_size)
+            if size_difference <= 100:  # Allow 100 bytes difference
+                logger.info(f"✅ PHASE 1.3 VERIFICATION: File size matches (diff: {size_difference} bytes)")
+            else:
+                logger.warning(f"⚠️ PHASE 1.3 VERIFICATION: File size mismatch (diff: {size_difference} bytes)")
+                logger.warning("   This could indicate a partial upload or file corruption!")
+        else:
+            logger.error(f"❌ PHASE 1.3 VERIFICATION: Cloud file NOT FOUND at {object_name}")
+            logger.error("   This indicates a critical upload failure!")
+            
         return True
     else:
         logger.warning(
@@ -158,6 +190,10 @@ def save_df_to_s3(
                 file_size = os.path.getsize(local_path)
                 logger.info(f"✅ File saved successfully to {local_path}")
                 logger.info(f"📁 Local file confirmed: {file_size} bytes")
+                
+                # PHASE 1.3: Log local file path for audit trail
+                logger.info(f"🔍 PHASE 1.3 LOCAL AUDIT: Local file path: {local_path}")
+                logger.info(f"🔍 PHASE 1.3 LOCAL AUDIT: Local file size: {file_size} bytes")
                 return True
             else:
                 logger.error(f"❌ Local file verification failed: {local_path}")

@@ -180,8 +180,51 @@ class TestCompactFetchFix(unittest.TestCase):
             
         # Should still return response (let processing logic handle stale data)
         self.assertIsNotNone(response, "Should return response even if stale")
-        self.assertEqual(mock_get.call_count, 3, "Should have made 3 attempts (initial + 2 retries)")
-        logger.info("✅ Retry mechanism attempted all retries correctly")
+        
+        # PHASE 2 ENHANCEMENT: AAPL is a problematic ticker, so it should get more aggressive retries
+        # Expected attempts: 8 retries + 1 initial = 9 total for AAPL
+        expected_attempts = 9  # Updated for problematic ticker aggressive retry
+        self.assertEqual(mock_get.call_count, expected_attempts, 
+                        f"Should have made {expected_attempts} attempts for problematic ticker AAPL (aggressive retry)")
+        logger.info(f"✅ Retry mechanism attempted all {expected_attempts} retries correctly for problematic ticker")
+        
+    @patch('utils.alpha_vantage_api.API_KEY', 'test_api_key')
+    @patch('requests.get')
+    def test_retry_mechanism_regular_ticker(self, mock_get):
+        """Test retry mechanism for non-problematic ticker."""
+        logger.info("🧪 Testing retry mechanism - regular ticker")
+        
+        # All responses return stale data
+        stale_response = Mock()
+        stale_response.text = self.create_mock_csv_response(include_today=False)
+        stale_response.raise_for_status = Mock()
+        
+        mock_get.return_value = stale_response
+        
+        # Use a regular ticker (not AAPL/PLTR)
+        regular_ticker = "AMD"
+        params = {
+            'function': 'TIME_SERIES_INTRADAY',
+            'symbol': regular_ticker,
+            'interval': '1min',
+            'outputsize': 'compact',
+            'apikey': 'test_api_key',
+            'datatype': 'csv'
+        }
+        
+        # Test retry mechanism with regular ticker
+        with patch('time.sleep'):  # Speed up test
+            response = _make_api_request_with_retry(params, max_retries=2, base_delay=0.1)
+            
+        # Should still return response (let processing logic handle stale data)
+        self.assertIsNotNone(response, "Should return response even if stale")
+        
+        # For regular tickers: enhanced retry but not as aggressive as problematic ones
+        # Expected attempts: 6 retries + 1 initial = 7 total for regular compact fetches
+        expected_attempts = 7  # Enhanced but not as aggressive as problematic tickers
+        self.assertEqual(mock_get.call_count, expected_attempts, 
+                        f"Should have made {expected_attempts} attempts for regular ticker (enhanced retry)")
+        logger.info(f"✅ Retry mechanism attempted {expected_attempts} retries correctly for regular ticker")
         
     @patch('utils.alpha_vantage_api.API_KEY', 'test_api_key')
     @patch('utils.alpha_vantage_api._make_api_request_with_retry')
