@@ -96,6 +96,8 @@ def fetch_intraday_compact():
     - If file > 10KB: use outputsize='compact' for efficient real-time updates
 
     Supports both 1min and 30min intervals via DATA_INTERVAL configuration.
+    
+    ENHANCED with extensive logging for diagnostic purposes as per problem statement Phase 1.2.
     """
     logger.info(f"🚀 Starting Intraday Compact Fetch Job - {DATA_INTERVAL} interval")
 
@@ -140,8 +142,9 @@ def fetch_intraday_compact():
     new_candles_added = 0
     total_tickers = len(tickers)
 
+    # PHASE 1.2: Enhanced logging for each ticker as specified in problem statement
     for ticker in tickers:
-        logger.debug(f"🔄 Processing {ticker}")
+        logger.info(f"🔄 Processing {ticker}")
 
         try:
             # Determine file path based on interval
@@ -150,8 +153,12 @@ def fetch_intraday_compact():
             else:
                 file_path = f"data/intraday/{ticker}_1min.csv"
 
+            # LOGGING: Log the exact file path being processed
+            logger.info(f"📂 TICKER {ticker}: Target file path: {file_path}")
+
             # Get existing data
             existing_df = read_df_from_s3(file_path)
+            logger.info(f"📊 TICKER {ticker}: Existing data rows: {len(existing_df)}")
 
             # CORE LOGIC: Intelligent Fetch Strategy based on 10KB file size rule
             # Exactly as specified in the problem statement
@@ -193,12 +200,34 @@ def fetch_intraday_compact():
                     f"   {ticker}: Using outputsize='compact' for real-time updates"
                 )
 
+            # LOGGING: Construct and log the exact API URL being called (Phase 1.2 requirement)
+            api_url_params = {
+                "function": "TIME_SERIES_INTRADAY",
+                "symbol": ticker,
+                "interval": DATA_INTERVAL,
+                "outputsize": outputsize_strategy,
+                "apikey": "***API_KEY***",  # Don't log actual API key
+                "datatype": "csv",
+            }
+            api_url = "https://www.alphavantage.co/query?" + "&".join([f"{k}={v}" for k, v in api_url_params.items()])
+            logger.info(f"🌐 TICKER {ticker}: API URL being called: {api_url}")
+
             # Fetch data using determined strategy and configured interval
             latest_df = get_intraday_data(
                 ticker, interval=DATA_INTERVAL, outputsize=outputsize_strategy
             )
 
+            # LOGGING: Log the number of rows received from API (Phase 1.2 requirement)
+            logger.info(f"📊 TICKER {ticker}: API response rows received: {len(latest_df)}")
+
             if not latest_df.empty:
+                # LOGGING: Log timestamp of last candle received (Phase 1.2 requirement)
+                if "timestamp" in latest_df.columns:
+                    latest_timestamp = latest_df["timestamp"].iloc[-1]
+                    logger.info(f"📅 TICKER {ticker}: Last candle timestamp: {latest_timestamp}")
+                elif len(latest_df.columns) >= 6:
+                    logger.info(f"⚠️ TICKER {ticker}: No timestamp column found, will normalize columns")
+
                 # Normalize column names if needed
                 if "timestamp" not in latest_df.columns and len(latest_df.columns) >= 6:
                     latest_df.columns = [
@@ -209,6 +238,7 @@ def fetch_intraday_compact():
                         "close",
                         "volume",
                     ]
+                    logger.info(f"🔄 TICKER {ticker}: Columns normalized to standard format")
 
                 # Handle data combination based on fetch strategy
                 if outputsize_strategy == "full":
@@ -222,6 +252,9 @@ def fetch_intraday_compact():
                     logger.debug(
                         f"   {ticker}: Compact fetch completed, appended new candles"
                     )
+
+                # LOGGING: Log combined data information
+                logger.info(f"📊 TICKER {ticker}: Combined data rows: {len(combined_df)}")
 
                 # Keep only last 7 days of data (rolling window)
                 # Use timezone-aware datetime for proper comparison
@@ -246,6 +279,10 @@ def fetch_intraday_compact():
 
                 # Now we can safely compare timezone-aware datetimes
                 combined_df = combined_df[combined_df[timestamp_col] >= seven_days_ago]
+                logger.info(f"📊 TICKER {ticker}: After 7-day trim: {len(combined_df)} rows")
+
+                # LOGGING: Log the final file path where script is attempting to save (Phase 1.2 requirement)
+                logger.info(f"💾 TICKER {ticker}: Attempting to save to final path: {file_path}")
 
                 # Save updated data
                 upload_success = save_df_to_s3(combined_df, file_path)
@@ -259,17 +296,22 @@ def fetch_intraday_compact():
                     )
                     if new_candles_count > 0:
                         new_candles_added += new_candles_count
-                    logger.debug(
-                        f"✅ {ticker}: Updated with {len(combined_df)} total rows"
-                    )
+                    
+                    # LOGGING: Confirm successful save with detailed information
+                    logger.info(f"✅ TICKER {ticker}: Successfully saved to {file_path}")
+                    logger.info(f"📊 TICKER {ticker}: Total rows in final file: {len(combined_df)}")
+                    logger.info(f"🆕 TICKER {ticker}: New candles added: {new_candles_count}")
                 else:
-                    logger.error(f"❌ {ticker}: Failed to upload to Spaces")
+                    logger.error(f"❌ TICKER {ticker}: Failed to upload to Spaces at {file_path}")
             else:
-                logger.debug(f"⚠️ {ticker}: No new data from API")
+                logger.warning(f"⚠️ TICKER {ticker}: No new data from API")
                 successful_fetches += 1  # Not an error if no new data
 
         except Exception as e:
-            logger.error(f"❌ {ticker}: Error processing - {e}")
+            logger.error(f"❌ TICKER {ticker}: Error processing - {e}")
+            # LOGGING: Add detailed error information for debugging
+            import traceback
+            logger.error(f"❌ TICKER {ticker}: Full error traceback: {traceback.format_exc()}")
 
         # Small delay to respect API limits (can be faster for compact fetches)
         time.sleep(0.5)
