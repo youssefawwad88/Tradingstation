@@ -34,21 +34,34 @@ To build an autonomous, institutional-style trade discovery and execution system
 - Alpha Vantage API key
 - DigitalOcean Spaces credentials (optional)
 
-## 🚀 New: Unified Ticker Management System
+## 🚀 New: Master Compact Fetcher - Unified Data System
 
-The system now includes a unified ticker management strategy that merges two sources:
+**Latest Enhancement**: Complete codebase cleanup with a powerful new unified data fetching system.
 
-- **Manual Tickers** (from `tickerlist.txt`) - Always included, no filters
-- **S&P 500 Tickers** (filtered using Ashraf's breakout logic)
+### 🎯 Master Compact Fetcher Features
+- **🏛️ Hardened Market Calendar**: Uses pandas_market_calendars for proper holiday handling
+- **🔍 Aggressive Data Validation**: Ensures today's data is present during market hours  
+- **🧠 Intelligent 10KB Rule**: Auto-chooses full vs compact fetch based on cloud file size
+- **🕐 Universal Intervals**: Handles both 1min and 30min data with single codebase
+- **🔄 Self-Healing**: Automatically detects and fixes incomplete data
+- **☁️ Cloud Gap Detection**: Identifies missing candles and timestamp gaps
+- **🛡️ Robust Error Handling**: Exponential backoff retry with comprehensive logging
 
 ### Quick Start
 ```bash
 # Generate master ticker list (daily at 6 AM ET)
 python generate_master_tickerlist.py
 
-# Run full data fetch (once per day)
+# New unified data fetching system
+python jobs/master_compact_fetcher.py                    # 1min interval (default)
+python jobs/master_compact_fetcher.py --interval 30min   # 30min interval
+python jobs/master_compact_fetcher.py --force-full       # Force full rebuild
+python jobs/master_compact_fetcher.py --test AAPL        # Test single ticker
+
+# Legacy commands still available
 python fetch_daily.py      # Daily data (200 rows)
-python fetch_30min.py      # 30-min data (500 rows)
+# Legacy commands (replaced by master compact fetcher)
+# python fetch_30min.py      # 30-min data (500 rows) - USE: python jobs/master_compact_fetcher.py --interval 30min
 
 # Run intraday updates (every minute) - NEW IMPROVED VERSION
 python jobs/intraday_fetcher.py

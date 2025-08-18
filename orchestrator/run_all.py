@@ -165,18 +165,35 @@ def run_daily_data_jobs():
 
 
 def run_intraday_updates():
-    """Run intraday data updates using FIXED Compact Intraday Fetch (TIME_SERIES_INTRADAY)."""
+    """Run intraday data updates using the new Master Compact Fetcher system."""
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
     logger.info(
-        f"{mode_prefix} Starting intraday updates (Fixed Compact Intraday Fetch)"
+        f"{mode_prefix} Starting intraday updates (Master Compact Fetcher)"
     )
     logger.info(
-        f"{mode_prefix} CRITICAL FIX: Now using TIME_SERIES_INTRADAY API for real minute-by-minute data"
+        f"{mode_prefix} ENHANCED SYSTEM: Using intelligent master compact fetcher with self-healing"
     )
-    result = run_job("fetch_intraday_compact.py", "fetch_intraday_compact")
+    result = run_job("jobs/master_compact_fetcher.py", "master_compact_fetcher")
     if TEST_MODE_ACTIVE and result:
         logger.info(
-            "[TEST MODE] Fixed Compact Intraday Fetch simulation completed successfully"
+            "[TEST MODE] Master Compact Fetcher simulation completed successfully"
+        )
+    return result
+
+
+def run_30min_updates():
+    """Run 30-minute intraday data updates using the new Master Compact Fetcher system."""
+    mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
+    logger.info(
+        f"{mode_prefix} Starting 30-minute intraday updates (Master Compact Fetcher)"
+    )
+    logger.info(
+        f"{mode_prefix} ENHANCED SYSTEM: Using intelligent master compact fetcher (30min interval)"
+    )
+    result = run_job("jobs/master_compact_fetcher.py --interval 30min", "master_compact_fetcher_30min")
+    if TEST_MODE_ACTIVE and result:
+        logger.info(
+            "[TEST MODE] Master Compact Fetcher (30min) simulation completed successfully"
         )
     return result
 
@@ -271,7 +288,7 @@ def setup_production_schedule():
     for hour in range(4, 20):  # Extended hours coverage
         for minute in [0, 15, 30, 45]:
             time_str = f"{hour:02d}:{minute:02d}"
-            schedule.every().day.at(time_str).do(run_intraday_updates).tag(
+            schedule.every().day.at(time_str).do(run_30min_updates).tag(
                 "intraday_30min"
             )
 
