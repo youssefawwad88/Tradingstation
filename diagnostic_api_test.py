@@ -400,10 +400,16 @@ class CompactFetchDiagnostic:
         """Test the append_new_candles_smart function with today's data."""
         logger.info(f"   🔧 Testing smart append logic for {symbol}")
         
+        # NOTE: This test is disabled as fetch_intraday_compact.py has been replaced 
+        # by the new Master Compact Fetcher system (jobs/master_compact_fetcher.py)
+        logger.warning(f"   ⚠️ Smart append test disabled - replaced by Master Compact Fetcher")
+        logger.info(f"      Use: python jobs/master_compact_fetcher.py --test {symbol}")
+        return
+        
         try:
-            # Import the function
-            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-            from fetch_intraday_compact import append_new_candles_smart
+            # DEPRECATED: Import the function
+            # sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            # from fetch_intraday_compact import append_new_candles_smart
             
             # Create some "existing" data from yesterday
             yesterday = self.today_et - timedelta(days=1)
