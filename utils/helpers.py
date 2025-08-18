@@ -1502,3 +1502,35 @@ def save_config_to_s3(config_dict, config_filename):
     except Exception as e:
         logger.error(f"❌ Error saving configuration to {config_filename}: {e}")
         return False
+
+
+def list_files_in_s3_dir(directory_prefix):
+    """
+    List files in a specific S3/Spaces directory.
+    
+    Args:
+        directory_prefix (str): Directory path/prefix to list files from
+        
+    Returns:
+        list: List of file names in the directory, empty list if error or no files
+    """
+    try:
+        from utils.spaces_manager import SpacesManager
+        
+        spaces_manager = SpacesManager()
+        if not spaces_manager.client:
+            logger.warning(f"⚠️ No Spaces client available. Cannot list files in {directory_prefix}")
+            return []
+            
+        # Ensure directory prefix ends with '/' if not empty
+        if directory_prefix and not directory_prefix.endswith('/'):
+            directory_prefix += '/'
+            
+        files = spaces_manager.list_objects(prefix=directory_prefix)
+        logger.info(f"📂 Found {len(files)} files in {directory_prefix}")
+        
+        return files
+        
+    except Exception as e:
+        logger.error(f"❌ Error listing files in directory {directory_prefix}: {e}")
+        return []

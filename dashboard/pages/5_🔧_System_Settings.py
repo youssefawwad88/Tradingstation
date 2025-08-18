@@ -125,6 +125,43 @@ with st.expander("Master Configuration", expanded=True):
             else:
                 st.warning("⚠️ Please enter a valid ticker symbol.")
 
+    # --- Remove Tickers ---
+    st.markdown("##### ➖ Remove Selected Tickers")
+    
+    if current_tickers:
+        col_remove1, col_remove2 = st.columns([3, 1])
+        
+        with col_remove1:
+            tickers_to_remove = st.multiselect(
+                "Select tickers to remove:",
+                options=current_tickers,
+                placeholder="Choose one or more tickers to remove...",
+                help="Select multiple tickers to remove them from the master list"
+            )
+        
+        with col_remove2:
+            st.write("")  # Add some spacing
+            if st.button("🗑️ Remove Selected", type="secondary", use_container_width=True):
+                if tickers_to_remove:
+                    # Remove selected tickers from the list
+                    updated_tickers = [ticker for ticker in current_tickers if ticker not in tickers_to_remove]
+                    success = save_list_to_s3(updated_tickers, "master_tickerlist.csv")
+                    if success:
+                        removed_count = len(tickers_to_remove)
+                        if removed_count == 1:
+                            st.success(f"✅ Successfully removed **{tickers_to_remove[0]}** from the master list!")
+                        else:
+                            st.success(f"✅ Successfully removed **{removed_count}** tickers from the master list!")
+                        with st.spinner("Refreshing..."):
+                            time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to remove tickers. Check the application logs.")
+                else:
+                    st.warning("⚠️ Please select at least one ticker to remove.")
+    else:
+        st.info("ℹ️ No tickers available to remove. Add some tickers first.")
+
     st.divider()
 
     # --- Engine Configuration ---
