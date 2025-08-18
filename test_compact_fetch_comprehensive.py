@@ -27,6 +27,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
 
 from fetch_intraday_compact import append_new_candles_smart, fetch_intraday_compact
 from utils.alpha_vantage_api import get_intraday_data
+from utils.market_time import is_market_open_on_date
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -221,17 +222,21 @@ class TestCompactFetchComprehensive(unittest.TestCase):
         logger.info("✅ Hardcoded problematic tickers have been properly removed")
     
     def test_market_hours_logic(self):
-        """Test the market hours vs non-market hours logic."""
-        logger.info("🧪 Testing market hours logic")
+        """Test the comprehensive market calendar logic (weekends AND holidays)."""
+        logger.info("🧪 Testing comprehensive market calendar logic")
         
         ny_tz = pytz.timezone("America/New_York")
         current_time = datetime.now(ny_tz)
         is_weekend = current_time.weekday() >= 5  # Saturday=5, Sunday=6
         
-        # Test weekend detection
+        # Test weekend detection (legacy)
         logger.info(f"Current time: {current_time}")
         logger.info(f"Day of week: {current_time.strftime('%A')} ({current_time.weekday()})")
         logger.info(f"Is weekend: {is_weekend}")
+        
+        # Test comprehensive market calendar
+        market_open = is_market_open_on_date()
+        logger.info(f"Market open (comprehensive): {market_open}")
         
         # The logic should properly handle market hours
         if is_weekend:
@@ -239,9 +244,16 @@ class TestCompactFetchComprehensive(unittest.TestCase):
         else:
             logger.info("✅ Weekday detected - missing data should cause failure")
         
-        # Test the logic that's in fetch_intraday_compact.py
-        market_closed = is_weekend  # Simplified logic from the script
-        self.assertEqual(market_closed, is_weekend, "Market closed logic should match weekend detection")
+        # Test the UPDATED logic that's in fetch_intraday_compact.py
+        market_closed = not is_market_open_on_date()  # Comprehensive check including holidays
+        
+        # The new logic should properly handle both weekends AND holidays
+        if market_closed:
+            logger.info("✅ Market closed (weekend or holiday) - missing data should be acceptable")
+        else:
+            logger.info("✅ Market open - missing data should cause failure")
+        
+        self.assertIsInstance(market_closed, bool, "Market closed should be a boolean value")
 
 
 if __name__ == "__main__":

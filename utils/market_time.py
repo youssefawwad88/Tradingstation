@@ -9,11 +9,73 @@ This module handles all time-related operations including:
 
 import logging
 from datetime import datetime, time, timedelta
-from typing import Tuple
+from typing import Tuple, Union
 
+import pandas_market_calendars as mcal
 import pytz
 
 logger = logging.getLogger(__name__)
+
+# Global NYSE calendar instance for efficient reuse
+_nyse_calendar = None
+
+def _get_nyse_calendar():
+    """Get NYSE calendar instance (cached for performance)."""
+    global _nyse_calendar
+    if _nyse_calendar is None:
+        _nyse_calendar = mcal.get_calendar('NYSE')
+    return _nyse_calendar
+
+
+def is_market_open_on_date(date_time: Union[datetime, None] = None) -> bool:
+    """
+    Check if the market is open on a given date, accounting for both weekends and holidays.
+    
+    This is the central function that replaces all oversimplified weekend-only checks.
+    It uses pandas_market_calendars to properly handle US stock market holidays.
+    
+    Args:
+        date_time: The datetime to check. If None, uses current time in Eastern timezone.
+        
+    Returns:
+        bool: True if the market is open (trading day), False if closed (weekend/holiday)
+    """
+    try:
+        # Use current time if none provided
+        if date_time is None:
+            ny_tz = pytz.timezone("America/New_York")
+            date_time = datetime.now(ny_tz)
+        
+        # Ensure we have the date in Eastern timezone
+        ny_tz = pytz.timezone("America/New_York")
+        if date_time.tzinfo is None:
+            date_time = ny_tz.localize(date_time)
+        else:
+            date_time = date_time.astimezone(ny_tz)
+        
+        # Extract just the date for calendar check
+        check_date = date_time.date()
+        
+        # Get NYSE calendar and check if this date is a trading day
+        nyse = _get_nyse_calendar()
+        schedule = nyse.schedule(start_date=check_date, end_date=check_date)
+        
+        # If schedule is empty, market is closed (weekend or holiday)
+        return not schedule.empty
+        
+    except Exception as e:
+        # Fallback to simple weekend check if calendar fails
+        logger.warning(f"Market calendar check failed, falling back to weekend-only check: {e}")
+        ny_tz = pytz.timezone("America/New_York")
+        if date_time is None:
+            date_time = datetime.now(ny_tz)
+        elif date_time.tzinfo is None:
+            date_time = ny_tz.localize(date_time)
+        else:
+            date_time = date_time.astimezone(ny_tz)
+        
+        # Fallback: only check weekends (0=Monday, 6=Sunday)
+        return date_time.weekday() < 5
 
 
 def detect_market_session() -> str:
@@ -76,6 +138,9 @@ def is_extended_hours() -> bool:
 def is_weekend() -> bool:
     """
     Check if current day is weekend (Saturday or Sunday).
+    
+    DEPRECATED: Use is_market_open_on_date() instead for comprehensive market calendar checking.
+    This function is kept for backward compatibility but only checks weekends, not holidays.
 
     Returns:
         True if it's weekend (Saturday=5, Sunday=6)
