@@ -18,6 +18,8 @@ import pytz
 # Add project root to Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
 
+from utils.market_time import is_market_open_on_date
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
 logger = logging.getLogger(__name__)
@@ -123,8 +125,9 @@ def demonstrate_market_hours_logic():
     logger.info(f"📊 Day of week number: {current_time.weekday()} (0=Monday, 6=Sunday)")
     logger.info(f"🏢 Is weekend: {is_weekend}")
     
-    # Demonstrate the decision logic
-    market_closed = is_weekend  # Simplified logic from the script
+    # Demonstrate the UPDATED decision logic with comprehensive market calendar
+    market_closed = not is_market_open_on_date()  # Comprehensive check including holidays
+    logger.info(f"🏦 Market closed (including holidays): {market_closed}")
     
     if market_closed:
         logger.info("\n✅ MARKET CLOSED SCENARIO:")

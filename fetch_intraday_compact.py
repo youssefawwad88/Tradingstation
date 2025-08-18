@@ -36,6 +36,7 @@ from utils.helpers import (
     save_df_to_s3,
     update_scheduler_status,
 )
+from utils.market_time import is_market_open_on_date
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -318,9 +319,8 @@ def fetch_intraday_compact():
                         logger.error(f"❌ TICKER {ticker}: Error validating today's data: {e}")
                         today_data_present = False
 
-                # HARDENED VALIDATION: Only declare success if today's data is present OR it's a weekend/holiday
-                is_weekend = datetime.now(ny_tz).weekday() >= 5  # Saturday=5, Sunday=6
-                market_closed = is_weekend  # Simplified check for now
+                # HARDENED VALIDATION: Only declare success if today's data is present OR the market is closed (weekend/holiday)
+                market_closed = not is_market_open_on_date()  # Comprehensive check including holidays
                 
                 if not today_data_present and not market_closed:
                     # FAIL THE FETCH: Today's data is missing during market hours
@@ -358,9 +358,7 @@ def fetch_intraday_compact():
                     logger.error(f"❌ TICKER {ticker}: Failed to upload to Spaces at {file_path}")
             else:
                 # CRITICAL: No new data from API is now treated as a failure during market hours
-                ny_tz = pytz.timezone("America/New_York")
-                is_weekend = datetime.now(ny_tz).weekday() >= 5
-                market_closed = is_weekend
+                market_closed = not is_market_open_on_date()  # Comprehensive check including holidays
                 
                 if not market_closed:
                     logger.error(f"❌ TICKER {ticker}: No new data from API during market hours")
