@@ -289,7 +289,7 @@ def update_scheduler_status(job_name, status, error_details=None):
             "job_name": job_name,
             "status": status,
             "last_run_timestamp": timestamp,
-            "error_details": error_details if error_details else "",
+            "error_details": error_details if error_details else None,
         }
 
         # Read existing status file or create new DataFrame
@@ -325,7 +325,7 @@ def update_scheduler_status(job_name, status, error_details=None):
                 ] = timestamp
                 existing_df.loc[
                     existing_df["job_name"] == job_name, "error_details"
-                ] = (error_details if error_details else "")
+                ] = (error_details if error_details else None)
                 status_df = existing_df
             else:
                 # Append new job
@@ -426,26 +426,12 @@ def read_master_tickerlist():
     logger.info("Reading master ticker list from master_tickerlist.csv")
 
     try:
-        # Try local file first
-        local_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "master_tickerlist.csv",
-        )
-        if os.path.exists(local_file):
-            df = pd.read_csv(local_file)
-            if "ticker" in df.columns:
-                tickers = df["ticker"].tolist()
-                logger.info(
-                    f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv"
-                )
-                return tickers
-
-        # Try to read from Spaces
+        # Use the centralized read_df_from_s3 function which handles both local and cloud fallback
         df = read_df_from_s3("master_tickerlist.csv")
         if not df.empty and "ticker" in df.columns:
             tickers = df["ticker"].tolist()
             logger.info(
-                f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv (Spaces)"
+                f"✅ Successfully read {len(tickers)} tickers from master_tickerlist.csv"
             )
             return tickers
 
