@@ -176,7 +176,7 @@ def read_df_from_s3(object_name: str) -> pd.DataFrame:
         object_name: Object name/path in S3
 
     Returns:
-        DataFrame if successful, empty DataFrame for FileNotFoundError only
+        DataFrame if successful, empty DataFrame only when file is not found
 
     Raises:
         pd.errors.ParserError: When CSV file is corrupted
