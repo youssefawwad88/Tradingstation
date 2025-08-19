@@ -36,9 +36,10 @@ if not validate_config():
     logger.critical("Configuration validation failed - exiting")
     sys.exit(1)
 
-# Global test mode state
+# Global configuration and flags
 TEST_MODE_ACTIVE = False
 TEST_MODE_REASON = ""
+KILL_SWITCH_ACTIVE = False
 
 
 def detect_and_log_test_mode():
@@ -679,10 +680,6 @@ def run_data_integrity_check():
     except Exception as e:
         logger.error(f"💥 Error in data integrity check: {e}")
         return False
-
-
-# Global kill switch flag
-KILL_SWITCH_ACTIVE = False
 
 
 if __name__ == "__main__":
