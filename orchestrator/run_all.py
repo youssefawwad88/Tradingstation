@@ -76,14 +76,23 @@ def run_job(script_path, job_name):
     """
     Runs a Python script sequentially and waits for it to complete.
     Returns True on success, False on failure.
+    
+    Args:
+        script_path: Can be just script path or "script_path args" format
+        job_name: Name for logging and status tracking
     """
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
     logger.info(f"{mode_prefix} Starting Job: {job_name}")
     update_scheduler_status(job_name, "Running")
 
     try:
+        # Parse script path and arguments
+        script_parts = script_path.split()
+        script_only = script_parts[0]
+        script_args = script_parts[1:] if len(script_parts) > 1 else []
+        
         full_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", script_path)
+            os.path.join(os.path.dirname(__file__), "..", script_only)
         )
 
         # Set environment variable to ensure jobs run in the same mode
@@ -92,8 +101,11 @@ def run_job(script_path, job_name):
             env["TEST_MODE"] = "enabled"
             env["MODE"] = "test"
 
+        # Build command with script and arguments
+        cmd = [sys.executable, full_path] + script_args
+
         result = subprocess.run(
-            [sys.executable, full_path],
+            cmd,
             check=True,
             capture_output=True,
             text=True,

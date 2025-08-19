@@ -318,6 +318,10 @@ class MasterCompactFetcher:
         df = self.fetch_with_retry(ticker, "full")
         
         if df is not None and not df.empty:
+            # Enhanced logging: Self-healing data details
+            self_heal_api_rows = len(df)
+            logger.info(f"🔧 {ticker}: Self-healing API returned {self_heal_api_rows} candles")
+            
             # Validate the full fetch results
             if self.validate_data_completeness(df, ticker, "full"):
                 # Check for and log any data gaps
@@ -330,12 +334,12 @@ class MasterCompactFetcher:
                 success = save_df_to_s3(df, file_path)
                 
                 if success:
-                    logger.info(f"✅ {ticker}: Self-healing successful - dataset rebuilt")
+                    logger.info(f"✅ {ticker}: Self-healing successful - rebuilt dataset with {self_heal_api_rows} rows")
                     return True
                 else:
-                    logger.error(f"❌ {ticker}: Self-healing failed - could not save rebuilt data")
+                    logger.error(f"❌ {ticker}: Self-healing failed - could not save rebuilt data ({self_heal_api_rows} rows)")
             else:
-                logger.error(f"❌ {ticker}: Self-healing failed - full fetch also incomplete")
+                logger.error(f"❌ {ticker}: Self-healing failed - full fetch also incomplete ({self_heal_api_rows} rows)")
         else:
             logger.error(f"❌ {ticker}: Self-healing failed - full fetch returned no data")
             
@@ -347,27 +351,38 @@ class MasterCompactFetcher:
         
         This is the core method that orchestrates all the logic for each ticker.
         """
+        # Enhanced logging: Start timestamp for each ticker
+        start_time = datetime.now()
         logger.info(f"\n{'='*60}")
         logger.info(f"🎯 Processing {ticker} ({self.interval} interval)")
+        logger.info(f"⏰ Start time: {start_time.strftime('%H:%M:%S')}")
         logger.info(f"{'='*60}")
         
         self.session_stats["total_processed"] += 1
         
         try:
-            # Determine fetch strategy
+            # Enhanced logging: Determine and log fetch strategy
             if force_full:
                 outputsize = "full"
-                logger.info(f"🔧 {ticker}: Force full mode enabled")
+                logger.info(f"🔧 {ticker}: FETCH MODE: FULL (force-full enabled)")
             else:
                 outputsize = self.get_intelligent_outputsize(ticker)
+                fetch_mode_reason = "full (small file or missing)" if outputsize == "full" else "compact (existing large file)"
+                logger.info(f"📊 {ticker}: FETCH MODE: {outputsize.upper()} ({fetch_mode_reason})")
             
-            # Attempt initial fetch
+            # Attempt initial fetch with enhanced logging
+            logger.info(f"🚀 {ticker}: Starting API fetch...")
             df = self.fetch_with_retry(ticker, outputsize)
             
             if df is None or df.empty:
-                logger.error(f"❌ {ticker}: No data received from API")
+                logger.error(f"❌ {ticker}: FAILED - No data received from API")
                 self.session_stats["failed_fetches"] += 1
+                self._log_ticker_completion(ticker, start_time, success=False, reason="No API data")
                 return False
+            
+            # Enhanced logging: Log API data received
+            api_row_count = len(df)
+            logger.info(f"📥 {ticker}: API returned {api_row_count} candles")
             
             # Validate data completeness
             if not self.validate_data_completeness(df, ticker, outputsize):
@@ -377,11 +392,15 @@ class MasterCompactFetcher:
                 if outputsize == "compact":
                     logger.info(f"🔧 {ticker}: Attempting self-healing...")
                     if self.self_healing_fetch(ticker):
+                        logger.info(f"✅ {ticker}: SUCCESS - Self-healing completed")
                         self.session_stats["successful_fetches"] += 1
+                        self._log_ticker_completion(ticker, start_time, success=True, reason="Self-healing successful")
                         return True
                 
                 # If self-healing failed or this was already a full fetch, mark as failed
+                logger.error(f"❌ {ticker}: FAILED - Data validation failed, self-healing not possible")
                 self.session_stats["failed_fetches"] += 1
+                self._log_ticker_completion(ticker, start_time, success=False, reason="Data validation failed")
                 return False
             
             # Data passed validation, check for gaps
@@ -389,25 +408,50 @@ class MasterCompactFetcher:
             if gaps:
                 logger.warning(f"⚠️ {ticker}: Data gaps detected but proceeding with save")
             
+            # Enhanced logging: Pre-save data processing
+            final_row_count = len(df)
+            logger.info(f"💾 {ticker}: Saving {final_row_count} candles (API: {api_row_count} → Final: {final_row_count})")
+            
             # Save the data
             file_path = f"{self.data_dir}/{ticker}.csv"
             success = save_df_to_s3(df, file_path)
             
             if success:
-                logger.info(f"✅ {ticker}: Successfully processed and saved {len(df)} rows")
+                logger.info(f"✅ {ticker}: SUCCESS - Processed and saved {final_row_count} rows")
                 self.session_stats["successful_fetches"] += 1
+                self._log_ticker_completion(ticker, start_time, success=True, 
+                                          reason=f"{final_row_count} rows saved", 
+                                          api_rows=api_row_count, final_rows=final_row_count)
                 return True
             else:
-                logger.error(f"❌ {ticker}: Failed to save data")
+                logger.error(f"❌ {ticker}: FAILED - Could not save data to storage")
                 self.session_stats["failed_fetches"] += 1
+                self._log_ticker_completion(ticker, start_time, success=False, reason="Save failed")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ {ticker}: Unexpected error during processing: {e}")
+            logger.error(f"❌ {ticker}: FAILED - Unexpected error during processing: {e}")
             import traceback
             logger.debug(f"Full traceback: {traceback.format_exc()}")
             self.session_stats["failed_fetches"] += 1
+            self._log_ticker_completion(ticker, start_time, success=False, reason=f"Exception: {str(e)}")
             return False
+
+    def _log_ticker_completion(self, ticker: str, start_time: datetime, success: bool, 
+                             reason: str, api_rows: int = None, final_rows: int = None):
+        """
+        Enhanced logging: Log ticker completion with timing and status details.
+        """
+        end_time = datetime.now()
+        duration = end_time - start_time
+        status = "SUCCESS" if success else "FAILED"
+        
+        logger.info(f"🏁 {ticker}: {status}")
+        logger.info(f"⏱️ {ticker}: Duration: {duration.total_seconds():.2f}s")
+        logger.info(f"📋 {ticker}: Reason: {reason}")
+        if api_rows is not None and final_rows is not None:
+            logger.info(f"📊 {ticker}: Data flow: API={api_rows} → Final={final_rows}")
+        logger.info(f"{'='*60}")
     
     def run_batch_processing(self, tickers: List[str], force_full: bool = False) -> Dict:
         """
