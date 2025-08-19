@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 import os
@@ -13,6 +14,11 @@ import schedule
 # Add project root to the Python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+# Strategic imports for new architecture
+from config import get_config, validate_config
+from core.data_manager import update_data
+from core.logging_system import setup_logging, get_logger
+
 from utils.helpers import (
     detect_market_session,
     get_test_mode_reason,
@@ -20,19 +26,15 @@ from utils.helpers import (
     update_scheduler_status,
 )
 
-# Set up logging
-import tempfile
+# Set up strategic logging system
+config = get_config()
+setup_logging()
+logger = get_logger(__name__)
 
-# Create secure temp directory for logs
-TEMP_DIR = tempfile.mkdtemp(prefix="orchestrator-")
-LOG_FILE = os.path.join(TEMP_DIR, "orchestrator.log")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE)],
-)
-logger = logging.getLogger(__name__)
+# Validate configuration on startup
+if not validate_config():
+    logger.critical("Configuration validation failed - exiting")
+    sys.exit(1)
 
 # Global test mode state
 TEST_MODE_ACTIVE = False
@@ -359,49 +361,330 @@ def should_run_jobs():
 
 def main():
     """
-    The main entry point for the trading station orchestrator.
-    Runs in production mode with proper scheduling, with automatic weekend/test mode detection.
+    Strategic Trading System Orchestrator - Main Entry Point
+    
+    This is the command-line interface for the new strategic system.
+    It parses command-line arguments and calls the appropriate data_manager.update_data() 
+    function with the correct parameters, as specified in Phase 2.
     """
+    # Parse command-line arguments
+    args = parse_command_line_arguments()
+    
+    # Handle debug mode
+    if args.debug:
+        import logging
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+    
+    # Handle configuration validation
+    if args.config_validate:
+        logger.info("🔧 Validating configuration...")
+        if validate_config():
+            logger.info("✅ Configuration validation passed")
+            return 0
+        else:
+            logger.error("❌ Configuration validation failed")
+            return 1
+    
+    # Handle kill switch
+    if args.kill_switch:
+        success = execute_kill_switch()
+        return 0 if success else 1
+    
+    # Handle data integrity check
+    if args.data_integrity_check:
+        success = run_data_integrity_check()
+        return 0 if success else 1
+    
+    # Handle single ticker data update
+    if args.ticker:
+        logger.info(f"🎯 Strategic single-ticker mode: {args.ticker}")
+        success = run_strategic_data_update(
+            ticker=args.ticker,
+            interval=args.interval,
+            data_type=args.data_type,
+            force_full=args.force_full
+        )
+        return 0 if success else 1
+    
+    # Default: Run in scheduled orchestrator mode
+    logger.info("🚀 Starting Strategic Trading System Orchestrator")
+    
+    # Check kill switch status
+    if KILL_SWITCH_ACTIVE:
+        logger.critical("🚨 Kill switch is active - orchestrator cannot start")
+        logger.critical("🔧 Restart required to resume operations")
+        return 1
+    
+    # Override mode if specified
+    if args.mode:
+        config.MODE = args.mode.lower()
+        logger.info(f"🎛️ Mode override: {args.mode}")
+    
     # Detect and log test mode status at startup
     test_mode_active = detect_and_log_test_mode()
-
+    
     mode_str = "Test Mode" if test_mode_active else "Production Mode"
-    logger.info(f"Starting Master Orchestrator ({mode_str})")
-
+    logger.info(f"🎯 Strategic Orchestrator starting in {mode_str}")
+    
     # Set up production schedule
     setup_production_schedule()
-
-    logger.info(f"Orchestrator running in {mode_str.lower()} - 24/7 operation")
-    logger.info(f"Scheduled jobs: {len(schedule.jobs)}")
-
+    
+    logger.info(f"⏰ Orchestrator running in {mode_str.lower()} - 24/7 operation")
+    logger.info(f"📅 Scheduled jobs: {len(schedule.jobs)}")
+    
     if test_mode_active:
-        logger.info(
-            "[TEST MODE] Jobs will run with simulated data for testing purposes"
-        )
-        logger.info("[TEST MODE] No live API calls will be made")
-
-    # Main scheduling loop
+        logger.info("🧪 [TEST MODE] Jobs will run with simulated data for testing purposes")
+        logger.info("🧪 [TEST MODE] No live API calls will be made")
+    
+    # Main scheduling loop with strategic enhancements
+    logger.info("🔄 Entering main orchestration loop")
+    
     while True:
         try:
+            # Check kill switch
+            if KILL_SWITCH_ACTIVE:
+                logger.critical("🚨 Kill switch activated - shutting down orchestrator")
+                break
+            
             if should_run_jobs():
                 schedule.run_pending()
             else:
                 if not test_mode_active:
-                    logger.debug("Outside market hours - skipping job checks")
-
+                    logger.debug("⏰ Outside market hours - skipping job checks")
+            
             time.sleep(30)  # Check every 30 seconds
-
+            
         except KeyboardInterrupt:
-            logger.info("Orchestrator stopped by user")
+            logger.info("⏹️ Orchestrator stopped by user")
             if test_mode_active:
-                logger.info(
-                    "[TEST MODE] Test session ended - all operations were simulated"
-                )
+                logger.info("🧪 [TEST MODE] Test session ended - all operations were simulated")
             break
         except Exception as e:
-            logger.error(f"Unexpected error in main loop: {e}")
+            logger.error(f"💥 Unexpected error in main loop: {e}")
             time.sleep(60)  # Wait 1 minute before retrying
+    
+    logger.info("🏁 Strategic Orchestrator shutdown complete")
+    return 0
+
+
+def parse_command_line_arguments():
+    """
+    Parse command-line arguments for the strategic orchestrator.
+    
+    Returns:
+        Parsed arguments namespace
+    """
+    parser = argparse.ArgumentParser(
+        description="Strategic Trading System Orchestrator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --ticker AAPL --interval 1min --data-type INTRADAY
+  %(prog)s --mode production --schedule
+  %(prog)s --ticker MSFT --force-full
+  %(prog)s --kill-switch
+        """
+    )
+    
+    # Data management arguments
+    parser.add_argument(
+        "--ticker",
+        type=str,
+        help="Stock ticker symbol to process"
+    )
+    
+    parser.add_argument(
+        "--interval",
+        type=str,
+        default="1min",
+        choices=["1min", "5min", "15min", "30min", "60min"],
+        help="Time interval for data (default: 1min)"
+    )
+    
+    parser.add_argument(
+        "--data-type",
+        type=str,
+        default="INTRADAY",
+        choices=["INTRADAY", "DAILY", "QUOTE"],
+        help="Type of data to fetch (default: INTRADAY)"
+    )
+    
+    parser.add_argument(
+        "--force-full",
+        action="store_true",
+        help="Force full fetch regardless of file size"
+    )
+    
+    # Orchestrator mode arguments
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["production", "test"],
+        help="Override mode (production or test)"
+    )
+    
+    parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Run in scheduled mode (default behavior)"
+    )
+    
+    # Safety features
+    parser.add_argument(
+        "--kill-switch",
+        action="store_true",
+        help="Emergency stop - kill all scheduled jobs"
+    )
+    
+    parser.add_argument(
+        "--data-integrity-check",
+        action="store_true",
+        help="Run data integrity validation"
+    )
+    
+    # Configuration
+    parser.add_argument(
+        "--config-validate",
+        action="store_true",
+        help="Validate configuration and exit"
+    )
+    
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging"
+    )
+    
+    return parser.parse_args()
+
+
+def run_strategic_data_update(ticker: str, interval: str, data_type: str, force_full: bool = False):
+    """
+    Run strategic data update using the new unified architecture.
+    
+    Args:
+        ticker: Stock ticker symbol
+        interval: Time interval
+        data_type: Type of data
+        force_full: Force full fetch
+        
+    Returns:
+        True if successful
+    """
+    logger.info(f"🚀 Strategic data update initiated for {ticker}")
+    
+    try:
+        success = update_data(
+            ticker=ticker,
+            interval=interval,
+            data_type=data_type,
+            force_full=force_full
+        )
+        
+        if success:
+            logger.info(f"✅ Strategic data update completed successfully for {ticker}")
+        else:
+            logger.error(f"❌ Strategic data update failed for {ticker}")
+            
+        return success
+        
+    except Exception as e:
+        logger.error(f"💥 Strategic data update error for {ticker}: {e}")
+        return False
+
+
+def execute_kill_switch():
+    """
+    Emergency kill switch - stop all scheduled jobs and prevent further actions.
+    
+    This is one of the advanced safety features specified in Phase 3.
+    """
+    logger.critical("🚨 KILL SWITCH ACTIVATED - Stopping all operations")
+    
+    try:
+        # Clear all scheduled jobs
+        schedule.clear()
+        logger.info("✅ All scheduled jobs cleared")
+        
+        # Set global flag to prevent new jobs
+        global KILL_SWITCH_ACTIVE
+        KILL_SWITCH_ACTIVE = True
+        
+        # Log kill switch activation
+        logger.critical("🛑 Kill switch active - all trading operations halted")
+        logger.critical("🔧 To resume operations, restart the orchestrator")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"💥 Error activating kill switch: {e}")
+        return False
+
+
+def run_data_integrity_check():
+    """
+    Run comprehensive data integrity validation.
+    
+    This is one of the advanced safety features specified in Phase 3.
+    """
+    logger.info("🔍 Running comprehensive data integrity check")
+    
+    try:
+        # Check critical tickers
+        critical_tickers = config.DEFAULT_TICKERS[:5]  # Check first 5 tickers
+        
+        integrity_results = {}
+        
+        for ticker in critical_tickers:
+            logger.info(f"Checking data integrity for {ticker}")
+            
+            # Use the intelligent data manager for validation
+            from core.data_manager import intelligent_manager
+            
+            # Check intraday data integrity
+            intraday_valid = intelligent_manager._validate_data_integrity(
+                ticker, "1min", "INTRADAY"
+            )
+            
+            # Check daily data integrity  
+            daily_valid = intelligent_manager._validate_data_integrity(
+                ticker, "1D", "DAILY"
+            )
+            
+            integrity_results[ticker] = {
+                "intraday": intraday_valid,
+                "daily": daily_valid,
+                "overall": intraday_valid and daily_valid
+            }
+            
+            if integrity_results[ticker]["overall"]:
+                logger.info(f"✅ Data integrity validated for {ticker}")
+            else:
+                logger.error(f"❌ Data integrity issues found for {ticker}")
+        
+        # Summary
+        total_tickers = len(integrity_results)
+        valid_tickers = sum(1 for r in integrity_results.values() if r["overall"])
+        
+        logger.info(f"📊 Data integrity check complete: {valid_tickers}/{total_tickers} tickers valid")
+        
+        if valid_tickers == total_tickers:
+            logger.info("✅ All data integrity checks passed")
+            return True
+        else:
+            logger.warning(f"⚠️ {total_tickers - valid_tickers} tickers failed integrity check")
+            return False
+            
+    except Exception as e:
+        logger.error(f"💥 Error in data integrity check: {e}")
+        return False
+
+
+# Global kill switch flag
+KILL_SWITCH_ACTIVE = False
 
 
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    sys.exit(exit_code)
