@@ -401,9 +401,9 @@ class CompactFetchDiagnostic:
         logger.info(f"   🔧 Testing smart append logic for {symbol}")
         
         # NOTE: This test is disabled as fetch_intraday_compact.py has been replaced 
-        # by the new Master Compact Fetcher system (jobs/master_compact_fetcher.py)
-        logger.warning(f"   ⚠️ Smart append test disabled - replaced by Master Compact Fetcher")
-        logger.info(f"      Use: python jobs/master_compact_fetcher.py --test {symbol}")
+        # by the new Unified DataFetchManager system (jobs/data_fetch_manager.py)
+        logger.warning(f"   ⚠️ Smart append test disabled - replaced by Unified DataFetchManager")
+        logger.info(f"      Use: python jobs/data_fetch_manager.py")
         return
         
         try:
