@@ -203,9 +203,9 @@ def run_30min_updates():
         f"{mode_prefix} Starting 30-minute intraday updates (DataFetchManager)"
     )
     logger.info(
-        f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager (processes all intervals)"
+        f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager (30min interval only)"
     )
-    result = run_job("jobs/data_fetch_manager.py", "data_fetch_manager_30min")
+    result = run_job("jobs/data_fetch_manager.py --interval 30min", "data_fetch_manager_30min")
     if TEST_MODE_ACTIVE and result:
         logger.info(
             "[TEST MODE] DataFetchManager (30min) simulation completed successfully"
