@@ -180,35 +180,35 @@ def run_daily_data_jobs():
 
 
 def run_intraday_updates():
-    """Run intraday data updates using the new Master Compact Fetcher system."""
+    """Run intraday data updates using the unified DataFetchManager system."""
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
     logger.info(
-        f"{mode_prefix} Starting intraday updates (Master Compact Fetcher)"
+        f"{mode_prefix} Starting intraday updates (DataFetchManager)"
     )
     logger.info(
-        f"{mode_prefix} ENHANCED SYSTEM: Using intelligent master compact fetcher with self-healing"
+        f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager with self-healing"
     )
-    result = run_job("jobs/master_compact_fetcher.py", "master_compact_fetcher")
+    result = run_job("jobs/data_fetch_manager.py", "data_fetch_manager")
     if TEST_MODE_ACTIVE and result:
         logger.info(
-            "[TEST MODE] Master Compact Fetcher simulation completed successfully"
+            "[TEST MODE] DataFetchManager simulation completed successfully"
         )
     return result
 
 
 def run_30min_updates():
-    """Run 30-minute intraday data updates using the new Master Compact Fetcher system."""
+    """Run 30-minute intraday data updates using the unified DataFetchManager system."""
     mode_prefix = "[TEST MODE]" if TEST_MODE_ACTIVE else "[LIVE MODE]"
     logger.info(
-        f"{mode_prefix} Starting 30-minute intraday updates (Master Compact Fetcher)"
+        f"{mode_prefix} Starting 30-minute intraday updates (DataFetchManager)"
     )
     logger.info(
-        f"{mode_prefix} ENHANCED SYSTEM: Using intelligent master compact fetcher (30min interval)"
+        f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager (processes all intervals)"
     )
-    result = run_job("jobs/master_compact_fetcher.py --interval 30min", "master_compact_fetcher_30min")
+    result = run_job("jobs/data_fetch_manager.py", "data_fetch_manager_30min")
     if TEST_MODE_ACTIVE and result:
         logger.info(
-            "[TEST MODE] Master Compact Fetcher (30min) simulation completed successfully"
+            "[TEST MODE] DataFetchManager (30min) simulation completed successfully"
         )
     return result
 

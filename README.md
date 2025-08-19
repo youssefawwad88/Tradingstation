@@ -52,22 +52,13 @@ To build an autonomous, institutional-style trade discovery and execution system
 # Generate master ticker list (daily at 6 AM ET)
 python generate_master_tickerlist.py
 
-# New unified data fetching system
-python jobs/master_compact_fetcher.py                    # 1min interval (default)
-python jobs/master_compact_fetcher.py --interval 30min   # 30min interval
-python jobs/master_compact_fetcher.py --force-full       # Force full rebuild
-python jobs/master_compact_fetcher.py --test AAPL        # Test single ticker
+# Unified data fetching system - Single Authority for All Market Data
+python jobs/data_fetch_manager.py                        # Processes all data types (daily, 1min, 30min)
 
 # Legacy commands still available
-python fetch_daily.py      # Daily data (200 rows)
-# Legacy commands (replaced by master compact fetcher)
-# python fetch_30min.py      # 30-min data (500 rows) - USE: python jobs/master_compact_fetcher.py --interval 30min
-
-# Run intraday updates (every minute) - NEW IMPROVED VERSION
-python jobs/intraday_fetcher.py
-
-# Or test both 1min and 30min intervals
-python jobs/intraday_fetcher.py --test
+python fetch_daily.py      # Daily data (200 rows) - standalone
+# Legacy commands (replaced by unified data fetch manager)
+# python fetch_30min.py      # 30-min data (500 rows) - USE: python jobs/data_fetch_manager.py
 ```
 
 📖 **Full Documentation**: See [TICKER_MANAGEMENT.md](TICKER_MANAGEMENT.md) for complete details.
