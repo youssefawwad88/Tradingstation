@@ -124,7 +124,7 @@ class DataFetchManager:
             
         try:
             # Download master_tickerlist.csv from root of bucket
-            df = download_dataframe(self.spaces_client, SPACES_BUCKET_NAME, "master_tickerlist.csv")
+            df = download_dataframe("master_tickerlist.csv")
             
             if df is None or df.empty:
                 logger.critical("❌ CRITICAL: master_tickerlist.csv is empty or not found")
@@ -227,9 +227,7 @@ class DataFetchManager:
                     
             # Step 4: Save to cloud
             success = upload_dataframe(
-                self.spaces_client,
                 df_daily,
-                SPACES_BUCKET_NAME,
                 f"daily/{ticker}.csv"
             )
             
@@ -285,8 +283,6 @@ class DataFetchManager:
             if file_exists:
                 try:
                     existing_df = download_dataframe(
-                        self.spaces_client,
-                        SPACES_BUCKET_NAME,
                         f"{directory}/{ticker}.csv"
                     )
                 except Exception as e:
@@ -341,9 +337,7 @@ class DataFetchManager:
                     
             # Step 8: Save to cloud
             success = upload_dataframe(
-                self.spaces_client,
                 combined_df,
-                SPACES_BUCKET_NAME,
                 f"{directory}/{ticker}.csv"
             )
             
@@ -594,51 +588,32 @@ class DataFetchManager:
             logger.warning(f"⚠️ Failed tickers: {failed_tickers}")
 
 
-def main():
-    """Main entry point for the DataFetchManager."""
+if __name__ == "__main__":
     import argparse
-
-    # Set up the argument parser
+    
     parser = argparse.ArgumentParser(description="Unified Data Fetch Manager for the Trading System.")
     parser.add_argument(
         '--interval',
         type=str,
         choices=['1min', '30min', 'daily'],
-        help="Specify which interval to update. If not provided, all intervals will be updated."
+        required=False,  # Make the argument optional
+        help="Specify a single interval to update. If not provided, all intervals will be updated by default."
     )
     args = parser.parse_args()
-    
-    # Initialize the manager
-    manager = DataFetchManager()
-    
-    # Download master tickerlist first (required for all operations)
-    if not manager.download_master_tickerlist():
-        logger.critical("❌ CRITICAL: Failed to download master tickerlist - EXITING")
-        exit(1)
-    
-    # Decide which functions to run based on the argument
-    success = False
+
+    # Instantiate and run the manager
+    manager = DataFetchManager() 
+
     if args.interval == '1min':
-        logger.info("--- Running 1-Minute Intraday Update Only ---")
-        success = manager.run_intraday_updates(interval='1min')
+        print("--- Triggering 1-Minute Intraday Update Only ---")
+        manager.run_intraday_updates(interval='1min')
     elif args.interval == '30min':
-        logger.info("--- Running 30-Minute Intraday Update Only ---")
-        success = manager.run_intraday_updates(interval='30min')
+        print("--- Triggering 30-Minute Intraday Update Only ---")
+        manager.run_intraday_updates(interval='30min')
     elif args.interval == 'daily':
-        logger.info("--- Running Daily Update Only ---")
-        success = manager.run_daily_updates()
+        print("--- Triggering Daily Update Only ---")
+        manager.run_daily_updates()
     else:
-        # If no specific interval is given, run everything (preserve original behavior)
-        logger.info("--- Running Full Data Update for All Intervals ---")
-        success = manager.run()
-    
-    if success:
-        logger.info("✅ DataFetchManager execution completed successfully")
-        exit(0)
-    else:
-        logger.error("❌ DataFetchManager execution failed")
-        exit(1)
-
-
-if __name__ == "__main__":
-    main()
+        # This is the default behavior if the script is run with no arguments
+        print("--- No specific interval provided. Running full update for ALL intervals. ---")
+        manager.run_all_data_updates()
