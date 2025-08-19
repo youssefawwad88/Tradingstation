@@ -79,9 +79,13 @@ def fetch_intraday_data(
         # Rename columns
         df.columns = [col.split(". ")[1] for col in df.columns]
 
-        # Convert values to float
+        # Convert values to float with robust error handling
         for col in df.columns:
-            df[col] = df[col].astype(float)
+            try:
+                df[col] = df[col].astype(float)
+            except ValueError as e:
+                logger.error(f"Failed to convert column '{col}' to float for {ticker}: {e}")
+                return None, False
 
         # Add date and ticker columns
         df.index = pd.to_datetime(df.index)
@@ -167,9 +171,13 @@ def fetch_daily_data(
         # Rename columns
         df.columns = [col.split(". ")[1] for col in df.columns]
 
-        # Convert values to float
+        # Convert values to float with robust error handling
         for col in df.columns:
-            df[col] = df[col].astype(float)
+            try:
+                df[col] = df[col].astype(float)
+            except ValueError as e:
+                logger.error(f"Failed to convert column '{col}' to float for {ticker}: {e}")
+                return None, False
 
         # Add date and ticker columns
         df.index = pd.to_datetime(df.index)
