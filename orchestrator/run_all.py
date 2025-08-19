@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -87,7 +88,7 @@ def run_job(script_path, job_name):
 
     try:
         # Parse script path and arguments
-        script_parts = script_path.split()
+        script_parts = shlex.split(script_path)
         script_only = script_parts[0]
         script_args = script_parts[1:] if len(script_parts) > 1 else []
         

@@ -440,7 +440,18 @@ class MasterCompactFetcher:
     def _log_ticker_completion(self, ticker: str, start_time: datetime, success: bool, 
                              reason: str, api_rows: int = None, final_rows: int = None):
         """
-        Enhanced logging: Log ticker completion with timing and status details.
+        Log ticker completion with timing and status details.
+        
+        This function provides comprehensive logging for ticker processing completion,
+        including timing information, success status, and data flow statistics.
+        
+        Args:
+            ticker (str): The ticker symbol that was processed
+            start_time (datetime): The timestamp when processing started for this ticker
+            success (bool): Whether the ticker processing completed successfully
+            reason (str): Detailed explanation of the completion status or failure reason
+            api_rows (int, optional): Number of rows received from the API. Defaults to None.
+            final_rows (int, optional): Number of rows in the final processed dataset. Defaults to None.
         """
         end_time = datetime.now()
         duration = end_time - start_time
