@@ -53,12 +53,12 @@ class ORBScreener:
                 self.universe_tickers = active_tickers
                 logger.info(f"Loaded {len(active_tickers)} tickers for ORB screening")
             else:
-                self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
-                logger.warning("Universe not found, using default tickers")
+                self.universe_tickers = config.FALLBACK_TICKERS
+                logger.warning("Universe not found, using fallback tickers")
                 
         except Exception as e:
             logger.error(f"Error loading universe: {e}")
-            self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
+            self.universe_tickers = config.FALLBACK_TICKERS
 
     def run_orb_screen(self) -> bool:
         """

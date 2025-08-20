@@ -40,7 +40,7 @@ class DataFetchManager:
     def load_universe(self) -> None:
         """Load the master ticker list from Spaces."""
         try:
-            universe_key = config.get_spaces_path("data", "universe", "master_tickerlist.csv")
+            universe_key = config.get_spaces_path(*config.MASTER_TICKERLIST_PATH)
             df = spaces_io.download_dataframe(universe_key)
             
             if df is not None and not df.empty:
@@ -50,12 +50,12 @@ class DataFetchManager:
                 logger.info(f"Loaded {len(active_tickers)} active tickers from universe")
             else:
                 # Fallback to default tickers
-                self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
-                logger.warning("Universe not found in Spaces, using default tickers")
+                self.universe_tickers = config.FALLBACK_TICKERS
+                logger.warning("Universe not found, using fallback tickers")
                 
         except Exception as e:
             logger.error(f"Error loading universe: {e}")
-            self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
+            self.universe_tickers = config.FALLBACK_TICKERS
 
     def run_full_data_update(self) -> bool:
         """
