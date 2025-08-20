@@ -590,20 +590,20 @@ class DataFetchManager:
 
 if __name__ == "__main__":
     import argparse
-    
     parser = argparse.ArgumentParser(description="Unified Data Fetch Manager for the Trading System.")
     parser.add_argument(
         '--interval',
         type=str,
         choices=['1min', '30min', 'daily'],
-        required=False,  # Make the argument optional
-        help="Specify a single interval to update. If not provided, all intervals will be updated by default."
+        required=False,
+        help="Specify a single interval to update. If not provided, a default action is taken."
     )
     args = parser.parse_args()
 
-    # Instantiate and run the manager
+    # Instantiate the main class that contains the fetching logic
     manager = DataFetchManager() 
 
+    # This logic block explicitly handles every possible case
     if args.interval == '1min':
         print("--- Triggering 1-Minute Intraday Update Only ---")
         manager.run_intraday_updates(interval='1min')
@@ -614,6 +614,6 @@ if __name__ == "__main__":
         print("--- Triggering Daily Update Only ---")
         manager.run_daily_updates()
     else:
-        # This is the default behavior if the script is run with no arguments
+        # Default behavior: If the script is run without any arguments, it updates EVERYTHING.
         print("--- No specific interval provided. Running full update for ALL intervals. ---")
         manager.run_all_data_updates()
