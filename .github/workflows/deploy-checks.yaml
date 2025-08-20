@@ -1,0 +1,42 @@
+name: Deploy Checks
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deployment-verification:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+
+    - name: Run deployment verification (dry run)
+      run: |
+        python tools/verify_deployment.py --dry-run
+      env:
+        DEPLOYMENT_TAG: ${{ github.sha }}
+
+    - name: Run health check
+      run: |
+        python tools/health_check.py
+      env:
+        DEPLOYMENT_TAG: ${{ github.sha }}
+
+    - name: Run smoke test
+      run: |
+        python tools/smoke_test_e2e.py --mock
+      env:
+        DEPLOYMENT_TAG: ${{ github.sha }}
+        TEST_MODE: enabled

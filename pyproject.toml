@@ -1,37 +1,41 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingstation"
-version = "1.0.0"
-description = "Modular Python Trading System"
-authors = [{name = "Trading Team", email = "trading@example.com"}]
+name = "trading-station"
+version = "2.0.0-dev"
+description = "Professional-grade automated trading platform"
+authors = [{name = "Trading Station Team"}]
+license = {text = "MIT"}
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "pandas",
-    "requests", 
-    "pytz",
-    "boto3",
-    "schedule",
-    "tqdm",
-    "streamlit",
-    "s3fs",
-    "alpha_vantage",
+    "pandas>=2.0.0,<3.0.0",
+    "pandas_market_calendars>=4.0.0,<5.0.0",
+    "requests>=2.28.0,<3.0.0",
+    "pytz>=2023.3",
+    "boto3>=1.26.0,<2.0.0",
+    "s3fs>=2023.1.0,<2024.0.0",
+    "schedule>=1.2.0,<2.0.0",
+    "tqdm>=4.64.0,<5.0.0",
+    "streamlit>=1.25.0,<2.0.0",
+    "alpha_vantage>=2.3.1,<3.0.0",
+    "aiohttp>=3.8.0,<4.0.0",
+    "PyYAML>=6.0,<7.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "psutil>=5.8.0,<6.0.0",
+    "plotly>=5.15.0,<6.0.0",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "--strict-markers --strict-config --verbose"
-markers = [
-    "unit: Unit tests",
-    "integration: Integration tests", 
-    "slow: Slow tests that may take time",
-    "api: Tests that require API calls",
-    "asyncio: Async tests",
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "isort>=5.12.0",
+    "pre-commit>=3.0.0",
 ]
 
 [tool.black]
@@ -47,16 +51,20 @@ extend-exclude = '''
   | \.mypy_cache
   | \.tox
   | \.venv
+  | _build
+  | buck-out
   | build
   | dist
 )/
 '''
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 88
-known_first_party = ["utils", "screeners", "orchestrator", "dashboard", "jobs"]
+[tool.ruff]
+select = ["E", "F", "W", "C90", "I", "N", "D", "UP", "S", "B", "A", "C4", "T20"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "S101"]
+fixable = ["A", "B", "C", "D", "E", "F", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
+unfixable = []
+line-length = 88
+target-version = "py39"
 
 [tool.mypy]
 python_version = "3.9"
@@ -72,24 +80,20 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
-
-[[tool.mypy.overrides]]
-module = [
-    "alpha_vantage.*",
-    "streamlit.*",
-    "boto3.*",
-    "botocore.*",
-]
 ignore_missing_imports = true
 
-[tool.flake8]
-max-line-length = 88
-extend-ignore = ["E203", "W503"]
-exclude = [
-    ".git",
-    "__pycache__",
-    "build",
-    "dist",
-    ".venv",
-    ".eggs",
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
 ]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+include_trailing_comma = true

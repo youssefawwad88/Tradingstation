@@ -1,9 +1,0 @@
-Date,Ticker,Close,Drop %,Gap %,Volume Spike?,Reclaimed?,Strong Green Candle?,5-Day High Close,Lowest 5D Close,20-Day Volume Avg,Strong Red Days?,Intraday Reversal Signal?,Setup Valid?,Watch Note,Body % of Candle,Inside Candle?,EMA Distance %,AVWAP Confluence?
-2025-07-28,AAPL,214.05,-0.16,0.07,No,Yes,No,214.40,212.48,"51,477,827",Yes,N/A,FALSE,"Failed: Drop %, Gap %, Volume, Candle",1.12,No,2.84,No
-2025-07-28,AMD,173.66,4.32,1.57,Yes,Yes,Yes,166.47,154.72,"48,910,185",No,AVWAP Reclaim,FALSE,"Failed: Drop %, Gap %, Prior Weakness",75.95,No,26.86,No
-2025-07-28,AMZN,232.79,0.24,0.83,No,Yes,No,232.23,227.47,"41,837,718",Yes,N/A,FALSE,"Failed: Drop %, Gap %, Volume, Candle",27.45,No,7.27,No
-2025-07-28,GOOGL,192.58,-0.31,0.24,No,Yes,No,193.18,190.10,"43,416,517",Yes,None,FALSE,"Failed: Drop %, Gap %, Volume, Candle",33.33,No,8.58,Yes
-2025-07-28,MSFT,512.50,-0.24,0.07,No,Yes,No,513.71,505.27,"17,551,100",No,N/A,FALSE,"Failed: Drop %, Gap %, Volume, Candle, Prior Weakness",32.38,No,6.34,No
-2025-07-28,NFLX,1174.60,-4.76,0.06,No,Yes,No,1233.27,1176.78,"4,059,469",No,Hammer,FALSE,"Failed: Drop %, Gap %, Volume, Candle, Prior Weakness",22.56,No,-2.82,No
-2025-07-28,NVDA,176.75,1.73,0.30,No,Yes,Yes,173.74,167.03,"168,226,033",Yes,AVWAP Reclaim,FALSE,"Failed: Drop %, Gap %, Volume",90.10,No,15.61,No
-2025-07-28,TSLA,325.59,-2.10,0.76,No,Yes,No,332.56,305.30,"97,696,770",No,AVWAP Reclaim,FALSE,"Failed: Drop %, Gap %, Volume, Candle, Prior Weakness",48.24,No,2.87,No

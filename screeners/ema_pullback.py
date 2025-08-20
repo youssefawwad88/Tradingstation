@@ -1,237 +1,245 @@
-import logging
-import os
-import sys
+"""
+EMA Pullback Strategy Screener - Trend continuation pullbacks.
 
-import numpy as np
+This module identifies pullbacks to EMA20 in uptrends with 
+bullish reversal signals for continuation trades.
+"""
+
+import time
+from datetime import datetime
+from typing import Dict, List, Optional
+
 import pandas as pd
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.config import config
+from utils.logging_setup import get_logger
+from utils.spaces_io import spaces_io
+
+logger = get_logger(__name__)
 
 
-# --- System Path Setup ---
-# This makes sure the script can find the 'utils' directory
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+class EMAPullbackScreener:
+    """EMA pullback strategy screener."""
 
-from utils.helpers import (
-    calculate_vwap,
-    format_to_two_decimal,
-    read_df_from_s3,
-    read_tickerlist_from_s3,
-    save_df_to_s3,
-)
+    def __init__(self) -> None:
+        """Initialize the EMA pullback screener."""
+        self.universe_tickers: List[str] = []
+        self.signals: List[Dict] = []
+        self.load_universe()
 
-# --- Screener-Specific Configuration ---
-EMA_LONG_PERIOD = 50
-EMA_MEDIUM_PERIOD = 21
-EMA_SHORT_PERIOD = 8
-VOLUME_SPIKE_THRESHOLD_PCT = 115
-
-
-def run_ema_pullback_screener():
-    """
-    EMA Trend Pullback Screener per specification:
-    Detect daily trend continuation pullbacks with EMA reclaim/reject behavior and volume confirmation.
-    """
-    logger.info("Running EMA Trend Pullback Screener")
-
-    # --- 1. Load tickers and AVWAP anchors ---
-    tickers = read_tickerlist_from_s3("tickerlist.txt")
-    if not tickers:
-        logger.warning("Ticker list from cloud is empty")
-        return
-
-    # Load AVWAP anchors for confluence
-    anchor_df = read_df_from_s3("data/avwap_anchors.csv")
-    anchor_dict = {}
-    if (
-        not anchor_df.empty
-        and "Ticker" in anchor_df.columns
-        and "Anchor 1 Date" in anchor_df.columns
-    ):
-        for _, row in anchor_df.iterrows():
-            ticker_symbol = row["Ticker"]
-            anchor_date = row["Anchor 1 Date"]
-            if pd.notna(anchor_date):
-                anchor_dict[ticker_symbol] = pd.to_datetime(anchor_date)
-
-    all_results = []
-
-    for ticker in tickers:
+    def load_universe(self) -> None:
+        """Load the master ticker list from Spaces."""
         try:
-            # --- 2. Load Data and Calculate Indicators ---
-            df = read_df_from_s3(f"data/daily/{ticker}_daily.csv")
-            if df is None or len(df) < EMA_LONG_PERIOD + 1:
-                continue
-
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df = df.sort_values("timestamp")
-
-            # Calculate EMAs
-            df["EMA50"] = df["close"].ewm(span=EMA_LONG_PERIOD, adjust=False).mean()
-            df["EMA21"] = df["close"].ewm(span=EMA_MEDIUM_PERIOD, adjust=False).mean()
-            df["EMA8"] = df["close"].ewm(span=EMA_SHORT_PERIOD, adjust=False).mean()
-
-            # Volume metrics (avoid lookahead)
-            df["Avg_Vol_20D"] = df["volume"].shift(1).rolling(window=20).mean()
-            df["Volume_vs_Avg_Pct"] = (df["volume"] / df["Avg_Vol_20D"]) * 100
-
-            # --- 3. Candle metrics (latest and previous) ---
-            latest = df.iloc[-1]
-            previous = df.iloc[-2] if len(df) >= 2 else None
-
-            trend_vs_ema50 = "Above" if latest["close"] > latest["EMA50"] else "Below"
-
-            # Candle calculations
-            candle_range = latest["high"] - latest["low"]
-            candle_body = abs(latest["close"] - latest["open"])
-            body_percent = (candle_body / candle_range * 100) if candle_range > 0 else 0
-
-            # Inside Candle check
-            inside_candle = "No"
-            if previous is not None:
-                if (
-                    latest["high"] < previous["high"]
-                    and latest["low"] > previous["low"]
-                ):
-                    inside_candle = "Yes"
-
-            # --- 4. Pullback logic ---
-            # Wick Confirmed check
-            combined_wicks = candle_range - candle_body
-            wick_confirmed = "Yes" if combined_wicks > 2 * candle_body else "No"
-
-            # Signal Candle check
-            signal_candle = "Yes" if 20 <= body_percent <= 60 else "No"
-
-            # Direction and EMA Reclaim/Reject
-            direction = "None"
-            ema_reclaim_reject = "N/A"
-            ema_distance_pct = np.nan
-
-            # Long condition: trend above EMA50, open below EMA8, close above EMA8
-            if (
-                trend_vs_ema50 == "Above"
-                and latest["open"] < latest["EMA8"]
-                and latest["close"] > latest["EMA8"]
-            ):
-                direction = "Long"
-                ema_reclaim_reject = "Reclaim EMA8"
-                ema_distance_pct = (
-                    (latest["close"] - latest["EMA8"]) / latest["EMA8"] * 100
-                )
-
-            # Short condition: trend below EMA50, open above EMA21, close below EMA21
-            elif (
-                trend_vs_ema50 == "Below"
-                and latest["open"] > latest["EMA21"]
-                and latest["close"] < latest["EMA21"]
-            ):
-                direction = "Short"
-                ema_reclaim_reject = "Reject EMA21"
-                ema_distance_pct = (
-                    (latest["EMA21"] - latest["close"]) / latest["EMA21"] * 100
-                )
-
-            # --- 5. Volume spike ---
-            volume_spike = "Yes" if latest["Volume_vs_Avg_Pct"] >= 115 else "No"
-
-            # --- 6. AVWAP Confluence ---
-            avwap_confluence = "N/A"
-            if ticker in anchor_dict:
-                try:
-                    anchor_date = anchor_dict[ticker]
-                    anchor_df_filtered = df[df["timestamp"] >= anchor_date].copy()
-                    if not anchor_df_filtered.empty:
-                        anchor_df_filtered["vwap"] = calculate_vwap(anchor_df_filtered)
-                        avwap_value = anchor_df_filtered["vwap"].iloc[-1]
-                        distance_to_avwap = (
-                            abs(latest["close"] - avwap_value) / avwap_value * 100
-                        )
-                        avwap_confluence = "Yes" if distance_to_avwap <= 1.0 else "No"
-                except Exception:
-                    avwap_confluence = "N/A"
-
-            # --- 7. Validation ---
-            conditions = [
-                wick_confirmed == "Yes",
-                ema_reclaim_reject != "N/A",
-                signal_candle == "Yes",
-                volume_spike == "Yes",
-                direction != "None",
-            ]
-
-            setup_valid = all(conditions)
-
-            # Reason / Notes
-            failing_conditions = []
-            if wick_confirmed != "Yes":
-                failing_conditions.append("Wick not confirmed")
-            if ema_reclaim_reject == "N/A":
-                failing_conditions.append("No EMA reclaim/reject")
-            if signal_candle != "Yes":
-                failing_conditions.append("Not a signal candle (20-60% body)")
-            if volume_spike != "Yes":
-                failing_conditions.append("No volume spike")
-            if direction == "None":
-                failing_conditions.append("No valid direction")
-
-            reason_notes = (
-                "; ".join(failing_conditions) if failing_conditions else "N/A"
-            )
-
-            # --- 8. Populate result ---
-            result = {
-                "Date": (
-                    latest["timestamp"].strftime("%Y-%m-%d")
-                    if hasattr(latest["timestamp"], "strftime")
-                    else str(latest["timestamp"])
-                ),
-                "Ticker": ticker,
-                "Direction": direction,
-                "Trend vs EMA50": trend_vs_ema50,
-                "EMA50": format_to_two_decimal(latest["EMA50"]),
-                "EMA21": format_to_two_decimal(latest["EMA21"]),
-                "EMA8": format_to_two_decimal(latest["EMA8"]),
-                "Close Price": format_to_two_decimal(latest["close"]),
-                "Wick Confirmed?": wick_confirmed,
-                "EMA Reclaim/Reject": ema_reclaim_reject,
-                "Signal Candle?": signal_candle,
-                "Volume": f"{int(latest['volume']):,}",
-                "Avg 20D Volume": (
-                    f"{int(latest['Avg_Vol_20D']):,}"
-                    if pd.notna(latest["Avg_Vol_20D"])
-                    else "N/A"
-                ),
-                "Volume vs Avg %": format_to_two_decimal(latest["Volume_vs_Avg_Pct"]),
-                "Volume Spike?": volume_spike,
-                "Signal Direction": direction if setup_valid else "None",
-                "Reason / Notes": reason_notes,
-                "Setup Valid?": "TRUE" if setup_valid else "FALSE",
-                "Body % of Candle": format_to_two_decimal(body_percent),
-                "Inside Candle?": inside_candle,
-                "EMA Distance %": format_to_two_decimal(ema_distance_pct),
-                "AVWAP Confluence?": avwap_confluence,
-            }
-            all_results.append(result)
-
+            universe_key = config.get_spaces_path("data", "universe", "master_tickerlist.csv")
+            df = spaces_io.download_dataframe(universe_key)
+            
+            if df is not None and not df.empty:
+                active_tickers = df[
+                    (df["active"] == 1) & (df["fetch_daily"] == 1)
+                ]["symbol"].tolist()
+                self.universe_tickers = active_tickers
+                logger.info(f"Loaded {len(active_tickers)} tickers for EMA pullback screening")
+            else:
+                self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
+                
         except Exception as e:
-            logger.error(f"Error processing {ticker}: {e}")
+            logger.error(f"Error loading universe: {e}")
+            self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
 
-    # --- 9. Final Processing & Save to Cloud ---
-    if not all_results:
-        logger.info("No EMA Pullback signals were generated.")
-        return
+    def run_ema_screen(self) -> bool:
+        """Run the EMA pullback screening process."""
+        logger.job_start("EMAPullbackScreener.run_ema_screen")
+        start_time = time.time()
+        
+        try:
+            self.signals.clear()
+            successful_tickers = 0
+            
+            for ticker in self.universe_tickers:
+                try:
+                    signals = self.screen_ticker(ticker)
+                    if signals:
+                        self.signals.extend(signals)
+                        successful_tickers += 1
+                
+                except Exception as e:
+                    logger.error(f"Error screening {ticker}: {e}")
+            
+            self.save_signals()
+            
+            duration = time.time() - start_time
+            logger.job_complete(
+                "EMAPullbackScreener.run_ema_screen",
+                duration_seconds=duration,
+                success=True,
+                successful_tickers=successful_tickers,
+                total_signals=len(self.signals),
+            )
+            
+            return True
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.job_complete(
+                "EMAPullbackScreener.run_ema_screen",
+                duration_seconds=duration,
+                success=False,
+                error=str(e),
+            )
+            return False
 
-    final_df = pd.DataFrame(all_results)
-    final_df.sort_values(
-        by=["Setup Valid?", "Ticker"], ascending=[False, True], inplace=True
-    )
+    def screen_ticker(self, ticker: str) -> List[Dict]:
+        """Screen a ticker for EMA pullback setups."""
+        try:
+            daily_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
+            df = spaces_io.download_dataframe(daily_key)
+            
+            if df is None or df.empty or len(df) < 60:
+                return []
+            
+            df = self._prepare_data(df)
+            
+            # Check latest bar for setup
+            latest_bar = df.iloc[-1]
+            prev_bar = df.iloc[-2]
+            
+            signal = self._check_pullback_setup(ticker, latest_bar, prev_bar, df)
+            
+            return [signal] if signal else []
+            
+        except Exception as e:
+            logger.error(f"Error screening {ticker}: {e}")
+            return []
 
-    save_df_to_s3(final_df, "data/signals/ema_pullback_signals.csv")
-    logger.info("EMA Pullback Screener finished. Results saved to cloud.")
+    def _prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Prepare daily data with EMAs."""
+        df = df.copy()
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        
+        # Calculate EMAs
+        df["ema20"] = df["close"].ewm(span=20, adjust=False).mean()
+        df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
+        
+        # Calculate volume average
+        df["avg_volume_20"] = df["volume"].rolling(20, min_periods=10).mean()
+        
+        return df
+
+    def _check_pullback_setup(self, ticker: str, bar: pd.Series, prev_bar: pd.Series, df: pd.DataFrame) -> Optional[Dict]:
+        """Check for valid EMA pullback setup."""
+        try:
+            ema20 = bar["ema20"]
+            ema50 = bar["ema50"]
+            
+            # Check trend: price above EMA20 > EMA50
+            if not (bar["close"] > ema20 > ema50):
+                return None
+            
+            # Check for pullback to EMA20 with reversal
+            pullback_depth = abs(bar["low"] - ema20) / ema20
+            
+            # Must have touched or come close to EMA20
+            if pullback_depth > 0.02:  # More than 2% away from EMA20
+                return None
+            
+            # Check for bullish reversal candle
+            is_bullish = bar["close"] > bar["open"]
+            closes_above_ema = bar["close"] > ema20
+            
+            if not (is_bullish and closes_above_ema):
+                return None
+            
+            # Calculate trade parameters
+            entry = bar["close"]
+            stop = min(bar["low"], ema20 * 0.99)  # Below pullback low or EMA20
+            
+            risk_per_share = entry - stop
+            if risk_per_share <= 0:
+                return None
+            
+            # Find resistance for target
+            recent_highs = df.tail(20)["high"]
+            resistance = recent_highs.max()
+            
+            # Targets
+            tp1 = min(resistance, entry + (2 * risk_per_share))
+            tp2 = entry + (3 * risk_per_share)
+            tp3 = entry + (4 * risk_per_share)
+            
+            # Position sizing
+            account_size = config.ACCOUNT_SIZE
+            risk_pct = config.MAX_RISK_PER_TRADE_PCT / 100
+            risk_amount = account_size * risk_pct
+            position_size = int(risk_amount / risk_per_share)
+            
+            # Reversal candle quality
+            body_size = abs(bar["close"] - bar["open"])
+            candle_range = bar["high"] - bar["low"]
+            rev_candle_type = "strong" if body_size / candle_range > 0.6 else "weak"
+            
+            signal = {
+                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                "symbol": ticker,
+                "direction": "long",
+                "setup_name": "ema_pullback",
+                "score": 7.0 if rev_candle_type == "strong" else 5.0,
+                "entry": entry,
+                "stop": stop,
+                "tp1": tp1,
+                "tp2": tp2,
+                "tp3": tp3,
+                "r_multiple_at_tp1": (tp1 - entry) / risk_per_share,
+                "r_multiple_at_tp2": (tp2 - entry) / risk_per_share,
+                "r_multiple_at_tp3": (tp3 - entry) / risk_per_share,
+                "notes": f"EMA20 pullback, {rev_candle_type} reversal",
+                "ema20": ema20,
+                "ema50": ema50,
+                "pullback_depth": pullback_depth,
+                "rev_candle_type": rev_candle_type,
+                "position_size": position_size,
+            }
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"Error checking pullback setup: {e}")
+            return None
+
+    def save_signals(self) -> bool:
+        """Save EMA pullback signals to Spaces."""
+        try:
+            if not self.signals:
+                return True
+            
+            df = pd.DataFrame(self.signals)
+            df["generated_at"] = datetime.utcnow().isoformat() + "Z"
+            
+            signals_key = config.get_spaces_path("data", "signals", "ema_pullback.csv")
+            success = spaces_io.upload_dataframe(df, signals_key)
+            
+            if success:
+                logger.info(f"Saved {len(df)} EMA pullback signals")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error saving EMA pullback signals: {e}")
+            return False
+
+
+def main():
+    """Main entry point for EMA pullback screener."""
+    screener = EMAPullbackScreener()
+    
+    from utils.config import get_deployment_info
+    deployment_info = get_deployment_info()
+    
+    logger.info(f"--- Running EMA Pullback Screener --- {deployment_info}")
+    
+    success = screener.run_ema_screen()
+    return success
 
 
 if __name__ == "__main__":
-    run_ema_pullback_screener()
+    success = main()
+    exit(0 if success else 1)

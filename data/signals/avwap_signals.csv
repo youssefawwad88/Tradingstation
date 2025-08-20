@@ -1,9 +1,0 @@
-Date,Ticker,Anchor 1 Date,AVWAP 1,Reclaimed 1?,Rejected 1?,Anchor 2 Date,AVWAP 2,Reclaimed 2?,Rejected 2?,Current Price,Today’s Volume,20D Avg Volume,Volume vs Avg %,AVWAP Distance %,Setup Type,Signal Direction,Reason / Notes,Breakout Potential?,Setup Valid?,Reclaim Quality,Adjusted Setup Valid?,Signal Strength (★)
-2025-07-29,NVDA,2025-05-29,163.21,Yes,No,N/A,N/A,No,No,176.16,"77,416,816","162,065,482",47.77,7.93,Strong Reclaim,Long,Strong Reclaim with Weak quality candle.,No,FALSE,Weak,FALSE,★
-2025-07-29,AAPL,N/A,N/A,No,No,N/A,N/A,No,No,212.25,"20,044,008","49,711,300",40.32,N/A,Weak Signal,None,Weak Signal with Weak quality candle.,No,FALSE,Weak,FALSE,★
-2025-07-29,TSLA,2025-06-23,315.01,Yes,No,2025-06-05,315.01,Yes,No,320.68,"48,282,790","98,877,105",48.83,1.80,Double Reclaim,Long,Double Reclaim with Weak quality candle.,No,FALSE,Weak,FALSE,★★★
-2025-07-29,AMD,2025-06-25,151.50,Yes,No,2025-06-24,151.50,Yes,No,179.18,"64,723,057","49,226,684",131.48,18.28,Double Reclaim,Long,Double Reclaim with Weak quality candle.,No,FALSE,Weak,FALSE,★★★
-2025-07-29,GOOGL,2025-07-24,192.74,Yes,No,N/A,N/A,No,No,194.87,"16,643,990","39,916,482",41.70,1.10,Strong Reclaim,Long,Strong Reclaim with Moderate quality candle.,No,FALSE,Moderate,FALSE,★★
-2025-07-29,MSFT,N/A,N/A,No,No,N/A,N/A,No,No,512.02,"5,793,639","16,539,540",35.03,N/A,Weak Signal,None,Weak Signal with Strong quality candle.,No,FALSE,Strong,FALSE,★
-2025-07-29,AMZN,N/A,N/A,No,No,N/A,N/A,No,No,231.20,"14,532,795","37,191,868",39.08,N/A,Weak Signal,None,Weak Signal with Strong quality candle.,No,FALSE,Strong,FALSE,★
-2025-07-29,NFLX,2025-07-18,1198.33,No,No,N/A,N/A,No,No,1174.98,"1,100,004","4,028,274",27.31,1.95,Weak Signal,None,Weak Signal with Strong quality candle.,No,FALSE,Strong,FALSE,★★
