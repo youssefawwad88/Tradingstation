@@ -40,11 +40,11 @@ class ExhaustionReversalScreener:
                 self.universe_tickers = active_tickers
                 logger.info(f"Loaded {len(active_tickers)} tickers for exhaustion screening")
             else:
-                self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
+                self.universe_tickers = config.FALLBACK_TICKERS
                 
         except Exception as e:
             logger.error(f"Error loading universe: {e}")
-            self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
+            self.universe_tickers = config.FALLBACK_TICKERS
 
     def run_exhaustion_screen(self) -> bool:
         """Run the exhaustion reversal screening process."""
