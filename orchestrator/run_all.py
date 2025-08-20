@@ -1,4 +1,31 @@
-print("--- ORCHESTRATOR VERSION 2.0 RUNNING ---")
+#!/usr/bin/env python3
+
+# Enhanced version info with deployment tracking
+def get_orchestrator_deployment_info():
+    """Get orchestrator deployment version information."""
+    try:
+        import subprocess
+        from datetime import datetime
+        # Get git commit hash
+        commit_hash = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], 
+            cwd=os.path.dirname(__file__)
+        ).decode().strip()[:8]
+        
+        # Get current timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        return f"[DEPLOYMENT v{commit_hash} @ {timestamp}]"
+    except Exception:
+        return "[DEPLOYMENT unknown]"
+
+# Print enhanced version info immediately when script starts
+try:
+    deployment_info = get_orchestrator_deployment_info()
+    print(f"--- ORCHESTRATOR VERSION 2.0 RUNNING {deployment_info} ---")
+except Exception:
+    print("--- ORCHESTRATOR VERSION 2.0 RUNNING ---")
+
 import argparse
 import asyncio
 import logging

@@ -1,4 +1,3 @@
-print("--- DATA FETCH MANAGER VERSION 2.0 RUNNING ---")
 #!/usr/bin/env python3
 """
 Unified DataFetchManager - The Single Authority for Market Data
@@ -74,6 +73,13 @@ def get_deployment_info():
         return f"[DEPLOYMENT v{commit_hash} @ {timestamp}]"
     except Exception:
         return "[DEPLOYMENT unknown]"
+
+# Print enhanced version info immediately when script starts
+try:
+    deployment_info = get_deployment_info()
+    print(f"--- DATA FETCH MANAGER VERSION 2.0 RUNNING {deployment_info} ---")
+except Exception:
+    print("--- DATA FETCH MANAGER VERSION 2.0 RUNNING ---")
 
 
 class DataFetchManager:
