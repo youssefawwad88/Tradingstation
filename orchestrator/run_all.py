@@ -4,6 +4,7 @@ Minimal shim for automated scheduling and execution across market sessions.
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -40,6 +41,9 @@ def main():
 
     # Setup logging
     logger = get_logger("orchestrator")
+
+    # Log environment at startup
+    logger.info(f"env={dict(os.environ)}")
 
     # Log project root for debugging
     logger.info(f"Running orchestrator in {config.APP_ENV} mode")
@@ -80,35 +84,41 @@ def main():
                 result = subprocess.run(
                     cmd,
                     cwd=project_root,
-                    check=True,
+                    shell=False,
+                    check=False,
                     capture_output=True,
                     text=True,
+                    env=os.environ,
                     timeout=1800,  # 30-minute timeout for any single job
                 )
 
                 execution_time = time.time() - start_time
-                logger.info(f"✓ {job['name']} completed in {execution_time:.2f}s")
 
-                # Log stdout if present
-                if result.stdout:
-                    logger.debug(f"STDOUT: {result.stdout.strip()}")
+                # Check for non-zero return code and log details
+                if result.returncode != 0:
+                    # Trim stdout and stderr to ~2KB each
+                    stdout_trimmed = result.stdout[-2048:] if result.stdout else "None"
+                    stderr_trimmed = result.stderr[-2048:] if result.stderr else "None"
+                    
+                    logger.error(f"✗ {job['name']} failed after {execution_time:.2f}s")
+                    logger.error(f"Command: {cmd}")
+                    logger.error(f"Return code: {result.returncode}")
+                    logger.error(f"STDOUT (last 2KB): {stdout_trimmed}")
+                    logger.error(f"STDERR (last 2KB): {stderr_trimmed}")
+                    
+                    # Check if job is critical
+                    if job.get('critical', False):
+                        logger.error("Critical job failed, stopping orchestrator")
+                        sys.exit(1)
+                else:
+                    logger.info(f"✓ {job['name']} completed in {execution_time:.2f}s")
+
+                    # Log stdout if present
+                    if result.stdout:
+                        logger.debug(f"STDOUT: {result.stdout.strip()}")
 
             except subprocess.TimeoutExpired:
                 logger.error(f"✗ {job['name']} failed - timeout after 30 minutes")
-                if job.get('critical', False):
-                    logger.error("Critical job failed, stopping orchestrator")
-                    sys.exit(1)
-
-            except subprocess.CalledProcessError as e:
-                execution_time = time.time() - start_time
-                error_details = f"Exited with code {e.returncode}. STDERR: {e.stderr.strip() if e.stderr else 'None'}"
-                logger.error(f"✗ {job['name']} failed after {execution_time:.2f}s - {error_details}")
-
-                # Log stdout for debugging even on failure
-                if e.stdout:
-                    logger.debug(f"STDOUT: {e.stdout.strip()}")
-
-                # Check if job is critical
                 if job.get('critical', False):
                     logger.error("Critical job failed, stopping orchestrator")
                     sys.exit(1)
