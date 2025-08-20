@@ -124,7 +124,7 @@ class DataFetchManager:
             
         try:
             # Download master_tickerlist.csv from root of bucket
-            df = download_dataframe(self.spaces_client, SPACES_BUCKET_NAME, "master_tickerlist.csv")
+            df = download_dataframe("master_tickerlist.csv")
             
             if df is None or df.empty:
                 logger.critical("❌ CRITICAL: master_tickerlist.csv is empty or not found")
@@ -227,9 +227,7 @@ class DataFetchManager:
                     
             # Step 4: Save to cloud
             success = upload_dataframe(
-                self.spaces_client,
                 df_daily,
-                SPACES_BUCKET_NAME,
                 f"daily/{ticker}.csv"
             )
             
@@ -285,8 +283,6 @@ class DataFetchManager:
             if file_exists:
                 try:
                     existing_df = download_dataframe(
-                        self.spaces_client,
-                        SPACES_BUCKET_NAME,
                         f"{directory}/{ticker}.csv"
                     )
                 except Exception as e:
@@ -341,9 +337,7 @@ class DataFetchManager:
                     
             # Step 8: Save to cloud
             success = upload_dataframe(
-                self.spaces_client,
                 combined_df,
-                SPACES_BUCKET_NAME,
                 f"{directory}/{ticker}.csv"
             )
             
@@ -460,6 +454,83 @@ class DataFetchManager:
         logger.info(f"📊 Successfully processed {successful_tickers}/{len(self.master_tickers)} tickers")
         
         return results
+    
+    def run_daily_updates(self) -> bool:
+        """
+        Run only daily data updates for all tickers.
+        
+        Returns:
+            bool: Success status
+        """
+        if not self.master_tickers:
+            logger.error("❌ No tickers to process - master tickerlist not loaded")
+            return False
+            
+        logger.info(f"🚀 Running DAILY updates for {len(self.master_tickers)} tickers")
+        start_time = time.time()
+        
+        successful_tickers = 0
+        for i, ticker in enumerate(self.master_tickers, 1):
+            logger.info(f"📈 Processing daily data for ticker {i}/{len(self.master_tickers)}: {ticker}")
+            
+            if self.fetch_daily_data(ticker):
+                successful_tickers += 1
+                
+            # Brief pause between tickers to respect API limits
+            time.sleep(0.2)
+            
+        elapsed_time = time.time() - start_time
+        logger.info(f"🏁 Daily updates completed in {elapsed_time:.1f} seconds")
+        logger.info(f"📊 Successfully processed {successful_tickers}/{len(self.master_tickers)} tickers")
+        
+        return successful_tickers > 0
+    
+    def run_intraday_updates(self, interval: str) -> bool:
+        """
+        Run only intraday data updates for a specific interval.
+        
+        Args:
+            interval: '1min' or '30min'
+            
+        Returns:
+            bool: Success status
+        """
+        if interval not in ['1min', '30min']:
+            logger.error(f"❌ Invalid interval: {interval}. Must be '1min' or '30min'")
+            return False
+            
+        if not self.master_tickers:
+            logger.error("❌ No tickers to process - master tickerlist not loaded")
+            return False
+            
+        logger.info(f"🚀 Running {interval.upper()} intraday updates for {len(self.master_tickers)} tickers")
+        start_time = time.time()
+        
+        successful_tickers = 0
+        for i, ticker in enumerate(self.master_tickers, 1):
+            logger.info(f"📊 Processing {interval} data for ticker {i}/{len(self.master_tickers)}: {ticker}")
+            
+            if self.fetch_intraday_data(ticker, interval):
+                successful_tickers += 1
+                
+            # Brief pause between tickers to respect API limits
+            time.sleep(0.2)
+            
+        elapsed_time = time.time() - start_time
+        logger.info(f"🏁 {interval.upper()} updates completed in {elapsed_time:.1f} seconds")
+        logger.info(f"📊 Successfully processed {successful_tickers}/{len(self.master_tickers)} tickers")
+        
+        return successful_tickers > 0
+    
+    def run_all_data_updates(self) -> bool:
+        """
+        Run complete data updates for all intervals (original behavior).
+        
+        Returns:
+            bool: Success status
+        """
+        logger.info("🌟 Running COMPLETE data updates for all intervals")
+        return self.run()
         
     def run(self):
         """
@@ -517,18 +588,32 @@ class DataFetchManager:
             logger.warning(f"⚠️ Failed tickers: {failed_tickers}")
 
 
-def main():
-    """Main entry point for the DataFetchManager."""
-    manager = DataFetchManager()
-    success = manager.run()
-    
-    if success:
-        logger.info("✅ DataFetchManager execution completed successfully")
-        exit(0)
-    else:
-        logger.error("❌ DataFetchManager execution failed")
-        exit(1)
-
-
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Unified Data Fetch Manager for the Trading System.")
+    parser.add_argument(
+        '--interval',
+        type=str,
+        choices=['1min', '30min', 'daily'],
+        required=False,  # Make the argument optional
+        help="Specify a single interval to update. If not provided, all intervals will be updated by default."
+    )
+    args = parser.parse_args()
+
+    # Instantiate and run the manager
+    manager = DataFetchManager() 
+
+    if args.interval == '1min':
+        print("--- Triggering 1-Minute Intraday Update Only ---")
+        manager.run_intraday_updates(interval='1min')
+    elif args.interval == '30min':
+        print("--- Triggering 30-Minute Intraday Update Only ---")
+        manager.run_intraday_updates(interval='30min')
+    elif args.interval == 'daily':
+        print("--- Triggering Daily Update Only ---")
+        manager.run_daily_updates()
+    else:
+        # This is the default behavior if the script is run with no arguments
+        print("--- No specific interval provided. Running full update for ALL intervals. ---")
+        manager.run_all_data_updates()
