@@ -1,5 +1,13 @@
+"""
+Central configuration management for the trading system.
+
+This module handles all configuration, environment variables, and constants.
+No secrets are stored in code - everything comes from environment variables.
+"""
+
 import os
 from pathlib import Path
+from typing import Optional
 
 # Load environment variables from .env file if it exists
 try:
@@ -12,93 +20,178 @@ except ImportError:
     # python-dotenv not installed, continue with system environment variables
     pass
 
-# API Keys
-ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 
-# DigitalOcean Spaces Configuration
-SPACES_ACCESS_KEY_ID = os.getenv("SPACES_ACCESS_KEY_ID")
-SPACES_SECRET_ACCESS_KEY = os.getenv("SPACES_SECRET_ACCESS_KEY")
-SPACES_BUCKET_NAME = os.getenv("SPACES_BUCKET_NAME")
-SPACES_REGION = os.getenv("SPACES_REGION", "nyc3")
-SPACES_ENDPOINT_URL = (
-    f"https://{SPACES_BUCKET_NAME}.{SPACES_REGION}.digitaloceanspaces.com"
-    if SPACES_BUCKET_NAME
-    else None
-)
+class Config:
+    """Central configuration class for all trading system settings."""
 
-# Phase 1: Environment Variable Setup - Path Structure Variables
-SPACES_BASE_PREFIX = os.getenv("SPACES_BASE_PREFIX", "data")
-SPACES_STRUCTURE_VERSION = os.getenv("SPACES_STRUCTURE_VERSION", "v2")
+    # === API Keys ===
+    ALPHA_VANTAGE_API_KEY: Optional[str] = os.getenv("ALPHA_VANTAGE_API_KEY")
 
-# Phase 1: Data Retention Configuration - KEEP TODAY'S DATA
-INTRADAY_TRIM_DAYS = int(os.getenv("INTRADAY_TRIM_DAYS", "7"))
-INTRADAY_EXCLUDE_TODAY = os.getenv("INTRADAY_EXCLUDE_TODAY", "false").lower() == "true"
-INTRADAY_INCLUDE_PREMARKET = (
-    os.getenv("INTRADAY_INCLUDE_PREMARKET", "true").lower() == "true"
-)
-INTRADAY_INCLUDE_AFTERHOURS = (
-    os.getenv("INTRADAY_INCLUDE_AFTERHOURS", "true").lower() == "true"
-)
-TIMEZONE = os.getenv("TIMEZONE", "America/New_York")
+    # === DigitalOcean Spaces Configuration ===
+    SPACES_ACCESS_KEY_ID: Optional[str] = os.getenv("SPACES_ACCESS_KEY_ID")
+    SPACES_SECRET_ACCESS_KEY: Optional[str] = os.getenv("SPACES_SECRET_ACCESS_KEY")
+    SPACES_BUCKET_NAME: Optional[str] = os.getenv("SPACES_BUCKET_NAME")
+    SPACES_REGION: str = os.getenv("SPACES_REGION", "nyc3")
+    SPACES_ENDPOINT: str = f"https://{SPACES_REGION}.digitaloceanspaces.com"
 
-# Phase 1: Processing Controls
-PROCESS_MANUAL_TICKERS = os.getenv("PROCESS_MANUAL_TICKERS", "true").lower() == "true"
-MAX_TICKERS_PER_RUN = int(os.getenv("MAX_TICKERS_PER_RUN", "25"))
-INTRADAY_BATCH_SIZE = int(os.getenv("INTRADAY_BATCH_SIZE", "25"))
-MARKET_HOURS_ONLY = os.getenv("MARKET_HOURS_ONLY", "false").lower() == "true"
-SKIP_IF_FRESH_MINUTES = int(os.getenv("SKIP_IF_FRESH_MINUTES", "0"))
-DEBUG_MODE = (
-    os.getenv("DEBUG_MODE", "true").lower() == "true"
-)  # Default to true for debugging
+    # === Application Environment ===
+    APP_ENV: str = os.getenv("APP_ENV", "development")
+    DEPLOYMENT_TAG: Optional[str] = os.getenv("DEPLOYMENT_TAG")
+    
+    # === Feature Flags ===
+    FETCH_EXTENDED_HOURS: bool = os.getenv("FETCH_EXTENDED_HOURS", "true").lower() == "true"
+    TEST_MODE_INIT_ALLOWED: bool = os.getenv("TEST_MODE_INIT_ALLOWED", "true").lower() == "true"
+    DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
-# Weekend Test Mode Configuration
-TEST_MODE = os.getenv("TEST_MODE", "auto").lower()  # auto, enabled, disabled
-WEEKEND_TEST_MODE_ENABLED = (
-    os.getenv("WEEKEND_TEST_MODE_ENABLED", "true").lower() == "true"
-)
+    # === Data Layer Structure (Spaces paths) ===
+    SPACES_BASE_PREFIX: str = "trading-system"
+    
+    
+    # === Data Folder Keys ===
+    @property
+    def UNIVERSE_PATH(self) -> str:
+        return self.get_spaces_path("data", "universe")
+    
+    @property
+    def DAILY_PATH(self) -> str:
+        return self.get_spaces_path("data", "daily")
+    
+    @property
+    def INTRADAY_1MIN_PATH(self) -> str:
+        return self.get_spaces_path("data", "intraday", "1min")
+    
+    @property
+    def INTRADAY_30MIN_PATH(self) -> str:
+        return self.get_spaces_path("data", "intraday", "30min")
+    
+    @property
+    def SIGNALS_PATH(self) -> str:
+        return self.get_spaces_path("data", "signals")
+    
+    @property
+    def DASHBOARD_PATH(self) -> str:
+        return self.get_spaces_path("data", "dashboard")
+    
+    @property
+    def MANIFEST_PATH(self) -> str:
+        return self.get_spaces_path("data", "manifest")
 
-# Master Orchestrator Mode Configuration
-# MODE environment variable takes priority over automatic weekend detection
-# Valid values: "test", "production" (case insensitive)
-# If not set, falls back to TEST_MODE and weekend detection logic
-MODE = os.getenv("MODE", "").lower() if os.getenv("MODE") else None
+    # === Data Retention Windows ===
+    INTRADAY_1MIN_RETENTION_DAYS: int = int(os.getenv("INTRADAY_1MIN_RETENTION_DAYS", "7"))
+    INTRADAY_30MIN_RETENTION_ROWS: int = int(os.getenv("INTRADAY_30MIN_RETENTION_ROWS", "500"))
+    DAILY_RETENTION_ROWS: int = int(os.getenv("DAILY_RETENTION_ROWS", "200"))
 
-# File Paths
-BASE_DATA_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
-)
-INTRADAY_DATA_DIR = f"{BASE_DATA_DIR}/intraday"
-INTRADAY_30MIN_DATA_DIR = f"{BASE_DATA_DIR}/intraday_30min"
-DAILY_DATA_DIR = f"{BASE_DATA_DIR}/daily"
+    # === Processing Controls ===
+    MAX_TICKERS_PER_RUN: int = int(os.getenv("MAX_TICKERS_PER_RUN", "25"))
+    API_RATE_LIMIT_CALLS_PER_MINUTE: int = int(os.getenv("API_RATE_LIMIT_CALLS_PER_MINUTE", "150"))
+    
+    # === Market Schedule ===
+    TIMEZONE: str = os.getenv("TIMEZONE", "America/New_York")
+    MARKET_OPEN_HOUR: int = 9
+    MARKET_OPEN_MINUTE: int = 30
+    MARKET_CLOSE_HOUR: int = 16
+    MARKET_CLOSE_MINUTE: int = 0
+    
+    # === Gap & Go Strategy Configuration ===
+    MIN_GAP_LONG_PCT: float = float(os.getenv("MIN_GAP_LONG_PCT", "2.0"))
+    MIN_GAP_SHORT_PCT: float = float(os.getenv("MIN_GAP_SHORT_PCT", "-2.0"))
+    VOLUME_SPIKE_THRESHOLD: float = float(os.getenv("VOLUME_SPIKE_THRESHOLD", "1.15"))
+    BREAKOUT_TIME_GUARD_MINUTES: int = int(os.getenv("BREAKOUT_TIME_GUARD_MINUTES", "6"))  # 09:36
+    
+    # === Risk Management ===
+    ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "100000"))
+    MAX_RISK_PER_TRADE_PCT: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "2.0"))
+    MAX_DAILY_RISK_PCT: float = float(os.getenv("MAX_DAILY_RISK_PCT", "6.0"))
+    DEFAULT_POSITION_SIZE_SHARES: int = int(os.getenv("DEFAULT_POSITION_SIZE_SHARES", "100"))
 
-# Ensure directories exist
-os.makedirs(INTRADAY_DATA_DIR, exist_ok=True)
-os.makedirs(INTRADAY_30MIN_DATA_DIR, exist_ok=True)
-os.makedirs(DAILY_DATA_DIR, exist_ok=True)
+    # === File Size Thresholds ===
+    MIN_FILE_SIZE_BYTES: int = int(os.getenv("MIN_FILE_SIZE_BYTES", "10240"))  # 10KB
+    
+    @classmethod
+    def validate_configuration(cls) -> tuple[bool, list[str]]:
+        """
+        Validate that all required configuration is present.
+        
+        Returns:
+            tuple: (is_valid, list_of_errors)
+        """
+        errors = []
+        
+        # Check required API keys for production
+        if cls.APP_ENV == "production":
+            if not cls.ALPHA_VANTAGE_API_KEY:
+                errors.append("ALPHA_VANTAGE_API_KEY is required in production")
+            if not cls.SPACES_ACCESS_KEY_ID:
+                errors.append("SPACES_ACCESS_KEY_ID is required in production")
+            if not cls.SPACES_SECRET_ACCESS_KEY:
+                errors.append("SPACES_SECRET_ACCESS_KEY is required in production")
+            if not cls.SPACES_BUCKET_NAME:
+                errors.append("SPACES_BUCKET_NAME is required in production")
+        
+        # Validate numeric ranges
+        if cls.MAX_RISK_PER_TRADE_PCT <= 0 or cls.MAX_RISK_PER_TRADE_PCT > 10:
+            errors.append("MAX_RISK_PER_TRADE_PCT must be between 0 and 10")
+        
+        if cls.ACCOUNT_SIZE <= 0:
+            errors.append("ACCOUNT_SIZE must be positive")
+            
+        return len(errors) == 0, errors
 
-# Stock Tickers
-DEFAULT_TICKERS = [
-    "AAPL",
-    "MSFT",
-    "AMZN",
-    "GOOGL",
-    "META",
-    "TSLA",
-    "NVDA",
-    "AMD",
-    "INTC",
-    "IBM",
-]
+    @classmethod
+    def get_credentials_status(cls) -> dict[str, bool]:
+        """Get the status of all credentials."""
+        return {
+            "alpha_vantage": bool(cls.ALPHA_VANTAGE_API_KEY),
+            "spaces_access_key": bool(cls.SPACES_ACCESS_KEY_ID),
+            "spaces_secret_key": bool(cls.SPACES_SECRET_ACCESS_KEY),
+            "spaces_bucket": bool(cls.SPACES_BUCKET_NAME),
+        }
 
-# Time Intervals
-INTRADAY_INTERVALS = ["1min", "30min"]
+    @classmethod
+    def is_test_mode(cls) -> bool:
+        """Determine if the system should run in test mode."""
+        # Check explicit test mode override
+        test_mode = os.getenv("TEST_MODE", "auto").lower()
+        if test_mode == "enabled":
+            return True
+        elif test_mode == "disabled":
+            return False
+        
+        # Auto mode: check if we have credentials and it's a weekday during market hours
+        import datetime
+        import pytz
+        
+        ny_tz = pytz.timezone(cls.TIMEZONE)
+        current_time = datetime.datetime.now(ny_tz)
+        is_weekend = current_time.weekday() >= 5
+        
+        # If no API key, always test mode
+        if not cls.ALPHA_VANTAGE_API_KEY:
+            return True
+            
+        # If weekend and test mode init allowed, use test mode
+        if is_weekend and cls.TEST_MODE_INIT_ALLOWED:
+            return True
+            
+        return False
 
-# --- Data Health Check Requirements ---
-# Minimum number of rows required for historical daily data
-DAILY_MIN_ROWS = 200
 
-# Minimum number of rows required for historical 30-minute data
-THIRTY_MIN_MIN_ROWS = 500
+# Global config instance
+config = Config()
 
-# Required lookback period in days for 1-minute data
-ONE_MIN_REQUIRED_DAYS = 7
+
+def get_deployment_info() -> str:
+    """Get deployment information for logging."""
+    tag = config.DEPLOYMENT_TAG or "unknown"
+    env = config.APP_ENV
+    return f"Deployment: {tag} | Environment: {env}"
+
+
+# Backward compatibility exports
+ALPHA_VANTAGE_API_KEY = config.ALPHA_VANTAGE_API_KEY
+SPACES_ACCESS_KEY_ID = config.SPACES_ACCESS_KEY_ID
+SPACES_SECRET_ACCESS_KEY = config.SPACES_SECRET_ACCESS_KEY
+SPACES_BUCKET_NAME = config.SPACES_BUCKET_NAME
+SPACES_REGION = config.SPACES_REGION
+SPACES_ENDPOINT = config.SPACES_ENDPOINT
+DEBUG_MODE = config.DEBUG_MODE
