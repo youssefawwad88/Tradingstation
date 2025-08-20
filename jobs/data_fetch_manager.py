@@ -524,17 +524,33 @@ def main():
     """Main entry point for the data fetch manager."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Unified Data Fetch Manager")
+    parser = argparse.ArgumentParser(
+        description="Unified Data Fetch Manager - Single Authority for Market Data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --job daily
+  %(prog)s --job intraday --interval 1min
+  %(prog)s --job intraday --interval 30min --force-full
+  %(prog)s --job intraday --interval all --tickers AAPL,TSLA
+  
+Legacy (deprecated):
+  %(prog)s --job intraday_1min   # Use: --job intraday --interval 1min
+  %(prog)s --job intraday_30min  # Use: --job intraday --interval 30min
+        """
+    )
+    
+    # Canonical flags
     parser.add_argument(
         "--job",
-        choices=["all", "daily", "intraday"],
-        default="all",
-        help="Job type to run",
+        choices=["daily", "intraday", "intraday_1min", "intraday_30min"],  # Include legacy
+        required=True,
+        help="Job type to run: 'daily' or 'intraday' with --interval",
     )
     parser.add_argument(
         "--interval",
         choices=["1min", "30min", "all"],
-        help="Specific interval for intraday jobs",
+        help="Required for --job intraday: {1min|30min|all}",
     )
     parser.add_argument(
         "--tickers",
@@ -545,13 +561,41 @@ def main():
         action="store_true",
         help="Force full refresh of all data",
     )
-    parser.add_argument(
+    
+    # Test mode flags
+    test_group = parser.add_mutually_exclusive_group()
+    test_group.add_argument(
         "--test-mode",
         action="store_true",
         help="Run in test mode (no API calls)",
     )
+    test_group.add_argument(
+        "--no-test-mode",
+        action="store_true",
+        help="Explicitly disable test mode",
+    )
     
     args = parser.parse_args()
+    
+    # Handle legacy flags with deprecation warnings
+    if args.job == "intraday_1min":
+        logger.warning("DEPRECATED: --job intraday_1min. Use: --job intraday --interval 1min")
+        args.job = "intraday"
+        args.interval = "1min"
+    elif args.job == "intraday_30min":
+        logger.warning("DEPRECATED: --job intraday_30min. Use: --job intraday --interval 30min")
+        args.job = "intraday"
+        args.interval = "30min"
+    
+    # Validate canonical flag combinations
+    if args.job == "intraday" and not args.interval:
+        parser.error("--job intraday requires --interval {1min|30min|all}")
+    elif args.job == "daily" and args.interval:
+        parser.error("--job daily does not accept --interval (intervals are for intraday only)")
+    
+    # Validate interval choices
+    if args.interval and args.interval not in ["1min", "30min", "all"]:
+        parser.error(f"Invalid --interval '{args.interval}'. Use: 1min, 30min, or all")
     
     manager = DataFetchManager()
     
@@ -567,10 +611,7 @@ def main():
     # Execute based on job type
     success = False
     
-    if args.job == "all":
-        logger.info(f"--- Running Full Data Update --- {deployment_info}")
-        success = manager.run_full_data_update()
-    elif args.job == "daily":
+    if args.job == "daily":
         logger.info(f"--- Running Daily Data Update --- {deployment_info}")
         success = manager.run_daily_updates()
     elif args.job == "intraday":
@@ -579,12 +620,9 @@ def main():
             success_1min = manager.run_intraday_updates("1min")
             success_30min = manager.run_intraday_updates("30min")
             success = success_1min or success_30min
-        elif args.interval:
+        else:
             logger.info(f"--- Running {args.interval} Intraday Update --- {deployment_info}")
             success = manager.run_intraday_updates(args.interval)
-        else:
-            logger.error("Intraday job requires --interval parameter")
-            return False
     
     return success
 

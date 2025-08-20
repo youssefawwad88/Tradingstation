@@ -30,7 +30,7 @@ class BreakoutScreener:
     def load_universe(self) -> None:
         """Load the master ticker list from Spaces."""
         try:
-            universe_key = config.get_spaces_path("data", "universe", "master_tickerlist.csv")
+            universe_key = config.get_spaces_path(*config.MASTER_TICKERLIST_PATH)
             df = spaces_io.download_dataframe(universe_key)
             
             if df is not None and not df.empty:
