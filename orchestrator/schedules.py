@@ -24,15 +24,9 @@ def get_premarket_schedule() -> List[Dict[str, Any]]:
     """Jobs to run during premarket (4:00 AM - 9:30 AM ET)."""
     return [
         {
-            "name": "Update Universe",
+            "name": "Daily Refresh",
             "module": "jobs.data_fetch_manager",
-            "args": ["--job", "universe"],
-            "critical": True
-        },
-        {
-            "name": "Fetch Daily Data",
-            "module": "jobs.data_fetch_manager",
-            "args": ["--job", "daily"],
+            "args": ["--job", "daily", "--force-full"],
             "critical": True
         },
         {
