@@ -1,3 +1,4 @@
+print("--- DATA FETCH MANAGER VERSION 2.0 RUNNING ---")
 #!/usr/bin/env python3
 """
 Unified DataFetchManager - The Single Authority for Market Data
