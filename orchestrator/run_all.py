@@ -1,3 +1,4 @@
+print("--- ORCHESTRATOR VERSION 2.0 RUNNING ---")
 import argparse
 import asyncio
 import logging
@@ -103,6 +104,9 @@ def run_job(script_path, job_name):
 
         # Build command with script and arguments
         cmd = [sys.executable, full_path] + script_args
+        
+        # DEBUG: Log the exact command being executed
+        logger.info(f"ORCHESTRATOR: Preparing to execute command: '{' '.join(cmd)}'")
 
         result = subprocess.run(
             cmd,

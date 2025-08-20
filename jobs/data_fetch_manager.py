@@ -1,3 +1,4 @@
+print("--- DATA FETCH MANAGER VERSION 2.0 RUNNING ---")
 #!/usr/bin/env python3
 """
 Unified DataFetchManager - The Single Authority for Market Data
@@ -57,6 +58,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_deployment_info():
+    """Get deployment version information for debugging silent failures."""
+    try:
+        import subprocess
+        # Get git commit hash
+        commit_hash = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], 
+            cwd=os.path.dirname(__file__)
+        ).decode().strip()[:8]
+        
+        # Get current timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        
+        return f"[DEPLOYMENT v{commit_hash} @ {timestamp}]"
+    except Exception:
+        return "[DEPLOYMENT unknown]"
+
+
 class DataFetchManager:
     """
     Unified Data Fetch Manager - The single authority for all market data operations.
@@ -67,6 +86,10 @@ class DataFetchManager:
     
     def __init__(self):
         """Initialize the DataFetchManager with all required configurations."""
+        # Log deployment version for debugging silent failures
+        deployment_info = get_deployment_info()
+        logger.info(f"🚀 DataFetchManager {deployment_info} - Initialization Starting")
+        
         self.ny_tz = pytz.timezone("America/New_York")
         self.utc_tz = pytz.timezone("UTC")
         
@@ -602,18 +625,21 @@ if __name__ == "__main__":
 
     # Instantiate the main class that contains the fetching logic
     manager = DataFetchManager() 
+    
+    # Get deployment info for tracking
+    deployment_info = get_deployment_info()
 
     # This logic block explicitly handles every possible case
     if args.interval == '1min':
-        print("--- Triggering 1-Minute Intraday Update Only ---")
+        print(f"--- Triggering 1-Minute Intraday Update Only --- {deployment_info}")
         manager.run_intraday_updates(interval='1min')
     elif args.interval == '30min':
-        print("--- Triggering 30-Minute Intraday Update Only ---")
+        print(f"--- Triggering 30-Minute Intraday Update Only --- {deployment_info}")
         manager.run_intraday_updates(interval='30min')
     elif args.interval == 'daily':
-        print("--- Triggering Daily Update Only ---")
+        print(f"--- Triggering Daily Update Only --- {deployment_info}")
         manager.run_daily_updates()
     else:
         # Default behavior: If the script is run without any arguments, it updates EVERYTHING.
-        print("--- No specific interval provided. Running full update for ALL intervals. ---")
+        print(f"--- No specific interval provided. Running full update for ALL intervals. --- {deployment_info}")
         manager.run_all_data_updates()
