@@ -46,35 +46,10 @@ class Config:
     # === Data Layer Structure (Spaces paths) ===
     SPACES_BASE_PREFIX: str = "trading-system"
     
-    
-    # === Data Folder Keys ===
-    @property
-    def UNIVERSE_PATH(self) -> str:
-        return self.get_spaces_path("data", "universe")
-    
-    @property
-    def DAILY_PATH(self) -> str:
-        return self.get_spaces_path("data", "daily")
-    
-    @property
-    def INTRADAY_1MIN_PATH(self) -> str:
-        return self.get_spaces_path("data", "intraday", "1min")
-    
-    @property
-    def INTRADAY_30MIN_PATH(self) -> str:
-        return self.get_spaces_path("data", "intraday", "30min")
-    
-    @property
-    def SIGNALS_PATH(self) -> str:
-        return self.get_spaces_path("data", "signals")
-    
-    @property
-    def DASHBOARD_PATH(self) -> str:
-        return self.get_spaces_path("data", "dashboard")
-    
-    @property
-    def MANIFEST_PATH(self) -> str:
-        return self.get_spaces_path("data", "manifest")
+    @classmethod
+    def get_spaces_path(cls, *path_parts: str) -> str:
+        """Get a complete Spaces object path."""
+        return f"{cls.SPACES_BASE_PREFIX}/" + "/".join(path_parts)
 
     # === Data Retention Windows ===
     INTRADAY_1MIN_RETENTION_DAYS: int = int(os.getenv("INTRADAY_1MIN_RETENTION_DAYS", "7"))
