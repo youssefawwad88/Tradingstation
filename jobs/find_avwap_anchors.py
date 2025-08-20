@@ -31,7 +31,7 @@ class AVWAPAnchorDetector:
     def load_universe(self) -> None:
         """Load the master ticker list from Spaces."""
         try:
-            universe_key = config.get_spaces_path("data", "universe", "master_tickerlist.csv")
+            universe_key = config.get_spaces_path(*config.MASTER_TICKERLIST_PATH)
             df = spaces_io.download_dataframe(universe_key)
             
             if df is not None and not df.empty:
@@ -40,12 +40,12 @@ class AVWAPAnchorDetector:
                 self.universe_tickers = active_tickers
                 logger.info(f"Loaded {len(active_tickers)} active tickers for anchor detection")
             else:
-                self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
-                logger.warning("Universe not found, using default tickers")
+                self.universe_tickers = config.FALLBACK_TICKERS
+                logger.warning("Universe not found, using fallback tickers")
                 
         except Exception as e:
             logger.error(f"Error loading universe: {e}")
-            self.universe_tickers = ["NVDA", "AAPL", "TSLA"]
+            self.universe_tickers = config.FALLBACK_TICKERS
 
     def detect_all_anchors(self, lookback_days: int = 30) -> bool:
         """

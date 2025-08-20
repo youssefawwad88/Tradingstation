@@ -1,5 +1,4 @@
-"""
-Central configuration management for the trading system.
+"""Central configuration management for the trading system.
 
 This module handles all configuration, environment variables, and constants.
 No secrets are stored in code - everything comes from environment variables.
@@ -37,7 +36,7 @@ class Config:
     # === Application Environment ===
     APP_ENV: str = os.getenv("APP_ENV", "development")
     DEPLOYMENT_TAG: Optional[str] = os.getenv("DEPLOYMENT_TAG")
-    
+
     # === Feature Flags ===
     FETCH_EXTENDED_HOURS: bool = os.getenv("FETCH_EXTENDED_HOURS", "true").lower() == "true"
     TEST_MODE_INIT_ALLOWED: bool = os.getenv("TEST_MODE_INIT_ALLOWED", "true").lower() == "true"
@@ -45,7 +44,11 @@ class Config:
 
     # === Data Layer Structure (Spaces paths) ===
     SPACES_BASE_PREFIX: str = "trading-system"
-    
+
+    # === Fallback Configuration ===
+    FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA"]
+    MASTER_TICKERLIST_PATH: tuple[str, ...] = ("data", "universe", "master_tickerlist.csv")
+
     @classmethod
     def get_spaces_path(cls, *path_parts: str) -> str:
         """Get a complete Spaces object path."""
@@ -59,20 +62,20 @@ class Config:
     # === Processing Controls ===
     MAX_TICKERS_PER_RUN: int = int(os.getenv("MAX_TICKERS_PER_RUN", "25"))
     API_RATE_LIMIT_CALLS_PER_MINUTE: int = int(os.getenv("API_RATE_LIMIT_CALLS_PER_MINUTE", "150"))
-    
+
     # === Market Schedule ===
     TIMEZONE: str = os.getenv("TIMEZONE", "America/New_York")
     MARKET_OPEN_HOUR: int = 9
     MARKET_OPEN_MINUTE: int = 30
     MARKET_CLOSE_HOUR: int = 16
     MARKET_CLOSE_MINUTE: int = 0
-    
+
     # === Gap & Go Strategy Configuration ===
     MIN_GAP_LONG_PCT: float = float(os.getenv("MIN_GAP_LONG_PCT", "2.0"))
     MIN_GAP_SHORT_PCT: float = float(os.getenv("MIN_GAP_SHORT_PCT", "-2.0"))
     VOLUME_SPIKE_THRESHOLD: float = float(os.getenv("VOLUME_SPIKE_THRESHOLD", "1.15"))
     BREAKOUT_TIME_GUARD_MINUTES: int = int(os.getenv("BREAKOUT_TIME_GUARD_MINUTES", "6"))  # 09:36
-    
+
     # === Risk Management ===
     ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "100000"))
     MAX_RISK_PER_TRADE_PCT: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "2.0"))
@@ -81,17 +84,16 @@ class Config:
 
     # === File Size Thresholds ===
     MIN_FILE_SIZE_BYTES: int = int(os.getenv("MIN_FILE_SIZE_BYTES", "10240"))  # 10KB
-    
+
     @classmethod
     def validate_configuration(cls) -> tuple[bool, list[str]]:
-        """
-        Validate that all required configuration is present.
+        """Validate that all required configuration is present.
         
         Returns:
             tuple: (is_valid, list_of_errors)
         """
         errors = []
-        
+
         # Check required API keys for production
         if cls.APP_ENV == "production":
             if not cls.ALPHA_VANTAGE_API_KEY:
@@ -102,14 +104,14 @@ class Config:
                 errors.append("SPACES_SECRET_ACCESS_KEY is required in production")
             if not cls.SPACES_BUCKET_NAME:
                 errors.append("SPACES_BUCKET_NAME is required in production")
-        
+
         # Validate numeric ranges
         if cls.MAX_RISK_PER_TRADE_PCT <= 0 or cls.MAX_RISK_PER_TRADE_PCT > 10:
             errors.append("MAX_RISK_PER_TRADE_PCT must be between 0 and 10")
-        
+
         if cls.ACCOUNT_SIZE <= 0:
             errors.append("ACCOUNT_SIZE must be positive")
-            
+
         return len(errors) == 0, errors
 
     @classmethod
@@ -131,23 +133,24 @@ class Config:
             return True
         elif test_mode == "disabled":
             return False
-        
+
         # Auto mode: check if we have credentials and it's a weekday during market hours
         import datetime
+
         import pytz
-        
+
         ny_tz = pytz.timezone(cls.TIMEZONE)
         current_time = datetime.datetime.now(ny_tz)
         is_weekend = current_time.weekday() >= 5
-        
+
         # If no API key, always test mode
         if not cls.ALPHA_VANTAGE_API_KEY:
             return True
-            
+
         # If weekend and test mode init allowed, use test mode
         if is_weekend and cls.TEST_MODE_INIT_ALLOWED:
             return True
-            
+
         return False
 
 
