@@ -188,7 +188,7 @@ def run_intraday_updates():
     logger.info(
         f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager with self-healing"
     )
-    result = run_job("jobs/data_fetch_manager.py", "data_fetch_manager")
+    result = run_job("jobs/data_fetch_manager.py --interval 1min", "data_fetch_manager")
     if TEST_MODE_ACTIVE and result:
         logger.info(
             "[TEST MODE] DataFetchManager simulation completed successfully"
