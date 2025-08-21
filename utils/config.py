@@ -24,7 +24,12 @@ class Config:
     """Central configuration class for all trading system settings."""
 
     # === API Keys ===
-    ALPHA_VANTAGE_API_KEY: Optional[str] = os.getenv("ALPHA_VANTAGE_API_KEY")
+    MARKETDATA_TOKEN: Optional[str] = os.getenv("MARKETDATA_TOKEN")
+    
+    # Environment variables for degraded mode
+    INTRADAY_EXTENDED: bool = os.getenv("INTRADAY_EXTENDED", "false").lower() == "true"
+    DEGRADE_INTRADAY_ON_STALE_MINUTES: int = int(os.getenv("DEGRADE_INTRADAY_ON_STALE_MINUTES", "5"))
+    PROVIDER_DEGRADED_ALLOWED: bool = os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
 
     # === DigitalOcean Spaces Configuration ===
     SPACES_ACCESS_KEY_ID: Optional[str] = os.getenv("SPACES_ACCESS_KEY_ID")
@@ -96,8 +101,8 @@ class Config:
 
         # Check required API keys for production
         if cls.APP_ENV == "production":
-            if not cls.ALPHA_VANTAGE_API_KEY:
-                errors.append("ALPHA_VANTAGE_API_KEY is required in production")
+            if not cls.MARKETDATA_TOKEN:
+                errors.append("MARKETDATA_TOKEN is required in production")
             if not cls.SPACES_ACCESS_KEY_ID:
                 errors.append("SPACES_ACCESS_KEY_ID is required in production")
             if not cls.SPACES_SECRET_ACCESS_KEY:
@@ -118,7 +123,7 @@ class Config:
     def get_credentials_status(cls) -> dict[str, bool]:
         """Get the status of all credentials."""
         return {
-            "alpha_vantage": bool(cls.ALPHA_VANTAGE_API_KEY),
+            "marketdata": bool(cls.MARKETDATA_TOKEN),
             "spaces_access_key": bool(cls.SPACES_ACCESS_KEY_ID),
             "spaces_secret_key": bool(cls.SPACES_SECRET_ACCESS_KEY),
             "spaces_bucket": bool(cls.SPACES_BUCKET_NAME),
@@ -144,7 +149,7 @@ class Config:
         is_weekend = current_time.weekday() >= 5
 
         # If no API key, always test mode
-        if not cls.ALPHA_VANTAGE_API_KEY:
+        if not cls.MARKETDATA_TOKEN:
             return True
 
         # If weekend and test mode init allowed, use test mode
@@ -166,7 +171,7 @@ def get_deployment_info() -> str:
 
 
 # Backward compatibility exports
-ALPHA_VANTAGE_API_KEY = config.ALPHA_VANTAGE_API_KEY
+MARKETDATA_TOKEN = config.MARKETDATA_TOKEN
 SPACES_ACCESS_KEY_ID = config.SPACES_ACCESS_KEY_ID
 SPACES_SECRET_ACCESS_KEY = config.SPACES_SECRET_ACCESS_KEY
 SPACES_BUCKET_NAME = config.SPACES_BUCKET_NAME

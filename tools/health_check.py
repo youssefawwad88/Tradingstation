@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import config
 from utils.spaces_io import SpacesIO
-from utils.alpha_vantage_api import AlphaVantageAPI
+from utils.providers.router import health_check as provider_health_check
 from utils.logging_setup import get_logger
 
 
@@ -28,23 +28,21 @@ class HealthChecker:
         self.spaces = SpacesIO()
         
     def check_api_limits(self) -> Dict[str, Any]:
-        """Check Alpha Vantage API usage and limits."""
+        """Check MarketData API connectivity and health."""
         try:
-            api = AlphaVantageAPI()
-            
-            # Try a test call to check if API is working
-            test_data = api.get_daily_data("AAPL", compact=True)
+            # Use the provider health check
+            is_healthy, status_msg = provider_health_check()
             
             result = {
-                "status": "healthy" if test_data is not None else "degraded",
-                "api_accessible": test_data is not None,
+                "status": "healthy" if is_healthy else "degraded",
+                "api_accessible": is_healthy,
                 "last_test": datetime.now(timezone.utc).isoformat(),
-                "estimated_calls_remaining": "unknown",  # Alpha Vantage doesn't provide this
-                "rate_limit_status": "unknown"
+                "provider": "marketdata",
+                "message": status_msg,
             }
             
-            if test_data is None:
-                result["issue"] = "API returned no data - possible rate limit or API key issue"
+            if not is_healthy:
+                result["issue"] = f"MarketData API issue: {status_msg}"
             
             return result
             
@@ -53,6 +51,7 @@ class HealthChecker:
                 "status": "unhealthy",
                 "api_accessible": False,
                 "error": str(e),
+                "provider": "marketdata",
                 "last_test": datetime.now(timezone.utc).isoformat()
             }
     

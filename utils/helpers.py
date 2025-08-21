@@ -153,7 +153,7 @@ def get_test_mode_reason() -> tuple[bool, str]:
     is_test = config.is_test_mode()
     
     if is_test:
-        if not config.ALPHA_VANTAGE_API_KEY:
+        if not config.MARKETDATA_TOKEN:
             return True, "No API key configured - running in TEST MODE"
         elif is_weekend():
             return True, f"Weekend detected - running in TEST MODE"
