@@ -40,7 +40,11 @@ from utils.config import (
     SPACES_SECRET_ACCESS_KEY, 
     SPACES_BUCKET_NAME,
     SPACES_REGION,
-    TIMEZONE
+    TIMEZONE,
+    INTRADAY_1MIN_COMPACT_COUNTBACK,
+    INTRADAY_1MIN_HEAL_EVERY_MINUTES,
+    INTRADAY_1MIN_HEAL_COUNTBACK,
+    INTRADAY_EXTENDED
 )
 from utils.spaces_manager import (
     get_spaces_credentials_status,
@@ -301,9 +305,9 @@ class DataFetchManager:
         """
         Fetch and process intraday data with intelligent strategy.
         
-        Decision Logic:
-        - If file doesn't exist OR size < 10KB: Full fetch (recovery/initial)
-        - If file exists and size >= 10KB: Compact fetch (standard update)
+        Phase 2.1 Runtime Tuning Implementation:
+        - For 1min interval: Uses compact fetch + periodic healing strategy
+        - For 30min interval: Uses existing logic (unchanged)
         
         Args:
             ticker: Stock ticker symbol
@@ -312,7 +316,133 @@ class DataFetchManager:
         Returns:
             bool: Success status
         """
-        directory = f"intraday_{interval}" if interval == "30min" else "intraday_1min"
+        # Phase 2.1: Special handling for 1-minute intervals
+        if interval == '1min':
+            return self._fetch_1min_intraday_data(ticker)
+        else:
+            # Keep existing logic for 30min unchanged
+            return self._fetch_30min_intraday_data(ticker, interval)
+    
+    def _fetch_1min_intraday_data(self, ticker: str) -> bool:
+        """
+        Phase 2.1: Optimized 1-minute intraday data fetch with compact + healing strategy.
+        
+        Strategy:
+        - Default: Compact fetch with configurable countback
+        - Periodic healing: Every N minutes, do a heal fetch
+        - Enhanced logging with all metrics
+        """
+        start_time = time.time()
+        interval = '1min'
+        directory = "intraday_1min"
+        
+        try:
+            # Step 1: Determine fetch mode (compact or heal)
+            now_minute = int(datetime.utcnow().strftime("%M"))
+            is_heal_cycle = (now_minute % INTRADAY_1MIN_HEAL_EVERY_MINUTES == 0)
+            
+            if is_heal_cycle:
+                mode = "heal"
+                countback = INTRADAY_1MIN_HEAL_COUNTBACK
+                outputsize = 'full'  # Use full to get enough data, then trim
+                logger.info(f"🔧 {ticker} ({interval}): HEAL FETCH - every {INTRADAY_1MIN_HEAL_EVERY_MINUTES} min cycle")
+            else:
+                mode = "compact" 
+                countback = INTRADAY_1MIN_COMPACT_COUNTBACK
+                outputsize = 'compact'  # Alpha Vantage compact gives ~100 bars (~180 min)
+                logger.info(f"⚡ {ticker} ({interval}): COMPACT FETCH - regular update")
+
+            # Step 2: Check if we have existing data for merge logic
+            file_exists, file_size = self.check_cloud_file_state(ticker, directory)
+            existing_df = None
+            existing_max_timestamp = None
+            
+            if file_exists:
+                try:
+                    existing_df = download_dataframe(f"{directory}/{ticker}.csv")
+                    if not existing_df.empty:
+                        existing_df['timestamp'] = pd.to_datetime(existing_df['timestamp'])
+                        existing_max_timestamp = existing_df['timestamp'].max()
+                except Exception as e:
+                    logger.warning(f"⚠️ {ticker}: Could not load existing data: {e}")
+            
+            # Step 3: Fetch new data
+            new_df = get_intraday_data(ticker, interval=interval, outputsize=outputsize)
+            if new_df is None or new_df.empty:
+                logger.error(f"❌ {ticker} ({interval}): Failed to fetch intraday data")
+                return False
+            
+            # Step 4: Process new data and apply countback limit
+            new_df['timestamp'] = pd.to_datetime(new_df['timestamp'])
+            new_df = new_df.sort_values('timestamp')
+            
+            # For heal mode, limit to countback rows to avoid excessive data
+            if mode == "heal" and len(new_df) > countback:
+                new_df = new_df.tail(countback)
+            
+            # Step 5: Apply merge rule - append only rows with new.timestamp > existing_max
+            appended_count = 0
+            if existing_df is not None and not existing_df.empty and existing_max_timestamp is not None:
+                # Filter new data to only include timestamps newer than existing max
+                new_rows = new_df[new_df['timestamp'] > existing_max_timestamp].copy()
+                appended_count = len(new_rows)
+                
+                if appended_count > 0:
+                    # Combine DataFrames - existing + new rows only
+                    combined_df = pd.concat([existing_df, new_rows], ignore_index=True)
+                    combined_df = combined_df.sort_values('timestamp')
+                    # Remove any potential duplicates, keeping last
+                    combined_df = combined_df.drop_duplicates(subset=['timestamp'], keep='last')
+                else:
+                    # No new data to append
+                    combined_df = existing_df.copy()
+                    logger.info(f"📊 {ticker} ({mode}): No new timestamps to append")
+            else:
+                # No existing data, use all new data
+                combined_df = new_df.copy()
+                appended_count = len(combined_df)
+            
+            # Step 6: Apply pruning - keep rows with timestamp >= now_utc - 8d (7d + today)
+            now_utc = datetime.utcnow()
+            cutoff_date = now_utc - timedelta(days=8)  # 8 days to ensure 7 days + today coverage
+            
+            pre_prune_count = len(combined_df)
+            combined_df = combined_df[combined_df['timestamp'] >= cutoff_date]
+            pruned_count = pre_prune_count - len(combined_df)
+            
+            # Step 7: Calculate metrics
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            final_rows = len(combined_df)
+            latest_ts_utc = combined_df['timestamp'].max().isoformat() if not combined_df.empty else None
+            
+            # Step 8: Save to cloud  
+            success = upload_dataframe(combined_df, f"{directory}/{ticker}.csv")
+            
+            if success:
+                # Enhanced logging as specified
+                logger.info(
+                    f"✅ Update 1min Intraday Data completed in {elapsed_ms/1000:.1f}s "
+                    f"provider=marketdata mode={mode} countback={countback} "
+                    f"appended={appended_count} final_rows={final_rows} "
+                    f"latest_ts_utc={latest_ts_utc} elapsed_ms={elapsed_ms}"
+                )
+                return True
+            else:
+                logger.error(f"❌ {ticker} ({interval}): Failed to save intraday data")
+                return False
+                
+        except Exception as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.error(f"❌ {ticker} ({interval}): Error processing intraday data: {e} elapsed_ms={elapsed_ms}")
+            return False
+    
+    def _fetch_30min_intraday_data(self, ticker: str, interval: str) -> bool:
+        """
+        30-minute intraday data fetch - UNCHANGED from original implementation.
+        
+        Phase 2.1: Keep existing 30-min logic exactly as is.
+        """
+        directory = f"intraday_{interval}"
         logger.info(f"📊 Processing {interval} intraday data for {ticker}")
         
         try:
@@ -359,16 +489,10 @@ class DataFetchManager:
                 combined_df['timestamp'] = pd.to_datetime(combined_df['timestamp'])
                 combined_df = combined_df.sort_values('timestamp')
                 
-            # Step 6: Trim to specification
-            if interval == '1min':
-                # Keep last 7 days
-                cutoff_date = datetime.now(self.ny_tz) - timedelta(days=self.INTRADAY_1MIN_DAYS)
-                combined_df = combined_df[combined_df['timestamp'] >= cutoff_date]
-            else:  # 30min
-                # Keep last 500 rows
-                combined_df = combined_df.tail(self.INTRADAY_30MIN_ROWS)
+            # Step 6: Trim to specification - 30min keeps last 500 rows
+            combined_df = combined_df.tail(self.INTRADAY_30MIN_ROWS)
                 
-            # Step 7: Self-healing gap detection
+            # Step 7: Self-healing gap detection (existing logic)
             gap_detected = self._detect_gaps(combined_df, interval, ticker)
             if gap_detected:
                 logger.warning(f"⚠️ {ticker} ({interval}): Data gap detected - triggering auto-remediation")
@@ -380,11 +504,7 @@ class DataFetchManager:
                     combined_df = combined_df.sort_values('timestamp')
                     
                     # Re-apply trimming after remediation
-                    if interval == '1min':
-                        cutoff_date = datetime.now(self.ny_tz) - timedelta(days=self.INTRADAY_1MIN_DAYS)
-                        combined_df = combined_df[combined_df['timestamp'] >= cutoff_date]
-                    else:
-                        combined_df = combined_df.tail(self.INTRADAY_30MIN_ROWS)
+                    combined_df = combined_df.tail(self.INTRADAY_30MIN_ROWS)
                         
                     logger.info(f"✅ {ticker} ({interval}): Auto-remediation completed")
                 else:
@@ -576,8 +696,12 @@ class DataFetchManager:
             time.sleep(0.2)
             
         elapsed_time = time.time() - start_time
+        per_symbol_ms = int((elapsed_time * 1000) / len(self.master_tickers)) if self.master_tickers else 0
+        
+        # Enhanced logging for Phase 2.1
         logger.info(f"🏁 {interval.upper()} updates completed in {elapsed_time:.1f} seconds")
         logger.info(f"📊 Successfully processed {successful_tickers}/{len(self.master_tickers)} tickers")
+        logger.info(f"⏱️ Performance: per_symbol_ms={per_symbol_ms}")
         
         return successful_tickers > 0
     
