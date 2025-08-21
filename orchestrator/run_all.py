@@ -119,9 +119,9 @@ def run_job(script_path, job_name):
         script_only = script_parts[0]
         script_args = script_parts[1:] if len(script_parts) > 1 else []
         
-        full_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", script_only)
-        )
+        # Get project root directory
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        full_path = os.path.join(project_root, script_only)
 
         # Set environment variable to ensure jobs run in the same mode
         env = os.environ.copy()
@@ -132,46 +132,96 @@ def run_job(script_path, job_name):
         # Build command with script and arguments
         cmd = [sys.executable, full_path] + script_args
         
-        # DEBUG: Log the exact command being executed
-        logger.info(f"ORCHESTRATOR: Preparing to execute command: '{' '.join(cmd)}'")
+        # DEBUG: Log the exact command being executed and cwd
+        logger.info(f"ORCHESTRATOR: Executing command: {' '.join(cmd)}")
+        logger.info(f"ORCHESTRATOR: Working directory: {project_root}")
 
         result = subprocess.run(
             cmd,
-            check=True,
             capture_output=True,
             text=True,
-            timeout=1800,  # 30-minute timeout for any single job
+            shell=False,
+            cwd=project_root,
             env=env,
+            timeout=1800,  # 30-minute timeout for any single job
         )
 
-        logger.info(f"{mode_prefix} SUCCESS: {job_name} finished")
-        if result.stdout:
-            # Show orchestrator summary line for intraday jobs
-            for line in result.stdout.strip().split("\n"):
-                if "ORCHESTRATOR SUMMARY:" in line:
-                    logger.info(f"  {mode_prefix} {line}")
-                    break
-                # Also log test mode completion messages
-                elif TEST_MODE_ACTIVE and any(
-                    keyword in line
-                    for keyword in ["TEST MODE", "test data", "simulated"]
-                ):
-                    logger.info(f"  {mode_prefix} {line}")
-            logger.debug(f"STDOUT for {job_name}: {result.stdout}")
-        update_scheduler_status(job_name, "Success")
-        return True
+        # Check for successful execution
+        if result.returncode == 0:
+            logger.info(f"{mode_prefix} SUCCESS: {job_name} finished")
+            if result.stdout:
+                # Show orchestrator summary line for intraday jobs
+                for line in result.stdout.strip().split("\n"):
+                    if "ORCHESTRATOR SUMMARY:" in line:
+                        logger.info(f"  {mode_prefix} {line}")
+                        break
+                    # Also log test mode completion messages
+                    elif TEST_MODE_ACTIVE and any(
+                        keyword in line
+                        for keyword in ["TEST MODE", "test data", "simulated"]
+                    ):
+                        logger.info(f"  {mode_prefix} {line}")
+                logger.debug(f"STDOUT for {job_name}: {result.stdout}")
+            update_scheduler_status(job_name, "Success")
+            return True
+        else:
+            # Handle non-zero return code - log comprehensive error details
+            def truncate_output(text, max_bytes=2048):
+                """Truncate text to approximately max_bytes, preserving whole lines when possible."""
+                if not text:
+                    return ""
+                if len(text.encode('utf-8')) <= max_bytes:
+                    return text
+                # Try to truncate at line boundaries
+                lines = text.split('\n')
+                truncated_lines = []
+                current_size = 0
+                for line in lines:
+                    line_size = len(line.encode('utf-8')) + 1  # +1 for newline
+                    if current_size + line_size > max_bytes:
+                        break
+                    truncated_lines.append(line)
+                    current_size += line_size
+                result = '\n'.join(truncated_lines)
+                if len(result.encode('utf-8')) < len(text.encode('utf-8')):
+                    result += f"\n... (truncated from {len(text.encode('utf-8'))} bytes)"
+                return result
 
-    except subprocess.TimeoutExpired:
+            logger.error(f"{mode_prefix} ERROR: {job_name} failed with return code {result.returncode}")
+            logger.error(f"ORCHESTRATOR: Failed command: {' '.join(cmd)}")
+            logger.error(f"ORCHESTRATOR: Working directory: {project_root}")
+            
+            # Log both stdout and stderr (truncated to ~2KB each)
+            if result.stdout:
+                stdout_truncated = truncate_output(result.stdout)
+                logger.error(f"STDOUT:\n{stdout_truncated}")
+            else:
+                logger.error("STDOUT: (empty)")
+                
+            if result.stderr:
+                stderr_truncated = truncate_output(result.stderr)
+                logger.error(f"STDERR:\n{stderr_truncated}")
+            else:
+                logger.error("STDERR: (empty)")
+            
+            error_details = f"Exited with code {result.returncode}. See logged stdout/stderr above."
+            update_scheduler_status(job_name, "Fail", error_details)
+            return False
+
+    except subprocess.TimeoutExpired as e:
         logger.error(f"{mode_prefix} TIMEOUT: {job_name} failed after 30 minutes")
+        logger.error(f"ORCHESTRATOR: Timed out command: {' '.join(cmd)}")
+        logger.error(f"ORCHESTRATOR: Working directory: {project_root}")
+        if hasattr(e, 'stdout') and e.stdout:
+            logger.error(f"TIMEOUT STDOUT: {e.stdout[:1000]}...")
+        if hasattr(e, 'stderr') and e.stderr:
+            logger.error(f"TIMEOUT STDERR: {e.stderr[:1000]}...")
         update_scheduler_status(job_name, "Fail", "Job timed out.")
-        return False
-    except subprocess.CalledProcessError as e:
-        error_details = f"Exited with code {e.returncode}. STDERR: {e.stderr}"
-        logger.error(f"{mode_prefix} ERROR: {job_name} failed - {error_details}")
-        update_scheduler_status(job_name, "Fail", error_details)
         return False
     except Exception as e:
         logger.error(f"{mode_prefix} UNEXPECTED ERROR in {job_name}: {e}")
+        logger.error(f"ORCHESTRATOR: Failed command: {' '.join(cmd) if 'cmd' in locals() else 'N/A'}")
+        logger.error(f"ORCHESTRATOR: Working directory: {project_root if 'project_root' in locals() else 'N/A'}")
         update_scheduler_status(job_name, "Fail", str(e))
         return False
 

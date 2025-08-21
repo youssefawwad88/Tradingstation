@@ -619,33 +619,123 @@ class DataFetchManager:
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Unified Data Fetch Manager for the Trading System.")
-    parser.add_argument(
-        '--interval',
-        type=str,
-        choices=['1min', '30min', 'daily'],
-        required=False,
-        help="Specify a single interval to update. If not provided, a default action is taken."
-    )
-    args = parser.parse_args()
-
-    # Instantiate the main class that contains the fetching logic
-    manager = DataFetchManager() 
     
-    # Get deployment info for tracking
-    deployment_info = get_deployment_info()
+    # Wrap main execution in try/catch for unhandled exceptions
+    try:
+        parser = argparse.ArgumentParser(description="Unified Data Fetch Manager for the Trading System.")
+        
+        # Canonical interface arguments
+        parser.add_argument(
+            '--job',
+            type=str,
+            choices=['intraday', 'daily'],
+            help="Job type: 'intraday' for intraday data, 'daily' for daily data"
+        )
+        parser.add_argument(
+            '--interval',
+            type=str,
+            choices=['1min', '30min', 'all', 'daily'],
+            help="For intraday jobs: '1min', '30min', or 'all'. For daily jobs: 'daily' (or omit)"
+        )
+        parser.add_argument(
+            '--tickers',
+            type=str,
+            help="Comma-separated list of tickers to process (optional, defaults to master tickerlist)"
+        )
+        parser.add_argument(
+            '--force-full',
+            action='store_true',
+            help="Force full fetch instead of incremental update"
+        )
+        parser.add_argument(
+            '--test-mode',
+            action='store_true',
+            help="Run in test mode (simulation)"
+        )
+        parser.add_argument(
+            '--verbose',
+            action='store_true',
+            help="Enable verbose logging"
+        )
+        
+        args = parser.parse_args()
+        
+        # Handle backward compatibility and canonical interface validation
+        if args.job:
+            # Canonical interface
+            if args.job == 'intraday':
+                if not args.interval or args.interval not in ['1min', '30min', 'all']:
+                    parser.error("For --job intraday, --interval must be '1min', '30min', or 'all'")
+            elif args.job == 'daily':
+                if args.interval and args.interval != 'daily':
+                    parser.error("For --job daily, --interval should be 'daily' or omitted")
+        elif args.interval:
+            # Backward compatibility shim - deprecated but supported
+            if args.interval in ['1min', '30min']:
+                print(f"⚠️ DEPRECATED: Use '--job intraday --interval {args.interval}' instead of '--interval {args.interval}'")
+                args.job = 'intraday'
+            elif args.interval == 'daily':
+                print(f"⚠️ DEPRECATED: Use '--job daily' instead of '--interval daily'")
+                args.job = 'daily'
+        else:
+            # No arguments - default behavior
+            pass
 
-    # This logic block explicitly handles every possible case
-    if args.interval == '1min':
-        print(f"--- Triggering 1-Minute Intraday Update Only --- {deployment_info}")
-        manager.run_intraday_updates(interval='1min')
-    elif args.interval == '30min':
-        print(f"--- Triggering 30-Minute Intraday Update Only --- {deployment_info}")
-        manager.run_intraday_updates(interval='30min')
-    elif args.interval == 'daily':
-        print(f"--- Triggering Daily Update Only --- {deployment_info}")
-        manager.run_daily_updates()
-    else:
-        # Default behavior: If the script is run without any arguments, it updates EVERYTHING.
-        print(f"--- No specific interval provided. Running full update for ALL intervals. --- {deployment_info}")
-        manager.run_all_data_updates()
+        # Instantiate the main class that contains the fetching logic
+        manager = DataFetchManager() 
+        
+        # Get deployment info for tracking
+        deployment_info = get_deployment_info()
+        
+        # Print startup banner
+        import os
+        deployment_tag = os.environ.get('DEPLOYMENT_TAG', 'unknown')
+        app_env = os.environ.get('APP_ENV', 'unknown')
+        bucket = os.environ.get('SPACES_BUCKET_NAME', 'unknown')
+        
+        # Count tickers
+        ticker_count = len(manager.master_tickers) if hasattr(manager, 'master_tickers') else 0
+        if args.tickers:
+            custom_tickers = [t.strip().upper() for t in args.tickers.split(',')]
+            ticker_count = len(custom_tickers)
+        
+        print(f"🚀 DATA FETCH MANAGER STARTUP BANNER")
+        print(f"deployment={deployment_tag} env={app_env} job={args.job or 'all'} interval={args.interval or 'all'} tickers={ticker_count} bucket={bucket} universe=data/universe/master_tickerlist.csv")
+        
+        # Execute based on parsed arguments
+        if args.job == 'intraday':
+            if args.interval == '1min':
+                print(f"--- Triggering 1-Minute Intraday Update Only --- {deployment_info}")
+                success = manager.run_intraday_updates(interval='1min')
+            elif args.interval == '30min':
+                print(f"--- Triggering 30-Minute Intraday Update Only --- {deployment_info}")
+                success = manager.run_intraday_updates(interval='30min')
+            elif args.interval == 'all':
+                print(f"--- Triggering All Intraday Updates --- {deployment_info}")
+                success1 = manager.run_intraday_updates(interval='1min')
+                success2 = manager.run_intraday_updates(interval='30min')
+                success = success1 and success2
+            else:
+                print(f"--- Triggering 30-Minute Intraday Update Only (default) --- {deployment_info}")
+                success = manager.run_intraday_updates(interval='30min')
+        elif args.job == 'daily':
+            print(f"--- Triggering Daily Update Only --- {deployment_info}")
+            success = manager.run_daily_updates()
+        else:
+            # Default behavior: If no job specified, run everything
+            print(f"--- No specific job provided. Running full update for ALL intervals. --- {deployment_info}")
+            success = manager.run_all_data_updates()
+        
+        # Exit with appropriate code
+        if not success:
+            print("❌ Data fetch manager completed with errors")
+            sys.exit(1)
+        else:
+            print("✅ Data fetch manager completed successfully")
+            sys.exit(0)
+            
+    except Exception as e:
+        import traceback
+        print(f"❌ UNHANDLED EXCEPTION in data_fetch_manager: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
