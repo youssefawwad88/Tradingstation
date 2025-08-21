@@ -321,7 +321,7 @@ class DataFetchManager:
                     resolution="1",
                     from_iso=from_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     to_iso=now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    extended=config.FETCH_EXTENDED_HOURS,
+                    extended=config.INTRADAY_EXTENDED,
                 )
             else:  # 30min
                 # Fetch last 520 bars for 30min data
@@ -329,7 +329,7 @@ class DataFetchManager:
                     symbol=ticker,
                     resolution="30",
                     countback=520,
-                    extended=config.FETCH_EXTENDED_HOURS,
+                    extended=config.INTRADAY_EXTENDED,
                 )
             if new_df is None or new_df.empty:
                 logger.error(f"Failed to fetch {interval} data for {ticker}")
@@ -348,7 +348,7 @@ class DataFetchManager:
                 trimmed_df = self._apply_30min_retention(merged_df)
             
             # Filter to market hours if configured
-            if not config.FETCH_EXTENDED_HOURS:
+            if not config.INTRADAY_EXTENDED:
                 trimmed_df = filter_market_hours(
                     trimmed_df,
                     include_premarket=False,

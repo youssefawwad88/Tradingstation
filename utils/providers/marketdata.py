@@ -24,7 +24,7 @@ class MarketDataProvider:
     
     def __init__(self) -> None:
         """Initialize the MarketData provider."""
-        self.base_url = "https://api.marketdata.app"
+        self.base_url = os.getenv("MARKETDATA_ENDPOINT", "https://api.marketdata.app")
         self.endpoint_base = "/v1/stocks"
         self.token = os.getenv("MARKETDATA_TOKEN")
         self.session = requests.Session()

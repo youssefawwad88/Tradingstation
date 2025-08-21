@@ -43,10 +43,16 @@ def get_candles(
     Returns:
         DataFrame with standardized OHLCV data and UTC timestamps
     """
-    # Route to MarketData provider (only provider after migration)
-    from utils.providers.marketdata import MarketDataProvider
+    # Pick provider by env PROVIDER=marketdata
+    provider_name = os.getenv("PROVIDER", "marketdata").lower()
     
-    provider = MarketDataProvider()
+    if provider_name == "marketdata":
+        from utils.providers.marketdata import MarketDataProvider
+        provider = MarketDataProvider()
+    else:
+        logger.error(f"Unsupported provider: {provider_name}")
+        return pd.DataFrame()
+    
     return provider.get_candles(
         symbol=symbol,
         resolution=resolution,
@@ -65,7 +71,12 @@ def health_check() -> tuple[bool, str]:
     Returns:
         Tuple of (is_healthy, status_message)
     """
-    from utils.providers.marketdata import MarketDataProvider
+    # Pick provider by env PROVIDER=marketdata  
+    provider_name = os.getenv("PROVIDER", "marketdata").lower()
     
-    provider = MarketDataProvider()
-    return provider.health_check()
+    if provider_name == "marketdata":
+        from utils.providers.marketdata import MarketDataProvider
+        provider = MarketDataProvider()
+        return provider.health_check()
+    else:
+        return False, f"Unsupported provider: {provider_name}"

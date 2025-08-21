@@ -11,7 +11,7 @@ python -m orchestrator.run_all
 
 ```bash
 # Required for data fetching
-ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+MARKETDATA_TOKEN=your_marketdata_token
 
 # Required for cloud storage  
 SPACES_ACCESS_KEY_ID=DO801DFNAMQ3QXPGAQYH
@@ -25,7 +25,11 @@ APP_ENV=production
 DEPLOYMENT_TAG=<short_sha>
 
 # Extended hours trading
-FETCH_EXTENDED_HOURS=true
+INTRADAY_EXTENDED=true
+
+# Optional - Provider degraded mode settings
+PROVIDER_DEGRADED_ALLOWED=true
+DEGRADE_INTRADAY_ON_STALE_MINUTES=5
 ```
 
 ## Expected Startup Logs

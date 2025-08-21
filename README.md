@@ -7,7 +7,7 @@ A professional-grade, automated trading platform built in Python that combines r
 ### Prerequisites
 - Python 3.9+ (tested with Python 3.12.3)
 - DigitalOcean Spaces credentials
-- Alpha Vantage API key
+- MarketData.io API key
 
 ### Installation
 ```bash
@@ -15,7 +15,7 @@ A professional-grade, automated trading platform built in Python that combines r
 pip install -r requirements.txt
 
 # Set environment variables (see docs/ENV.md)
-export ALPHA_VANTAGE_API_KEY="your_key"
+export MARKETDATA_TOKEN="your_key"
 export SPACES_ACCESS_KEY_ID="your_key"
 export SPACES_SECRET_ACCESS_KEY="your_secret"
 export SPACES_BUCKET_NAME="your_bucket"
