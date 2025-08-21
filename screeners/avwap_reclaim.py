@@ -14,7 +14,7 @@ import pandas as pd
 from utils.config import config
 from utils.logging_setup import get_logger
 from utils.spaces_io import spaces_io
-from utils.time_utils import get_market_time, is_in_session_window
+from utils.time_utils import get_market_time, is_in_session_window, utc_now
 
 logger = get_logger(__name__)
 
@@ -280,7 +280,7 @@ class AVWAPReclaimScreener:
                 return True
             
             df = pd.DataFrame(self.signals)
-            df["generated_at"] = datetime.utcnow().isoformat() + "Z"
+            df["generated_at"] = utc_now().isoformat()
             df["deployment"] = config.DEPLOYMENT_TAG or "unknown"
             
             signals_key = config.get_spaces_path("data", "signals", "avwap_reclaim.csv")
@@ -288,7 +288,7 @@ class AVWAPReclaimScreener:
             metadata = {
                 "strategy": "avwap_reclaim",
                 "total_signals": str(len(df)),
-                "generation_date": datetime.utcnow().isoformat() + "Z",
+                "generation_date": utc_now().isoformat(),
             }
             
             success = spaces_io.upload_dataframe(df, signals_key, metadata=metadata)
