@@ -12,8 +12,11 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from utils.config import config
+from utils.time_utils import utc_now
 from utils.logging_setup import get_logger
+from utils.time_utils import utc_now
 from utils.spaces_io import spaces_io
+from utils.time_utils import utc_now
 
 logger = get_logger(__name__)
 
@@ -301,7 +304,7 @@ class ExhaustionReversalScreener:
                 return True
             
             df = pd.DataFrame(self.signals)
-            df["generated_at"] = datetime.utcnow().isoformat() + "Z"
+            df["generated_at"] = utc_now().isoformat()
             
             signals_key = config.get_spaces_path("data", "signals", "exhaustion_reversal.csv")
             success = spaces_io.upload_dataframe(df, signals_key)

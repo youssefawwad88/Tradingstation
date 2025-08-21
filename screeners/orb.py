@@ -19,6 +19,7 @@ from utils.time_utils import (
     get_market_time,
     get_session_window,
     is_in_session_window,
+    utc_now,
 )
 
 logger = get_logger(__name__)
@@ -577,7 +578,7 @@ class ORBScreener:
             df = pd.DataFrame(self.signals)
             
             # Add metadata
-            df["generated_at"] = datetime.utcnow().isoformat() + "Z"
+            df["generated_at"] = utc_now().isoformat()
             df["deployment"] = config.DEPLOYMENT_TAG or "unknown"
             
             # Save to Spaces
@@ -589,7 +590,7 @@ class ORBScreener:
                 "total_signals": str(len(df)),
                 "long_signals": str(len(df[df["direction"] == "long"])),
                 "short_signals": str(len(df[df["direction"] == "short"])),
-                "generation_date": datetime.utcnow().isoformat() + "Z",
+                "generation_date": utc_now().isoformat(),
             }
             
             success = spaces_io.upload_dataframe(df, signals_key, metadata=metadata)

@@ -14,7 +14,7 @@ import pandas as pd
 from utils.config import config
 from utils.logging_setup import get_logger
 from utils.spaces_io import spaces_io
-from utils.time_utils import get_market_time, get_trading_days_back
+from utils.time_utils import get_market_time, get_trading_days_back, utc_now
 
 logger = get_logger(__name__)
 
@@ -367,7 +367,7 @@ class AVWAPAnchorDetector:
             df = pd.DataFrame(all_anchors)
             
             # Add metadata
-            df["detected_at"] = datetime.utcnow().isoformat() + "Z"
+            df["detected_at"] = utc_now().isoformat()
             df["deployment"] = config.DEPLOYMENT_TAG or "unknown"
             
             # Save to Spaces
@@ -377,7 +377,7 @@ class AVWAPAnchorDetector:
                 "type": "avwap_anchors",
                 "total_anchors": str(len(df)),
                 "unique_tickers": str(df["symbol"].nunique()),
-                "detection_date": datetime.utcnow().isoformat() + "Z",
+                "detection_date": utc_now().isoformat(),
             }
             
             success = spaces_io.upload_dataframe(df, anchors_key, metadata=metadata)

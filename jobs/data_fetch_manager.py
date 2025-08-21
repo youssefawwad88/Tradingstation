@@ -23,6 +23,7 @@ from utils.time_utils import (
     get_market_time,
     get_trading_days_back,
     is_weekend,
+    utc_now,
 )
 from utils.validation import clean_dataframe, validate_dataframe
 
@@ -357,8 +358,10 @@ class DataFetchManager:
         
         # Check data freshness - if data is very old, do full refresh
         if "timestamp" in existing_df.columns:
-            latest_timestamp = pd.to_datetime(existing_df["timestamp"].max())
-            days_old = (get_market_time() - latest_timestamp.tz_localize(None)).days
+            # Both timestamps need to be timezone-aware UTC for proper comparison
+            latest_timestamp = pd.to_datetime(existing_df["timestamp"].max(), utc=True)
+            now_utc = utc_now()
+            days_old = (now_utc - latest_timestamp).days
             
             if interval == "daily" and days_old > 7:
                 return "FULL"
@@ -502,7 +505,7 @@ class DataFetchManager:
                 first_ts = last_ts = None
             
             manifest[entry_key] = {
-                "last_fetch_utc": datetime.utcnow().isoformat() + "Z",
+                "last_fetch_utc": utc_now().isoformat(),
                 "rows": len(df),
                 "first_ts": first_ts,
                 "last_ts": last_ts,
@@ -628,5 +631,13 @@ Legacy (deprecated):
 
 
 if __name__ == "__main__":
-    success = main()
-    exit(0 if success else 1)
+    import sys
+    import traceback
+    
+    try:
+        success = main()
+        exit(0 if success else 1)
+    except Exception as e:
+        logger.error(f"Fatal in data_fetch_manager: {e}")
+        traceback.print_exc(file=sys.stderr)  # Ensure orchestrator shows it
+        sys.exit(1)

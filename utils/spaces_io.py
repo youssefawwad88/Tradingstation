@@ -19,6 +19,67 @@ from utils.config import config
 logger = logging.getLogger(__name__)
 
 
+def _parse_timestamps_on_read(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Parse timestamps when reading CSV from Spaces to ensure UTC timezone.
+    
+    Args:
+        df: DataFrame read from CSV
+        
+    Returns:
+        DataFrame with properly parsed UTC timestamps
+    """
+    # Import here to avoid circular imports
+    from utils.time_utils import as_utc
+    
+    df = df.copy()
+    
+    # Handle intraday timestamp columns
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        
+    # Handle daily date columns  
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+        
+    return df
+
+
+def _prepare_timestamps_for_write(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepare timestamps when writing CSV to Spaces to ensure UTC format.
+    
+    Args:
+        df: DataFrame to write
+        
+    Returns:
+        DataFrame with UTC timestamps
+    """
+    # Import here to avoid circular imports
+    from utils.time_utils import as_utc
+    
+    df = df.copy()
+    
+    # Ensure timestamp column is UTC if it exists
+    if "timestamp" in df.columns and not df["timestamp"].empty:
+        try:
+            df["timestamp"] = as_utc(df["timestamp"])
+            # Optional: write as ISO8601 string with "Z" for guaranteed round-trip
+            df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception as e:
+            logger.warning(f"Could not convert timestamp column to UTC: {e}")
+            
+    # Ensure date column is UTC if it exists
+    if "date" in df.columns and not df["date"].empty:
+        try:
+            df["date"] = as_utc(df["date"])
+            df["date"] = df["date"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception as e:
+            logger.warning(f"Could not convert date column to UTC: {e}")
+            
+    return df
+
+
 class SpacesIO:
     """DigitalOcean Spaces client with atomic operations and metadata support."""
 
@@ -250,14 +311,14 @@ class SpacesIO:
         file_format: str = "csv",
     ) -> Optional[pd.DataFrame]:
         """
-        Download a DataFrame from Spaces.
+        Download a DataFrame from Spaces with UTC timestamp parsing.
         
         Args:
             key: Object key/path
             file_format: File format ("csv" or "parquet")
             
         Returns:
-            DataFrame or None if not found/error
+            DataFrame with UTC timestamps or None if not found/error
         """
         data = self.get_object(key)
         if data is None:
@@ -267,7 +328,10 @@ class SpacesIO:
             buffer = io.BytesIO(data)
             
             if file_format.lower() == "csv":
-                return pd.read_csv(buffer)
+                df = pd.read_csv(buffer)
+                # Parse timestamps to ensure they are UTC timezone-aware
+                df = _parse_timestamps_on_read(df)
+                return df
             elif file_format.lower() == "parquet":
                 return pd.read_parquet(buffer)
             else:
@@ -286,7 +350,7 @@ class SpacesIO:
         metadata: Optional[Dict[str, str]] = None,
     ) -> bool:
         """
-        Upload a DataFrame to Spaces.
+        Upload a DataFrame to Spaces with UTC timestamp enforcement.
         
         Args:
             df: DataFrame to upload
@@ -298,6 +362,10 @@ class SpacesIO:
             True if successful, False otherwise
         """
         try:
+            # Prepare timestamps for writing if CSV format
+            if file_format.lower() == "csv":
+                df = _prepare_timestamps_for_write(df)
+                
             buffer = io.BytesIO()
             
             if file_format.lower() == "csv":
@@ -316,6 +384,7 @@ class SpacesIO:
                 "rows": str(len(df)),
                 "columns": str(len(df.columns)),
                 "format": file_format,
+                "timestamps": "UTC",  # Mark that timestamps are in UTC
             }
             if metadata:
                 df_metadata.update(metadata)
