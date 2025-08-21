@@ -269,7 +269,7 @@ def run_intraday_updates():
     logger.info(
         f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager with self-healing"
     )
-    result = run_job("jobs/data_fetch_manager.py --interval 1min", "data_fetch_manager")
+    result = run_job("jobs/data_fetch_manager.py --job intraday --interval 1min", "data_fetch_manager")
     if TEST_MODE_ACTIVE and result:
         logger.info(
             "[TEST MODE] DataFetchManager simulation completed successfully"
@@ -286,7 +286,7 @@ def run_30min_updates():
     logger.info(
         f"{mode_prefix} ENHANCED SYSTEM: Using unified data fetch manager (30min interval only)"
     )
-    result = run_job("jobs/data_fetch_manager.py --interval 30min", "data_fetch_manager_30min")
+    result = run_job("jobs/data_fetch_manager.py --job intraday --interval 30min", "data_fetch_manager_30min")
     if TEST_MODE_ACTIVE and result:
         logger.info(
             "[TEST MODE] DataFetchManager (30min) simulation completed successfully"

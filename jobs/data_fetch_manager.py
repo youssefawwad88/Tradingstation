@@ -121,6 +121,27 @@ class DataFetchManager:
         """Validate all required credentials and log status."""
         logger.info("🔍 DataFetchManager Initialization - Validating Credentials")
         
+        # Define required environment variables
+        required_env_vars = [
+            'SPACES_ACCESS_KEY_ID',
+            'SPACES_SECRET_ACCESS_KEY', 
+            'SPACES_BUCKET_NAME',
+            'SPACES_REGION',
+            'ALPHA_VANTAGE_API_KEY'
+        ]
+        
+        missing_vars = []
+        for var in required_env_vars:
+            if not os.environ.get(var):
+                missing_vars.append(var)
+        
+        if missing_vars:
+            logger.error(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
+            logger.error("Required environment variables for full functionality:")
+            for var in missing_vars:
+                logger.error(f"   {var}: ❌ Missing")
+            # Note: We don't exit here anymore, we continue with degraded functionality
+        
         # Check Alpha Vantage API Key
         if not ALPHA_VANTAGE_API_KEY:
             logger.error("❌ ALPHA_VANTAGE_API_KEY not found - API calls will fail")
@@ -141,6 +162,7 @@ class DataFetchManager:
         """
         Download and read master_tickerlist.csv from Spaces cloud storage.
         This is the single source of truth for all tickers to process.
+        With fallback to default tickers if cloud storage is unavailable.
         
         Returns:
             bool: Success status
@@ -148,8 +170,12 @@ class DataFetchManager:
         logger.info("📥 Downloading master_tickerlist.csv from Spaces cloud storage")
         
         if not self.spaces_client:
-            logger.error("❌ Spaces client not available - cannot download master tickerlist")
-            return False
+            logger.warning("⚠️ No Spaces client available - using fallback ticker list")
+            # Fallback to default tickers as specified in problem statement
+            fallback_tickers = ["NVDA", "AAPL", "TSLA"]
+            logger.warning(f"🔄 Using fallback tickers: {fallback_tickers}")
+            self.master_tickers = fallback_tickers
+            return True
             
         try:
             # Download master_tickerlist.csv from root of bucket
@@ -492,8 +518,10 @@ class DataFetchManager:
             bool: Success status
         """
         if not self.master_tickers:
-            logger.error("❌ No tickers to process - master tickerlist not loaded")
-            return False
+            logger.info("📥 Loading master tickerlist for daily updates")
+            if not self.download_master_tickerlist():
+                logger.error("❌ Failed to load master tickerlist")
+                return False
             
         logger.info(f"🚀 Running DAILY updates for {len(self.master_tickers)} tickers")
         start_time = time.time()
@@ -529,8 +557,10 @@ class DataFetchManager:
             return False
             
         if not self.master_tickers:
-            logger.error("❌ No tickers to process - master tickerlist not loaded")
-            return False
+            logger.info("📥 Loading master tickerlist for intraday updates")
+            if not self.download_master_tickerlist():
+                logger.error("❌ Failed to load master tickerlist")
+                return False
             
         logger.info(f"🚀 Running {interval.upper()} intraday updates for {len(self.master_tickers)} tickers")
         start_time = time.time()
