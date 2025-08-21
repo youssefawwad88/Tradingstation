@@ -6,7 +6,8 @@ and trading session logic for the trading system.
 """
 
 import datetime
-from typing import Optional, Tuple
+import os
+from typing import Optional, Tuple, Union
 
 import pandas as pd
 import pytz
@@ -16,6 +17,9 @@ from utils.config import config
 # Market timezone
 MARKET_TZ = pytz.timezone(config.TIMEZONE)
 UTC_TZ = pytz.UTC
+
+# Environment variable for market timezone (for problem statement compatibility)
+MARKET_TZ_NAME = os.getenv("MARKET_TZ", "America/New_York")
 
 
 def get_market_time() -> datetime.datetime:
@@ -412,3 +416,94 @@ def get_current_session_state() -> dict:
         "breakout_guard_time": get_breakout_guard_time(current_date),
         "early_volume_window": get_early_volume_window(current_date),
     }
+
+
+# === New timezone utility functions for problem statement requirements ===
+
+def utc_now() -> pd.Timestamp:
+    """Return current timestamp in UTC timezone."""
+    return pd.Timestamp.now(tz="UTC")
+
+
+def as_utc(ts: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series, pd.DatetimeIndex]:
+    """
+    Convert timestamps to UTC timezone.
+    
+    If tz-naive: assume already UTC and localize to UTC
+    If ET or other tz: convert to UTC
+    
+    Args:
+        ts: Pandas Series or DatetimeIndex with timestamps
+        
+    Returns:
+        Timestamps converted to UTC
+    """
+    if isinstance(ts, pd.Series):
+        if getattr(ts.dt, "tz", None) is None:
+            return ts.dt.tz_localize("UTC")
+        return ts.dt.tz_convert("UTC")
+    else:  # DatetimeIndex
+        if getattr(ts, "tz", None) is None:
+            return ts.tz_localize("UTC")
+        return ts.tz_convert("UTC")
+
+
+def to_market_tz(ts_utc: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series, pd.DatetimeIndex]:
+    """
+    Convert UTC timestamps to market timezone.
+    
+    Args:
+        ts_utc: UTC timestamps
+        
+    Returns:
+        Timestamps converted to market timezone
+    """
+    if isinstance(ts_utc, pd.Series):
+        return ts_utc.dt.tz_convert(MARKET_TZ_NAME)
+    else:  # DatetimeIndex
+        return ts_utc.tz_convert(MARKET_TZ_NAME)
+
+
+def parse_intraday_from_alpha_vantage(df: pd.DataFrame, col: str = "timestamp") -> pd.DataFrame:
+    """
+    Parse intraday timestamps from Alpha Vantage API.
+    
+    AV intraday timestamps are in US/Eastern (local market time) with no tz info.
+    
+    Args:
+        df: DataFrame with timestamp column
+        col: Name of timestamp column
+        
+    Returns:
+        DataFrame with UTC timestamps
+    """
+    df = df.copy()
+    ts = pd.to_datetime(df[col], errors="coerce")
+    if getattr(ts.dt, "tz", None) is None:
+        ts = ts.dt.tz_localize(MARKET_TZ_NAME, ambiguous="infer", nonexistent="shift_forward")
+    ts = ts.dt.tz_convert("UTC")
+    df[col] = ts
+    return df
+
+
+def parse_daily_from_alpha_vantage(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
+    """
+    Parse daily timestamps from Alpha Vantage API.
+    
+    Daily dates are calendar days; store as UTC midnight.
+    
+    Args:
+        df: DataFrame with date column  
+        col: Name of date column
+        
+    Returns:
+        DataFrame with UTC timestamps
+    """
+    df = df.copy()
+    ts = pd.to_datetime(df[col], errors="coerce")
+    if getattr(ts.dt, "tz", None) is None:
+        ts = ts.dt.tz_localize("UTC")
+    else:
+        ts = ts.dt.tz_convert("UTC")
+    df[col] = ts.dt.normalize()  # 00:00 UTC
+    return df
