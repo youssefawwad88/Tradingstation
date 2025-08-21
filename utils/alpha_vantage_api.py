@@ -147,8 +147,11 @@ class AlphaVantageAPI:
                 logger.error(f"Unexpected CSV format for {symbol}: {df.columns.tolist()}")
                 return None
             
-            # Convert timestamp to datetime and sort
-            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+            # Import here to avoid circular imports
+            from utils.time_utils import parse_intraday_from_alpha_vantage
+            
+            # Parse intraday timestamps from Alpha Vantage (ET -> UTC)
+            df = parse_intraday_from_alpha_vantage(df, col="timestamp")
             df = df.sort_values("timestamp").reset_index(drop=True)
             
             # Convert price columns to float
@@ -215,8 +218,11 @@ class AlphaVantageAPI:
             # Rename timestamp to date for daily data
             df = df.rename(columns={"timestamp": "date"})
             
-            # Convert date to datetime and sort
-            df["date"] = pd.to_datetime(df["date"]).dt.date
+            # Import here to avoid circular imports
+            from utils.time_utils import parse_daily_from_alpha_vantage
+            
+            # Parse daily dates from Alpha Vantage to UTC midnight
+            df = parse_daily_from_alpha_vantage(df, col="date")
             df = df.sort_values("date").reset_index(drop=True)
             
             # Convert price columns to float
