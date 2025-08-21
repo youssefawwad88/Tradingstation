@@ -4,11 +4,11 @@ This document outlines all required environment variables for the TradingStation
 
 ## Required Environment Variables
 
-### Alpha Vantage API
+### MarketData.io API
 ```bash
-ALPHA_VANTAGE_API_KEY=LF4A4K5UCTYB93VZ
+MARKETDATA_TOKEN=your_marketdata_token
 ```
-- **Purpose**: Access to Alpha Vantage market data API
+- **Purpose**: Access to MarketData.io market data API
 - **Required**: Yes
 - **Usage**: All data fetching operations
 
@@ -45,7 +45,7 @@ DEPLOYMENT_TAG=auto-generated
 Create a `.env` file in the project root:
 ```bash
 # .env (DO NOT COMMIT)
-ALPHA_VANTAGE_API_KEY=LF4A4K5UCTYB93VZ
+MARKETDATA_TOKEN=your_marketdata_token
 SPACES_ACCESS_KEY_ID=DO00LRPNKCCXNDX8NZRH
 SPACES_SECRET_ACCESS_KEY=w+5GuIgaXuGBIoEDXRO7r84YZC9tL0mnbEwltzQEd9o
 SPACES_REGION=nyc3
@@ -61,7 +61,7 @@ source .env  # or use python-dotenv
 
 ### Docker
 ```bash
-docker run -e ALPHA_VANTAGE_API_KEY=value -e SPACES_ACCESS_KEY_ID=value ...
+docker run -e MARKETDATA_TOKEN=value -e SPACES_ACCESS_KEY_ID=value ...
 ```
 
 ## Security Notes

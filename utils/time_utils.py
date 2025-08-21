@@ -425,6 +425,14 @@ def utc_now() -> pd.Timestamp:
     return pd.Timestamp.now(tz="UTC")
 
 
+def convert_utc_to_et(dt: Union[datetime.datetime, pd.Timestamp]) -> Union[datetime.datetime, pd.Timestamp]:
+    """Convert UTC datetime to Eastern Time."""
+    if isinstance(dt, pd.Timestamp):
+        return dt.tz_convert(MARKET_TZ)
+    else:
+        return convert_from_utc(dt, MARKET_TZ)
+
+
 def as_utc(ts: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series, pd.DatetimeIndex]:
     """
     Convert timestamps to UTC timezone.
@@ -462,48 +470,3 @@ def to_market_tz(ts_utc: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series,
         return ts_utc.dt.tz_convert(MARKET_TZ_NAME)
     else:  # DatetimeIndex
         return ts_utc.tz_convert(MARKET_TZ_NAME)
-
-
-def parse_intraday_from_alpha_vantage(df: pd.DataFrame, col: str = "timestamp") -> pd.DataFrame:
-    """
-    Parse intraday timestamps from Alpha Vantage API.
-    
-    AV intraday timestamps are in US/Eastern (local market time) with no tz info.
-    
-    Args:
-        df: DataFrame with timestamp column
-        col: Name of timestamp column
-        
-    Returns:
-        DataFrame with UTC timestamps
-    """
-    df = df.copy()
-    ts = pd.to_datetime(df[col], errors="coerce")
-    if getattr(ts.dt, "tz", None) is None:
-        ts = ts.dt.tz_localize(MARKET_TZ_NAME, ambiguous="infer", nonexistent="shift_forward")
-    ts = ts.dt.tz_convert("UTC")
-    df[col] = ts
-    return df
-
-
-def parse_daily_from_alpha_vantage(df: pd.DataFrame, col: str = "date") -> pd.DataFrame:
-    """
-    Parse daily timestamps from Alpha Vantage API.
-    
-    Daily dates are calendar days; store as UTC midnight.
-    
-    Args:
-        df: DataFrame with date column  
-        col: Name of date column
-        
-    Returns:
-        DataFrame with UTC timestamps
-    """
-    df = df.copy()
-    ts = pd.to_datetime(df[col], errors="coerce")
-    if getattr(ts.dt, "tz", None) is None:
-        ts = ts.dt.tz_localize("UTC")
-    else:
-        ts = ts.dt.tz_convert("UTC")
-    df[col] = ts.dt.normalize()  # 00:00 UTC
-    return df

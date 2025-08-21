@@ -6,13 +6,14 @@ with self-healing capabilities, retention policies, and atomic operations.
 """
 
 import json
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from utils.alpha_vantage_api import get_daily_data, get_intraday_data
+from utils.providers.router import get_candles, health_check
 from utils.config import config
 from utils.helpers import get_test_mode_reason
 from utils.logging_setup import get_logger
@@ -198,8 +199,13 @@ class DataFetchManager:
             outputsize = "full" if mode == "FULL" else "compact"
             logger.debug(f"Fetching daily data for {ticker} (mode={mode}, outputsize={outputsize})")
             
-            # Fetch new data
-            new_df = get_daily_data(ticker, outputsize=outputsize)
+            # Fetch new data using MarketData provider
+            new_df = get_candles(
+                symbol=ticker,
+                resolution="D",
+                countback=220,  # Fetch more than needed, will be trimmed
+                adjustsplits=True,
+            )
             if new_df is None or new_df.empty:
                 logger.error(f"Failed to fetch daily data for {ticker}")
                 return False
@@ -220,16 +226,36 @@ class DataFetchManager:
                 # Continue with cleaned data
                 trimmed_df = clean_dataframe(trimmed_df, "DAILY")
             
-            # Upload to Spaces
+            # Upload to Spaces with atomic writes
             metadata = {
                 "symbol": ticker,
                 "interval": "daily",
                 "mode": mode,
                 "rows": str(len(trimmed_df)),
+                "managed-by": "data_fetch_manager",
+                "provider": "marketdata",
+                "deployment": config.DEPLOYMENT_TAG or "unknown",
             }
             
             success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
             if success:
+                # Log per-run details as required
+                latest_timestamp = trimmed_df["timestamp"].max() if not trimmed_df.empty else None
+                latest_ts_utc = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if latest_timestamp else "none"
+                
+                # Calculate rows added (new rows only, not total)
+                if existing_df is not None and not existing_df.empty:
+                    existing_count = len(existing_df)
+                    appended_rows = len(trimmed_df) - existing_count
+                else:
+                    appended_rows = len(trimmed_df)
+                
+                logger.info(
+                    f"✅ {ticker} (daily) update complete - "
+                    f"provider=marketdata interval=daily appended={appended_rows} "
+                    f"final_rows={len(trimmed_df)} latest_ts_utc={latest_ts_utc}"
+                )
+                
                 # Update manifest
                 self._update_manifest(ticker, "daily", trimmed_df, mode)
                 logger.data_operation(
@@ -237,6 +263,7 @@ class DataFetchManager:
                     ticker,
                     rows_processed=len(trimmed_df),
                     mode=mode,
+                    provider="marketdata",
                 )
             
             return success
@@ -271,8 +298,39 @@ class DataFetchManager:
             outputsize = "full" if mode == "FULL" else "compact"
             logger.debug(f"Fetching {interval} data for {ticker} (mode={mode}, outputsize={outputsize})")
             
-            # Fetch new data
-            new_df = get_intraday_data(ticker, interval=interval, outputsize=outputsize)
+            # Check provider health before intraday operations  
+            if interval == "1min":
+                healthy, health_msg = health_check()
+                if not healthy:
+                    degraded_allowed = os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
+                    if degraded_allowed:
+                        logger.info(f"Provider degraded, skipping 1min intraday update: {health_msg}")
+                        return True  # Skip with success
+                    else:
+                        logger.error(f"Provider health check failed: {health_msg}")
+                        return False
+                        
+            # Determine fetch strategy based on interval
+            if interval == "1min":
+                # Fetch from 8 days ago to now for 1min data
+                now_utc = utc_now()
+                from_utc = now_utc - timedelta(days=8)
+                
+                new_df = get_candles(
+                    symbol=ticker,
+                    resolution="1",
+                    from_iso=from_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    to_iso=now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    extended=config.INTRADAY_EXTENDED,
+                )
+            else:  # 30min
+                # Fetch last 520 bars for 30min data
+                new_df = get_candles(
+                    symbol=ticker,
+                    resolution="30",
+                    countback=520,
+                    extended=config.INTRADAY_EXTENDED,
+                )
             if new_df is None or new_df.empty:
                 logger.error(f"Failed to fetch {interval} data for {ticker}")
                 return False
@@ -290,7 +348,7 @@ class DataFetchManager:
                 trimmed_df = self._apply_30min_retention(merged_df)
             
             # Filter to market hours if configured
-            if not config.FETCH_EXTENDED_HOURS:
+            if not config.INTRADAY_EXTENDED:
                 trimmed_df = filter_market_hours(
                     trimmed_df,
                     include_premarket=False,
@@ -304,16 +362,36 @@ class DataFetchManager:
                 # Continue with cleaned data
                 trimmed_df = clean_dataframe(trimmed_df, schema_name)
             
-            # Upload to Spaces
+            # Upload to Spaces with atomic writes
             metadata = {
                 "symbol": ticker,
                 "interval": interval,
                 "mode": mode,
                 "rows": str(len(trimmed_df)),
+                "managed-by": "data_fetch_manager",
+                "provider": "marketdata",
+                "deployment": config.DEPLOYMENT_TAG or "unknown",
             }
             
             success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
             if success:
+                # Log per-run details as required
+                latest_timestamp = trimmed_df["timestamp"].max() if not trimmed_df.empty else None
+                latest_ts_utc = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if latest_timestamp else "none"
+                
+                # Calculate rows added (new rows only, not total)
+                if existing_df is not None and not existing_df.empty:
+                    existing_count = len(existing_df)
+                    appended_rows = len(trimmed_df) - existing_count
+                else:
+                    appended_rows = len(trimmed_df)
+                
+                logger.info(
+                    f"✅ {ticker} ({interval}) update complete - "
+                    f"provider=marketdata interval={interval} appended={appended_rows} "
+                    f"final_rows={len(trimmed_df)} latest_ts_utc={latest_ts_utc}"
+                )
+                
                 # Update manifest
                 self._update_manifest(ticker, interval, trimmed_df, mode)
                 logger.data_operation(
@@ -322,6 +400,7 @@ class DataFetchManager:
                     interval=interval,
                     rows_processed=len(trimmed_df),
                     mode=mode,
+                    provider="marketdata",
                 )
             
             return success
@@ -377,7 +456,7 @@ class DataFetchManager:
         interval: str,
     ) -> Optional[pd.DataFrame]:
         """
-        Merge existing and new data, handling duplicates and sorting.
+        Merge existing and new data, only adding newer rows as per MarketData requirements.
         
         Args:
             existing_df: Existing DataFrame or None
@@ -389,35 +468,48 @@ class DataFetchManager:
         """
         try:
             if existing_df is None or existing_df.empty:
-                return new_df.copy()
+                # Ensure timestamps are UTC aware
+                new_df_copy = new_df.copy()
+                new_df_copy["timestamp"] = pd.to_datetime(new_df_copy["timestamp"], utc=True)
+                return new_df_copy
             
-            # Determine timestamp column
-            timestamp_col = "date" if interval == "daily" else "timestamp"
-            
-            # Ensure both DataFrames have the timestamp column
-            if timestamp_col not in new_df.columns:
-                logger.error(f"Missing {timestamp_col} column in new data")
+            # All data uses "timestamp" column with UTC timestamps
+            if "timestamp" not in new_df.columns:
+                logger.error("Missing timestamp column in new data")
                 return None
             
-            if timestamp_col not in existing_df.columns:
-                logger.error(f"Missing {timestamp_col} column in existing data")
+            if "timestamp" not in existing_df.columns:
+                logger.error("Missing timestamp column in existing data")
                 return None
             
-            # Concatenate and remove duplicates
-            combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+            # Ensure both DataFrames have UTC-aware timestamps
+            existing_df_copy = existing_df.copy()
+            new_df_copy = new_df.copy()
             
-            # Convert timestamp column to datetime for comparison
-            combined_df[timestamp_col] = pd.to_datetime(combined_df[timestamp_col])
+            existing_df_copy["timestamp"] = pd.to_datetime(existing_df_copy["timestamp"], utc=True)
+            new_df_copy["timestamp"] = pd.to_datetime(new_df_copy["timestamp"], utc=True)
             
-            # Remove duplicates (keep latest)
-            combined_df = combined_df.drop_duplicates(subset=[timestamp_col], keep="last")
+            # Get the maximum timestamp from existing data
+            existing_max = existing_df_copy["timestamp"].max()
             
-            # Sort by timestamp
-            combined_df = combined_df.sort_values(timestamp_col).reset_index(drop=True)
+            # Filter new data to only include rows newer than existing max
+            newer_rows = new_df_copy[new_df_copy["timestamp"] > existing_max]
+            
+            if newer_rows.empty:
+                logger.debug("No newer data to merge")
+                return existing_df_copy
+            
+            # Combine existing data with only newer rows
+            combined_df = pd.concat([existing_df_copy, newer_rows], ignore_index=True)
+            
+            # Sort by timestamp and remove any potential duplicates
+            combined_df = combined_df.sort_values("timestamp")
+            combined_df = combined_df.drop_duplicates(subset=["timestamp"], keep="last")
+            combined_df = combined_df.reset_index(drop=True)
             
             logger.debug(
                 f"Merged data: existing={len(existing_df)}, new={len(new_df)}, "
-                f"final={len(combined_df)}"
+                f"newer_rows={len(newer_rows)}, final={len(combined_df)}"
             )
             
             return combined_df
@@ -431,29 +523,38 @@ class DataFetchManager:
         if df.empty:
             return df
         
-        # Keep last N rows based on configuration
+        # Keep last ~210-220 rows for daily data
         max_rows = config.DAILY_RETENTION_ROWS
+        
+        # Ensure timestamp is UTC-aware datetime for proper sorting
+        df = df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df = df.sort_values("timestamp")
+        
         if len(df) > max_rows:
             df = df.tail(max_rows).reset_index(drop=True)
         
+        logger.debug(f"Daily retention: kept {len(df)} rows (max: {max_rows})")
         return df
 
     def _apply_1min_retention(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply retention policy for 1-minute data."""
+        """Apply retention policy for 1-minute data using UTC timestamps only."""
         if df.empty:
             return df
         
-        # Keep data from last N trading days
+        # Keep data from last N days using UTC timestamps only (no ET conversion)
         retention_days = config.INTRADAY_1MIN_RETENTION_DAYS
-        cutoff_date = get_market_time().date() - timedelta(days=retention_days)
+        now_utc = utc_now()
+        cutoff_utc = now_utc - timedelta(days=retention_days)
         
-        # Convert timestamp to date for filtering
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["date"] = df["timestamp"].dt.date
+        # Ensure timestamp is UTC-aware datetime
+        df = df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         
-        # Filter to retention window
-        df = df[df["date"] > cutoff_date].drop("date", axis=1).reset_index(drop=True)
+        # Filter to retention window (UTC only)
+        df = df[df["timestamp"] >= cutoff_utc].reset_index(drop=True)
         
+        logger.debug(f"1min retention: kept {len(df)} rows after {retention_days} day cutoff")
         return df
 
     def _apply_30min_retention(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -461,11 +562,18 @@ class DataFetchManager:
         if df.empty:
             return df
         
-        # Keep last N rows based on configuration
+        # Keep last N rows, then sort by timestamp to maintain order
         max_rows = config.INTRADAY_30MIN_RETENTION_ROWS
+        
+        # Ensure timestamp is UTC-aware datetime for proper sorting
+        df = df.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df = df.sort_values("timestamp")
+        
         if len(df) > max_rows:
             df = df.tail(max_rows).reset_index(drop=True)
         
+        logger.debug(f"30min retention: kept {len(df)} rows (max: {max_rows})")
         return df
 
     def _update_manifest(
