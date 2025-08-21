@@ -102,3 +102,16 @@ THIRTY_MIN_MIN_ROWS = 500
 
 # Required lookback period in days for 1-minute data
 ONE_MIN_REQUIRED_DAYS = 7
+
+# Phase 2.1: Runtime Tuning - Compact Fetch and Healing Configuration
+# Compact fetch: number of 1-minute bars to fetch for regular updates (default 180 = 3 hours)
+INTRADAY_1MIN_COMPACT_COUNTBACK = int(os.getenv("INTRADAY_1MIN_COMPACT_COUNTBACK", "180"))
+
+# Healing frequency: run heal fetch every N minutes (default 15)
+INTRADAY_1MIN_HEAL_EVERY_MINUTES = int(os.getenv("INTRADAY_1MIN_HEAL_EVERY_MINUTES", "15"))
+
+# Heal fetch: number of 1-minute bars to fetch for healing (default 1440 = 1 day)
+INTRADAY_1MIN_HEAL_COUNTBACK = int(os.getenv("INTRADAY_1MIN_HEAL_COUNTBACK", "1440"))
+
+# Extended hours trading data inclusion
+INTRADAY_EXTENDED = os.getenv("INTRADAY_EXTENDED", "true").lower() == "true"
