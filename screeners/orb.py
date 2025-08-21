@@ -80,6 +80,11 @@ class ORBScreener:
                 logger.info("Outside valid ORB screening window")
                 return True
             
+            # Screeners guardrail: Check if 1-min data is stale or provider degraded
+            if self._is_data_stale_or_degraded():
+                logger.info("ORB screening suppressed - stale 1-min data or degraded provider")
+                return True
+            
             successful_tickers = 0
             
             for ticker in self.universe_tickers:
@@ -206,6 +211,58 @@ class ORBScreener:
         or_completion_time = market_open + timedelta(minutes=self.or_window_minutes + 5)
         
         return market_open <= current_time <= market_close
+
+    def _is_data_stale_or_degraded(self) -> bool:
+        """
+        Check if 1-min data is stale or provider is degraded.
+        
+        Per requirements: if latest 1-min age > 10 min (ET) or provider degraded
+        → suppress new live signals for that cycle.
+        
+        Returns:
+            True if data is stale or degraded, False otherwise
+        """
+        try:
+            from utils.providers.router import health_check
+            
+            # Check provider health first
+            is_healthy, status_msg = health_check()
+            if not is_healthy:
+                logger.warning(f"Provider degraded: {status_msg}")
+                return True
+            
+            # Check 1-min data freshness for a sample ticker (use first from universe)
+            if not self.universe_tickers:
+                return False
+                
+            sample_ticker = self.universe_tickers[0] 
+            data_key = config.get_spaces_path("data", "intraday", "1min", f"{sample_ticker}.csv")
+            df = spaces_io.download_dataframe(data_key)
+            
+            if df is None or df.empty:
+                logger.warning("No 1-min data available for staleness check")
+                return True
+            
+            # Get latest timestamp and convert to ET for age calculation
+            latest_timestamp_utc = pd.to_datetime(df["timestamp"].max(), utc=True)
+            
+            from utils.time_utils import convert_utc_to_et
+            latest_et = convert_utc_to_et(latest_timestamp_utc)
+            now_et = convert_utc_to_et(utc_now())
+            
+            age_minutes = (now_et - latest_et).total_seconds() / 60
+            
+            # Check if age exceeds threshold (10 minutes)
+            if age_minutes > 10:
+                logger.warning(f"1-min data is stale: {age_minutes:.1f} minutes old (threshold: 10m)")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking data staleness: {e}")
+            # On error, be conservative and suppress signals
+            return True
 
     def _prepare_intraday_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """Prepare intraday data with calculated fields."""

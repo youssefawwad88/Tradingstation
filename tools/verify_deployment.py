@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import Config
 from utils.spaces_io import SpacesIO
-from utils.alpha_vantage_api import AlphaVantageAPI
+from utils.providers.router import health_check as provider_health_check
 from utils.logging_setup import get_logger
 
 
@@ -32,7 +32,7 @@ class DeploymentVerifier:
     def check_environment_variables(self) -> Tuple[bool, Dict[str, Any]]:
         """Verify all required environment variables are set."""
         required_vars = [
-            "ALPHA_VANTAGE_API_KEY",
+            "MARKETDATA_TOKEN",
             "SPACES_ACCESS_KEY_ID", 
             "SPACES_SECRET_ACCESS_KEY",
             "SPACES_REGION",
@@ -65,30 +65,27 @@ class DeploymentVerifier:
             
         return results["status"] == "PASS", results
     
-    def check_alpha_vantage_connectivity(self) -> Tuple[bool, Dict[str, Any]]:
-        """Test Alpha Vantage API connectivity and quotas."""
+    def check_marketdata_connectivity(self) -> Tuple[bool, Dict[str, Any]]:
+        """Test MarketData API connectivity and health."""
         results = {
             "status": "UNKNOWN",
             "api_key_valid": False,
             "test_call_success": False,
-            "rate_limit_info": {},
+            "provider": "marketdata",
             "error": None
         }
         
         try:
-            api = AlphaVantageAPI()
+            is_healthy, status_msg = provider_health_check()
             
-            # Test with a simple quote call
-            test_data = api.get_daily_data("AAPL", compact=True)
-            
-            if test_data is not None and not test_data.empty:
+            if is_healthy:
                 results["api_key_valid"] = True
                 results["test_call_success"] = True
                 results["status"] = "PASS"
-                results["sample_data_points"] = len(test_data)
+                results["message"] = status_msg
             else:
                 results["status"] = "FAIL"
-                results["error"] = "API returned no data"
+                results["error"] = f"Health check failed: {status_msg}"
                 
         except Exception as e:
             results["status"] = "FAIL"
@@ -240,7 +237,7 @@ class DeploymentVerifier:
         
         checks = [
             ("environment_variables", self.check_environment_variables),
-            ("alpha_vantage_connectivity", self.check_alpha_vantage_connectivity),
+            ("marketdata_connectivity", self.check_marketdata_connectivity),
             ("spaces_connectivity", self.check_spaces_connectivity), 
             ("data_structure", self.check_data_structure),
             ("system_components", self.check_system_components)
