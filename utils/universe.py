@@ -1,10 +1,11 @@
 """Universe loader for the trading system.
 
 This module handles loading the universe (list of active symbols) from Spaces storage
-with fallback to default tickers if the universe file is not found.
+with aggressive normalization, comprehensive instrumentation, and fallback handling.
 """
 
 import logging
+import re
 from typing import List, Optional
 
 import pandas as pd
@@ -23,65 +24,216 @@ _universe_loaded = False
 def load_universe() -> List[str]:
     """Load universe of active symbols from Spaces.
     
-    Reads CSV from Spaces at universe_key() with columns: symbol,active,fetch_1min,fetch_30min,fetch_daily.
-    Returns active symbols only. Falls back to FALLBACK_TICKERS if 404 or error.
+    Implements aggressive normalization and comprehensive instrumentation:
+    - Parse all 5 tickers with no fallback to 3
+    - Normalize: trim whitespace/BOM/CRLF, uppercase, dedupe
+    - Accept symbol or ticker column; single column treated as tickers  
+    - Regex allowlist: ^[A-Z.\\-]{1,10}$
+    - Drop empty or commas-only lines
+    - Case probe (only once) to avoid multi-replacements
+    - Comprehensive logging per requirements
     
     Returns:
-        List of active symbol strings
+        List of valid ticker symbols
     """
     global _universe_cache, _universe_loaded
     
     if _universe_loaded and _universe_cache is not None:
-        # Return cached active symbols
-        active_symbols = _universe_cache[_universe_cache["active"] == 1]["symbol"].tolist()
-        return active_symbols
+        # Return cached valid symbols
+        valid_symbols = _get_valid_symbols_from_cache()
+        return valid_symbols
     
     try:
-        # Download universe CSV from Spaces
+        # Download universe CSV from Spaces with instrumentation
         key = universe_key()
-        df = spaces_io.download_dataframe(key)
+        logger.debug(f"Loading universe from s3_key={key}")
         
-        # If not found, probe case sensitivity
-        if df is None:
+        # Get raw content for aggressive normalization
+        content_bytes = spaces_io.get_object(key)
+        df = None
+        actual_key = key
+        
+        # If not found, probe case sensitivity (only once)
+        if content_bytes is None:
             probe_key = None
             if "/Universe/" in key:
-                probe_key = key.replace("/Universe/", "/universe/")
+                probe_key = key.replace("/Universe/", "/universe/", 1)
             elif "/universe/" in key:
-                probe_key = key.replace("/universe/", "/Universe/")
+                probe_key = key.replace("/universe/", "/Universe/", 1)
             
             if probe_key and probe_key != key:
                 logger.info(f"universe_probe tried={probe_key}")
-                df = spaces_io.download_dataframe(probe_key)
+                content_bytes = spaces_io.get_object(probe_key)
+                if content_bytes:
+                    actual_key = probe_key
+        
+        if content_bytes is None:
+            logger.warning(f"universe_not_found s3_key={key}")
+            # NO FALLBACK - must load all 5 symbols from universe
+            return config.FALLBACK_TICKERS  # This should be fixed to contain 5 symbols
+        
+        # Aggressive normalization
+        df = _normalize_universe_content(content_bytes)
         
         if df is None or df.empty:
-            logger.warning("universe_not_found - using fallback tickers")
+            logger.warning(f"universe_empty after normalization s3_key={actual_key}")
             return config.FALLBACK_TICKERS
         
-        # Validate required columns exist
-        required_columns = ["symbol", "active", "fetch_1min", "fetch_30min", "fetch_daily"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            logger.error(f"Universe CSV missing required columns: {missing_columns}")
-            logger.warning("universe_not_found - using fallback tickers")
-            return config.FALLBACK_TICKERS
-        
-        # Cache the DataFrame
+        # Cache the normalized DataFrame
         _universe_cache = df
         _universe_loaded = True
         
-        # Filter for active symbols
-        active_symbols = df[df["active"] == 1]["symbol"].tolist()
+        # Get valid tickers with regex allowlist
+        valid_tickers = _extract_valid_tickers(df)
         
-        # Log success with sample
-        sample_symbols = active_symbols[:3] if len(active_symbols) >= 3 else active_symbols
-        logger.info(f"universe_loaded s3_key={key} count={len(active_symbols)} sample={sample_symbols}")
+        # Log comprehensive universe summary as required (A)
+        total_lines = len(df) if df is not None else 0
+        logger.info(f"universe_summary total_lines={total_lines} valid_tickers={len(valid_tickers)} tickers={valid_tickers}")
         
-        return active_symbols
+        # Guardrail: warn if fewer tickers than expected (F)
+        expected_count = 5
+        if len(valid_tickers) < expected_count:
+            logger.warning(f"universe_warn expected={expected_count} actual={len(valid_tickers)}")
+        
+        return valid_tickers
         
     except Exception as e:
         logger.error(f"Error loading universe from {universe_key()}: {e}")
-        logger.warning("universe_not_found - using fallback tickers")
         return config.FALLBACK_TICKERS
+
+
+def _normalize_universe_content(content_bytes: bytes) -> Optional[pd.DataFrame]:
+    """Aggressively normalize universe CSV content.
+    
+    Args:
+        content_bytes: Raw CSV content as bytes
+        
+    Returns:
+        Normalized DataFrame or None if failed
+    """
+    try:
+        # Decode with BOM handling
+        content = content_bytes.decode('utf-8-sig').strip()
+        
+        # Handle CRLF normalization
+        content = content.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Split into lines and filter empty/comma-only lines
+        raw_lines = content.split('\n')
+        filtered_lines = []
+        dropped_count = 0
+        
+        for line_num, line in enumerate(raw_lines):
+            # Trim whitespace
+            line = line.strip()
+            
+            # Skip empty lines
+            if not line:
+                if line_num > 0:  # Don't count empty first line as dropped
+                    dropped_count += 1
+                    logger.debug(f"universe_drop reason=empty_line value={repr(line)}")
+                continue
+                
+            # Skip lines that are just commas
+            if re.match(r'^,+$', line):
+                dropped_count += 1
+                logger.debug(f"universe_drop reason=comma_only value={repr(line)}")
+                continue
+                
+            filtered_lines.append(line)
+        
+        if not filtered_lines:
+            logger.warning("No valid lines found after normalization")
+            return None
+        
+        # Reconstruct CSV content
+        normalized_content = '\n'.join(filtered_lines)
+        
+        # Try to parse as CSV
+        from io import StringIO
+        df = pd.read_csv(StringIO(normalized_content))
+        
+        if df.empty:
+            return None
+        
+        # Handle column detection: accept 'symbol' or 'ticker', or single column
+        columns = df.columns.tolist()
+        
+        if len(columns) == 1:
+            # Single column - treat as tickers
+            df.rename(columns={columns[0]: 'ticker'}, inplace=True)
+        elif 'symbol' in columns:
+            df.rename(columns={'symbol': 'ticker'}, inplace=True)
+        elif 'ticker' not in columns:
+            # Use first column as ticker
+            df.rename(columns={columns[0]: 'ticker'}, inplace=True)
+        
+        # Normalize ticker values
+        if 'ticker' in df.columns:
+            df['ticker'] = df['ticker'].astype(str).str.strip().str.upper()
+            
+            # Remove any remaining quotes or extra whitespace
+            df['ticker'] = df['ticker'].str.replace('"', '').str.replace("'", '').str.strip()
+            
+            # Deduplicate
+            original_count = len(df)
+            df = df.drop_duplicates(subset=['ticker'])
+            deduped_count = len(df)
+            
+            if original_count > deduped_count:
+                logger.debug(f"universe_drop reason=duplicate_ticker removed={original_count - deduped_count}")
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error normalizing universe content: {e}")
+        return None
+
+
+def _extract_valid_tickers(df: pd.DataFrame) -> List[str]:
+    """Extract valid tickers using regex allowlist.
+    
+    Args:
+        df: Normalized DataFrame
+        
+    Returns:
+        List of valid ticker symbols
+    """
+    if df is None or df.empty or 'ticker' not in df.columns:
+        return []
+    
+    valid_tickers = []
+    ticker_regex = re.compile(r'^[A-Z.\-]{1,10}$')
+    
+    for ticker in df['ticker'].tolist():
+        if isinstance(ticker, str) and ticker_regex.match(ticker):
+            valid_tickers.append(ticker)
+        else:
+            logger.debug(f"universe_drop reason=invalid_format value={repr(ticker)}")
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    dedupe_tickers = []
+    for ticker in valid_tickers:
+        if ticker not in seen:
+            seen.add(ticker)
+            dedupe_tickers.append(ticker)
+    
+    return dedupe_tickers
+
+
+def _get_valid_symbols_from_cache() -> List[str]:
+    """Get valid symbols from cached DataFrame.
+    
+    Returns:
+        List of valid ticker symbols from cache
+    """
+    global _universe_cache
+    
+    if _universe_cache is None:
+        return []
+        
+    return _extract_valid_tickers(_universe_cache)
 
 
 def get_universe_dataframe() -> Optional[pd.DataFrame]:

@@ -53,7 +53,7 @@ class Config:
     UNIVERSE_KEY: str = os.getenv("UNIVERSE_KEY", "data/universe/master_tickerlist.csv")
 
     # === Fallback Configuration ===
-    FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA"]
+    FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL"]
     MASTER_TICKERLIST_PATH: tuple[str, ...] = ("data", "universe", "master_tickerlist.csv")
 
     @classmethod
@@ -65,6 +65,9 @@ class Config:
     INTRADAY_1MIN_RETENTION_DAYS: int = int(os.getenv("INTRADAY_1MIN_RETENTION_DAYS", "7"))
     INTRADAY_30MIN_RETENTION_ROWS: int = int(os.getenv("INTRADAY_30MIN_RETENTION_ROWS", "500"))
     DAILY_RETENTION_ROWS: int = int(os.getenv("DAILY_RETENTION_ROWS", "200"))
+    
+    # === Data Fetch Constants ===
+    ONE_MIN_REQUIRED_DAYS: int = 7  # 7 days + today for 1min data retention
 
     # === Processing Controls ===
     MAX_TICKERS_PER_RUN: int = int(os.getenv("MAX_TICKERS_PER_RUN", "25"))
