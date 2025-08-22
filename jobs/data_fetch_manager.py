@@ -17,7 +17,9 @@ from utils.providers.router import get_candles, health_check
 from utils.config import config
 from utils.helpers import get_test_mode_reason
 from utils.logging_setup import get_logger
+from utils.paths import key_intraday_1min, key_intraday_30min, key_daily, s3_key
 from utils.spaces_io import spaces_io
+from utils.universe import load_universe
 from utils.time_utils import (
     convert_to_utc,
     filter_market_hours,
@@ -40,20 +42,10 @@ class DataFetchManager:
         self.load_universe()
 
     def load_universe(self) -> None:
-        """Load the master ticker list from Spaces."""
+        """Load the master ticker list from Spaces using the new universe loader."""
         try:
-            universe_key = config.get_spaces_path(*config.MASTER_TICKERLIST_PATH)
-            df = spaces_io.download_dataframe(universe_key)
-            
-            if df is not None and not df.empty:
-                # Filter for active tickers
-                active_tickers = df[df["active"] == 1]["symbol"].tolist()
-                self.universe_tickers = active_tickers
-                logger.info(f"Loaded {len(active_tickers)} active tickers from universe")
-            else:
-                # Fallback to default tickers
-                self.universe_tickers = config.FALLBACK_TICKERS
-                logger.warning("Universe not found, using fallback tickers")
+            self.universe_tickers = load_universe()
+            logger.info(f"Loaded {len(self.universe_tickers)} active tickers from universe")
                 
         except Exception as e:
             logger.error(f"Error loading universe: {e}")
@@ -190,14 +182,13 @@ class DataFetchManager:
             True if successful, False otherwise
         """
         try:
-            data_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
+            data_key = s3_key(key_daily(ticker))
             
             # Determine fetch mode
             existing_df = spaces_io.download_dataframe(data_key)
             mode = self._determine_fetch_mode(existing_df, "daily")
             
-            outputsize = "full" if mode == "FULL" else "compact"
-            logger.debug(f"Fetching daily data for {ticker} (mode={mode}, outputsize={outputsize})")
+            logger.debug(f"Fetching daily data for {ticker} (mode={mode})")
             
             # Fetch new data using MarketData provider
             new_df = get_candles(
@@ -226,47 +217,72 @@ class DataFetchManager:
                 # Continue with cleaned data
                 trimmed_df = clean_dataframe(trimmed_df, "DAILY")
             
-            # Upload to Spaces with atomic writes
-            metadata = {
-                "symbol": ticker,
-                "interval": "daily",
-                "mode": mode,
-                "rows": str(len(trimmed_df)),
-                "managed-by": "data_fetch_manager",
-                "provider": "marketdata",
-                "deployment": config.DEPLOYMENT_TAG or "unknown",
-            }
+            # Determine if we should write based on the policy:
+            # - Write if the file didn't exist
+            # - Write if appended > 0  
+            # - Write if mode == "heal" even when appended == 0 (may reorder/clean)
+            should_write = False
+            appended_rows = 0
             
-            success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
-            if success:
-                # Log per-run details as required
-                latest_timestamp = trimmed_df["timestamp"].max() if not trimmed_df.empty else None
-                latest_ts_utc = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if latest_timestamp else "none"
+            if existing_df is None or existing_df.empty:
+                should_write = True
+                appended_rows = len(trimmed_df)
+            else:
+                existing_count = len(existing_df)
+                appended_rows = len(trimmed_df) - existing_count
+                should_write = (appended_rows > 0) or (mode == "heal")
+            
+            if should_write:
+                # Upload to Spaces with atomic writes
+                metadata = {
+                    "symbol": ticker,
+                    "interval": "daily",
+                    "mode": mode,
+                    "rows": str(len(trimmed_df)),
+                    "managed-by": "data_fetch_manager",
+                    "provider": "marketdata",
+                    "deployment": config.DEPLOYMENT_TAG or "unknown",
+                }
                 
-                # Calculate rows added (new rows only, not total)
-                if existing_df is not None and not existing_df.empty:
-                    existing_count = len(existing_df)
-                    appended_rows = len(trimmed_df) - existing_count
+                success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
+                if success:
+                    # Proof-of-write always visible
+                    logger.info(f"write_ok s3_key={data_key}")
+                    
+                    # Get object metadata for logging
+                    obj_metadata = spaces_io.object_metadata(data_key)
+                    etag, size_bytes = "unknown", 0
+                    if obj_metadata:
+                        size_bytes = obj_metadata.get("size", 0)
+                        etag = obj_metadata.get("etag", "")
+                    
+                    
+                    # Log per-run details as required  
+                    latest_timestamp = trimmed_df["timestamp"].max() if not trimmed_df.empty else None
+                    latest_ts_utc = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if latest_timestamp else "none"
+                    
+                    logger.info(
+                        f"provider=marketdata interval=daily mode={mode} "
+                        f"appended={appended_rows} final_rows={len(trimmed_df)} latest_ts_utc={latest_ts_utc} "
+                        f"s3_key={data_key} size={size_bytes} etag={etag}"
+                    )
+                    
+                    # Update manifest
+                    self._update_manifest(ticker, "daily", trimmed_df, mode)
+                    logger.data_operation(
+                        "daily_update",
+                        ticker,
+                        rows_processed=len(trimmed_df),
+                        mode=mode,
+                        provider="marketdata",
+                    )
+                    return True
                 else:
-                    appended_rows = len(trimmed_df)
-                
-                logger.info(
-                    f"✅ {ticker} (daily) update complete - "
-                    f"provider=marketdata interval=daily appended={appended_rows} "
-                    f"final_rows={len(trimmed_df)} latest_ts_utc={latest_ts_utc}"
-                )
-                
-                # Update manifest
-                self._update_manifest(ticker, "daily", trimmed_df, mode)
-                logger.data_operation(
-                    "daily_update",
-                    ticker,
-                    rows_processed=len(trimmed_df),
-                    mode=mode,
-                    provider="marketdata",
-                )
-            
-            return success
+                    logger.error(f"Failed to upload daily data for {ticker}")
+                    return False
+            else:
+                logger.debug(f"No write needed for {ticker} daily data - appended={appended_rows}, mode={mode}")
+                return True
             
         except Exception as e:
             logger.error(f"Error fetching daily data for {ticker}: {e}")
@@ -285,18 +301,17 @@ class DataFetchManager:
         """
         try:
             if interval == "1min":
-                data_key = config.get_spaces_path("data", "intraday", "1min", f"{ticker}.csv")
+                data_key = s3_key(key_intraday_1min(ticker))
                 schema_name = "INTRADAY_1MIN"
             else:
-                data_key = config.get_spaces_path("data", "intraday", "30min", f"{ticker}.csv")
+                data_key = s3_key(key_intraday_30min(ticker))
                 schema_name = "INTRADAY_30MIN"
             
             # Determine fetch mode
             existing_df = spaces_io.download_dataframe(data_key)
             mode = self._determine_fetch_mode(existing_df, interval)
             
-            outputsize = "full" if mode == "FULL" else "compact"
-            logger.debug(f"Fetching {interval} data for {ticker} (mode={mode}, outputsize={outputsize})")
+            logger.debug(f"Fetching {interval} data for {ticker} (mode={mode})")
             
             # Check provider health before intraday operations  
             if interval == "1min":
@@ -362,48 +377,81 @@ class DataFetchManager:
                 # Continue with cleaned data
                 trimmed_df = clean_dataframe(trimmed_df, schema_name)
             
-            # Upload to Spaces with atomic writes
-            metadata = {
-                "symbol": ticker,
-                "interval": interval,
-                "mode": mode,
-                "rows": str(len(trimmed_df)),
-                "managed-by": "data_fetch_manager",
-                "provider": "marketdata",
-                "deployment": config.DEPLOYMENT_TAG or "unknown",
-            }
+            # Determine if we should write based on the policy:
+            # - Write if the file didn't exist
+            # - Write if appended > 0  
+            # - Write if mode == "heal" even when appended == 0 (may reorder/clean)
+            should_write = False
+            appended_rows = 0
             
-            success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
-            if success:
-                # Log per-run details as required
-                latest_timestamp = trimmed_df["timestamp"].max() if not trimmed_df.empty else None
-                latest_ts_utc = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if latest_timestamp else "none"
+            if existing_df is None or existing_df.empty:
+                should_write = True
+                appended_rows = len(trimmed_df)
+            else:
+                existing_count = len(existing_df)
+                appended_rows = len(trimmed_df) - existing_count
+                should_write = (appended_rows > 0) or (mode == "heal")
+            
+            if should_write:
+                # Upload to Spaces with atomic writes
+                metadata = {
+                    "symbol": ticker,
+                    "interval": interval,
+                    "mode": mode,
+                    "rows": str(len(trimmed_df)),
+                    "managed-by": "data_fetch_manager",
+                    "provider": "marketdata",
+                    "deployment": config.DEPLOYMENT_TAG or "unknown",
+                }
                 
-                # Calculate rows added (new rows only, not total)
-                if existing_df is not None and not existing_df.empty:
-                    existing_count = len(existing_df)
-                    appended_rows = len(trimmed_df) - existing_count
+                success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
+                if success:
+                    # Proof-of-write always visible
+                    logger.info(f"write_ok s3_key={data_key}")
+                    
+                    # Get object metadata for logging
+                    obj_metadata = spaces_io.object_metadata(data_key)
+                    etag, size_bytes = "unknown", 0
+                    if obj_metadata:
+                        size_bytes = obj_metadata.get("size", 0)
+                        etag = obj_metadata.get("etag", "")
+                    
+                    
+                    # Log per-run details as required  
+                    latest_timestamp = trimmed_df["timestamp"].max() if not trimmed_df.empty else None
+                    latest_ts_utc = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if latest_timestamp else "none"
+                    
+                    logger.info(
+                        f"provider=marketdata interval={interval} mode={mode} "
+                        f"appended={appended_rows} final_rows={len(trimmed_df)} latest_ts_utc={latest_ts_utc} "
+                        f"s3_key={data_key} size={size_bytes} etag={etag}"
+                    )
+                    
+                    # Add freshness line for 1min updates
+                    if interval == "1min":
+                        now_utc = utc_now()
+                        age_sec = int((now_utc - latest_timestamp).total_seconds()) if latest_timestamp else 9999
+                        logger.info(
+                            f"health=fresh interval=1min symbol={ticker} age_sec={age_sec} rows={len(trimmed_df)}"
+                        )
+                    
+                    # Update manifest
+                    self._update_manifest(ticker, interval, trimmed_df, mode)
+                    logger.data_operation(
+                        f"{interval}_update",
+                        ticker,
+                        interval=interval,
+                        rows_processed=len(trimmed_df),
+                        mode=mode,
+                        provider="marketdata",
+                    )
+                    return True
                 else:
-                    appended_rows = len(trimmed_df)
-                
-                logger.info(
-                    f"✅ {ticker} ({interval}) update complete - "
-                    f"provider=marketdata interval={interval} appended={appended_rows} "
-                    f"final_rows={len(trimmed_df)} latest_ts_utc={latest_ts_utc}"
-                )
-                
-                # Update manifest
-                self._update_manifest(ticker, interval, trimmed_df, mode)
-                logger.data_operation(
-                    f"{interval}_update",
-                    ticker,
-                    interval=interval,
-                    rows_processed=len(trimmed_df),
-                    mode=mode,
-                    provider="marketdata",
-                )
-            
-            return success
+                    logger.error(f"Failed to upload {interval} data for {ticker}")
+                    return False
+            else:
+                logger.debug(f"No write needed for {ticker} {interval} data - appended={appended_rows}, mode={mode}")
+                return True
             
         except Exception as e:
             logger.error(f"Error fetching {interval} data for {ticker}: {e}")
@@ -593,7 +641,7 @@ class DataFetchManager:
             mode: Fetch mode used
         """
         try:
-            manifest_key = config.get_spaces_path("data", "manifest", "fetch_status.json")
+            manifest_key = s3_key("data", "manifest", "fetch_status.json")
             
             # Load existing manifest
             manifest = spaces_io.download_json(manifest_key) or {}

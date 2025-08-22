@@ -1,0 +1,42 @@
+name: Seed Universe
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Space-separated list of ticker symbols (e.g., NVDA AAPL TSLA)'
+        required: true
+        default: 'NVDA AAPL TSLA'
+        type: string
+
+jobs:
+  seed-universe:
+    name: Upload Universe CSV to Spaces
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Seed universe to Spaces
+      env:
+        SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+        SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+        SPACES_BUCKET_NAME: ${{ vars.SPACES_BUCKET_NAME }}
+        SPACES_REGION: ${{ vars.SPACES_REGION }}
+        SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
+        DATA_ROOT: ${{ vars.DATA_ROOT }}
+        UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
+      run: |
+        echo "Seeding universe with tickers: ${{ github.event.inputs.tickers }}"
+        python -m tools.seed_universe --tickers ${{ github.event.inputs.tickers }}
