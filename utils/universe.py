@@ -70,7 +70,7 @@ def load_universe() -> List[str]:
         if content_bytes is None:
             logger.warning(f"universe_not_found s3_key={key}")
             # NO FALLBACK - must load all 5 symbols from universe
-            return config.FALLBACK_TICKERS  # This should be fixed to contain 5 symbols
+            return config.FALLBACK_TICKERS  # Contains 5 symbols as required
         
         # Aggressive normalization
         df = _normalize_universe_content(content_bytes)
@@ -225,7 +225,7 @@ def _extract_valid_tickers(df: pd.DataFrame) -> List[str]:
         return []
     
     valid_tickers = []
-    ticker_regex = re.compile(r'^[A-Z.\-]{1,10}$')
+    ticker_regex = re.compile(r'^[A-Z.-]{1,10}$')
     
     for ticker in df['ticker'].tolist():
         if isinstance(ticker, str) and ticker_regex.match(ticker):
