@@ -156,14 +156,25 @@ class DataFetchManager:
 
         successful_tickers = 0
         tickers_with_zero_rows = []
+        consecutive_zero_rows = 0  # Early guardrail exit for systemic issues
 
         for ticker in self.universe_tickers:
             try:
                 success, zero_rows = self.fetch_intraday_data_with_metrics(ticker, interval)
                 if success:
                     successful_tickers += 1
+                    consecutive_zero_rows = 0  # Reset counter on success
                 if zero_rows:
                     tickers_with_zero_rows.append(ticker)
+                    consecutive_zero_rows += 1
+                    
+                    # Early exit on systemic zero-row issues  
+                    if consecutive_zero_rows >= 5:
+                        logger.warning(
+                            f"Early exit: {consecutive_zero_rows} consecutive zero-row responses "
+                            f"for {interval} data - possible systemic provider issue"
+                        )
+                        break
 
                 # Brief pause between tickers
                 time.sleep(0.2)
@@ -660,7 +671,8 @@ class DataFetchManager:
             mode: Fetch mode used
         """
         try:
-            manifest_key = s3_key("data", "manifest", "fetch_status.json")
+            from utils.paths import k, BASE
+            manifest_key = k(BASE, "data", "manifest", "fetch_status.json")
 
             # Load existing manifest
             manifest = spaces_io.download_json(manifest_key) or {}
@@ -697,7 +709,7 @@ class DataFetchManager:
         except Exception as e:
             logger.error(f"Error updating manifest for {ticker}:{interval}: {e}")
 
-    def fetch_intraday_data_with_metrics(self, ticker: str, interval: str) -> Tuple[bool, bool]:
+    def fetch_intraday_data_with_metrics(self, ticker: str, interval: str) -> tuple[bool, bool]:
         """Fetch intraday data with zero-row tracking for guardrails.
         
         Args:
@@ -707,15 +719,49 @@ class DataFetchManager:
         Returns:
             Tuple of (success, had_zero_rows)
         """
-        # For simplicity, we'll just call the existing method and track zero rows
-        # by checking if the fetch was successful
-        success = self.fetch_intraday_data(ticker, interval)
+        # Improved zero-row guardrail as per PR feedback
+        try:
+            # Fetch data using the provider
+            from datetime import timedelta
+            from utils.providers.router import get_candles
+            
+            if interval == "1min":
+                # Fetch from required days back + today for 1min data
+                now_utc = utc_now()
+                from_utc = now_utc - timedelta(days=config.ONE_MIN_REQUIRED_DAYS + 1)
 
-        # If the fetch failed, we assume it was due to zero rows or other issues
-        # In a production system, we'd want more granular tracking
-        zero_rows = not success
-
-        return success, zero_rows
+                df = get_candles(
+                    symbol=ticker,
+                    resolution="1",
+                    from_iso=from_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    to_iso=now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    extended=config.INTRADAY_EXTENDED,
+                )
+            else:  # 30min
+                df = get_candles(
+                    symbol=ticker,
+                    resolution="30",
+                    countback=520,
+                    extended=config.INTRADAY_EXTENDED,
+                )
+            
+            # Proper zero-row vs failure detection
+            success = df is not None and not df.empty
+            zero_rows = df is not None and df.empty
+            
+            if success:
+                # Process the data normally using existing method
+                return self.fetch_intraday_data(ticker, interval), False
+            elif zero_rows:
+                logger.warning(f"Zero rows returned for {ticker} {interval} - provider returned empty dataset")
+                return False, True
+            else:
+                logger.error(f"provider_error ticker={ticker} interval={interval} - get_candles returned None")
+                return False, False
+                
+        except Exception as e:
+            logger.error(f"provider_error ticker={ticker} interval={interval} error={e}")
+            return False, False
 
     def _log_startup_paths(self) -> None:
         """Log startup path configuration (A)."""
@@ -755,7 +801,7 @@ class DataFetchManager:
             f"first_ts={first_ts} last_ts={last_ts} tz={tz}"
         )
 
-    def _check_zero_rows_guardrail(self, tickers_with_zero_rows: List[str]) -> bool:
+    def _check_zero_rows_guardrail(self, tickers_with_zero_rows: list[str]) -> bool:
         """Check for zero-row guardrail and exit if all symbols return 0 rows (F)."""
         if len(tickers_with_zero_rows) == len(self.universe_tickers) and len(self.universe_tickers) > 0:
             logger.error(f"minute_anomaly all_zero_rows symbols={self.universe_tickers}")

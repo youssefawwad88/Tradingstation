@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 # Path configuration from environment
 BASE = os.getenv("SPACES_BASE_PREFIX", "").strip("/")  # e.g. "trading-system"
 DATA_ROOT = os.getenv("DATA_ROOT", "data").strip("/")  # e.g. "data" (RELATIVE)
-UNIVERSE_KEY = os.getenv("UNIVERSE_KEY", "data/Universe/master_tickerlist.csv").strip("/")  # RELATIVE
+UNIVERSE_KEY = os.getenv(
+    "UNIVERSE_KEY", "data/Universe/master_tickerlist.csv"
+).strip("/")  # RELATIVE
 
 
 def k(*parts: str) -> str:
@@ -116,4 +118,7 @@ def key_daily(sym: str) -> str:
 def log_startup_paths() -> None:
     """Log path resolution on startup as required by instrumentation."""
     sample_prefix = k(BASE, DATA_ROOT, "intraday", "1min")
-    logger.info(f"paths_resolved base={BASE} data_root={DATA_ROOT} universe_key={UNIVERSE_KEY} write_prefix={sample_prefix}/")
+    logger.info(
+        f"paths_resolved base={BASE} data_root={DATA_ROOT} "
+        f"universe_key={UNIVERSE_KEY} write_prefix={sample_prefix}/"
+    )
