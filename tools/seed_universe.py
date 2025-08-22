@@ -58,22 +58,24 @@ def upload_universe(df: pd.DataFrame) -> bool:
     try:
         key = universe_key()
         
-        # Upload CSV with explicit content type
-        success = spaces_io.upload_dataframe(df, key, content_type="text/csv")
+        # Upload CSV with metadata
+        success = spaces_io.upload_dataframe(df, key, file_format="csv")
         
         if not success:
             logger.error("Failed to upload universe CSV")
             return False
         
         # Get object metadata to show confirmation
-        client = spaces_io._get_client()
-        if client:
+        if spaces_io.is_available:
             try:
-                response = client.head_object(Bucket=config.SPACES_BUCKET_NAME, Key=key)
-                size_bytes = response.get('ContentLength', 0)
-                etag = response.get('ETag', '').strip('"')
-                
-                print(f"s3://{config.SPACES_BUCKET_NAME}/{key} size={size_bytes} etag={etag}")
+                metadata = spaces_io.object_metadata(key)
+                if metadata:
+                    size_bytes = metadata.get('size', 0)
+                    etag = metadata.get('etag', '')
+                    
+                    print(f"s3://{config.SPACES_BUCKET_NAME}/{key} size={size_bytes} etag={etag}")
+                else:
+                    print(f"Universe uploaded to {key} (metadata unavailable)")
                 
             except Exception as e:
                 logger.warning(f"Could not get object metadata: {e}")

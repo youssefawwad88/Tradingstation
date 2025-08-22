@@ -38,26 +38,16 @@ def list_objects_by_prefix(prefix: str) -> List[dict]:
         List of object metadata dictionaries
     """
     try:
-        client = spaces_io._get_client()
-        if not client:
+        if not spaces_io.is_available:
             logger.error("Cannot connect to Spaces - client not available")
             return []
         
-        response = client.list_objects_v2(
-            Bucket=config.SPACES_BUCKET_NAME,
-            Prefix=prefix
-        )
-        
-        objects = []
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                objects.append({
-                    'key': obj['Key'],
-                    'size': obj['Size'],
-                    'last_modified': obj['LastModified']
-                })
-        
-        return objects
+        objects = spaces_io.list_objects(prefix)
+        return [{
+            'key': obj['Key'],
+            'size': obj['Size'], 
+            'last_modified': obj['LastModified']
+        } for obj in objects]
         
     except Exception as e:
         logger.error(f"Error listing objects with prefix {prefix}: {e}")
@@ -75,16 +65,19 @@ def get_last_timestamps(key: str, num_lines: int = 10) -> List[str]:
         List of timestamp strings found
     """
     try:
-        client = spaces_io._get_client()
-        if not client:
+        if not spaces_io.is_available:
             return []
         
-        # Get the object
-        response = client.get_object(Bucket=config.SPACES_BUCKET_NAME, Key=key)
-        content = response['Body'].read()
+        # Get the object content as bytes
+        content_bytes = spaces_io.get_object(key)
+        if not content_bytes:
+            return []
+            
+        # Decode to text
+        content = content_bytes.decode('utf-8')
         
         # Get last N lines
-        lines = content.decode('utf-8').strip().split('\n')
+        lines = content.strip().split('\n')
         last_lines = lines[-num_lines:] if len(lines) > num_lines else lines[1:]  # Skip header
         
         # Extract timestamps - assume first column is timestamp
@@ -128,24 +121,24 @@ def inspect_symbols(symbols: List[str]) -> None:
             full_key = s3_key(key)
             
             try:
-                client = spaces_io._get_client()
-                if not client:
+                if not spaces_io.is_available:
                     continue
                     
                 # Get object metadata
-                response = client.head_object(Bucket=config.SPACES_BUCKET_NAME, Key=full_key)
-                size = response.get('ContentLength', 0)
-                last_modified = response.get('LastModified', 'Unknown')
+                metadata = spaces_io.object_metadata(full_key)
+                if metadata:
+                    size = metadata.get('size', 0)
+                    last_modified = metadata.get('last_modified', 'Unknown')
+                    
+                    # Get last timestamps
+                    timestamps = get_last_timestamps(full_key)
+                    timestamp_str = ", ".join(timestamps) if timestamps else "No timestamps found"
+                    
+                    print(f"  {data_type:>6}: path={full_key}, size={size} bytes, last_modified={last_modified}")
+                    print(f"         Last 3 timestamps: {timestamp_str}")
+                else:
+                    print(f"  {data_type:>6}: NOT FOUND")
                 
-                # Get last timestamps
-                timestamps = get_last_timestamps(full_key)
-                timestamp_str = ", ".join(timestamps) if timestamps else "No timestamps found"
-                
-                print(f"  {data_type:>6}: path={full_key}, size={size} bytes, last_modified={last_modified}")
-                print(f"         Last 3 timestamps: {timestamp_str}")
-                
-            except client.exceptions.NoSuchKey:
-                print(f"  {data_type:>6}: NOT FOUND")
             except Exception as e:
                 print(f"  {data_type:>6}: ERROR - {e}")
 

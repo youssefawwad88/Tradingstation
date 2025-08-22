@@ -1,0 +1,31 @@
+name: Redeploy DigitalOcean App
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Name of the DigitalOcean app to redeploy'
+        required: false
+        default: 'Auto-detect from DO_APP_ID'
+        type: string
+
+jobs:
+  redeploy:
+    name: Trigger DigitalOcean App Deployment
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DO_API_TOKEN }}
+        
+    - name: Trigger app deployment
+      run: |
+        echo "Triggering deployment for app ID: ${{ secrets.DO_APP_ID }}"
+        doctl apps create-deployment ${{ secrets.DO_APP_ID }}
+        
+    - name: Get deployment status
+      run: |
+        echo "Getting latest deployment status..."
+        doctl apps list-deployments ${{ secrets.DO_APP_ID }} --format ID,Phase,CreatedAt --no-header | head -1
