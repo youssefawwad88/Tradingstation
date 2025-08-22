@@ -76,9 +76,10 @@ def get_last_timestamps(key: str, num_lines: int = 10) -> List[str]:
         # Decode to text
         content = content_bytes.decode('utf-8')
         
-        # Get last N lines
+        # Get last N lines (D: always drop header)
         lines = content.strip().split('\n')
-        last_lines = lines[-num_lines:] if len(lines) > num_lines else lines[1:]  # Skip header
+        data_lines = lines[1:]  # Always skip header
+        last_lines = data_lines[-num_lines:] if len(data_lines) > num_lines else data_lines
         
         # Extract timestamps - assume first column is timestamp
         timestamps = []

@@ -1,0 +1,71 @@
+name: Fetch Data Once
+
+on:
+  workflow_dispatch:
+    inputs:
+      interval:
+        description: 'Data interval to fetch'
+        required: true
+        default: '1min'
+        type: choice
+        options:
+        - '1min'
+        - '30min'
+        - 'daily'
+      tickers:
+        description: 'Comma-separated list of tickers'
+        required: true
+        default: 'AAPL,TSLA,NVDA'
+        type: string
+      force_full:
+        description: 'Force full refresh of data'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        
+    - name: Fetch data
+      env:
+        SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+        SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+        SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
+        SPACES_REGION: ${{ secrets.SPACES_REGION }}
+        MARKETDATA_TOKEN: ${{ secrets.MARKETDATA_TOKEN }}
+        MARKETDATA_ENDPOINT: ${{ secrets.MARKETDATA_ENDPOINT }}
+      run: |
+        if [ "${{ inputs.interval }}" = "daily" ]; then
+          JOB_ARG="daily"
+          INTERVAL_ARG=""
+        else
+          JOB_ARG="intraday"
+          INTERVAL_ARG="--interval ${{ inputs.interval }}"
+        fi
+        
+        FORCE_FULL_ARG=""
+        if [ "${{ inputs.force_full }}" = "true" ]; then
+          FORCE_FULL_ARG="--force-full"
+        fi
+        
+        echo "Running: python -m jobs.data_fetch_manager --job $JOB_ARG $INTERVAL_ARG --tickers ${{ inputs.tickers }} $FORCE_FULL_ARG"
+        
+        python -m jobs.data_fetch_manager \
+          --job "$JOB_ARG" \
+          $INTERVAL_ARG \
+          --tickers "${{ inputs.tickers }}" \
+          $FORCE_FULL_ARG
