@@ -246,6 +246,9 @@ class DataFetchManager:
                 
                 success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
                 if success:
+                    # Proof-of-write always visible
+                    logger.info(f"write_ok s3_key={data_key}")
+                    
                     # Get object metadata for logging
                     obj_metadata = spaces_io.object_metadata(data_key)
                     etag, size_bytes = "unknown", 0
@@ -403,6 +406,9 @@ class DataFetchManager:
                 
                 success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
                 if success:
+                    # Proof-of-write always visible
+                    logger.info(f"write_ok s3_key={data_key}")
+                    
                     # Get object metadata for logging
                     obj_metadata = spaces_io.object_metadata(data_key)
                     etag, size_bytes = "unknown", 0
