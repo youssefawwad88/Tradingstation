@@ -149,9 +149,31 @@ def _normalize_universe_content(content_bytes: bytes) -> Optional[pd.DataFrame]:
         # Reconstruct CSV content
         normalized_content = '\n'.join(filtered_lines)
         
-        # Try to parse as CSV
+        # Try to parse as CSV with error handling
         from io import StringIO
-        df = pd.read_csv(StringIO(normalized_content))
+        try:
+            df = pd.read_csv(StringIO(normalized_content), on_bad_lines='skip')
+        except Exception as e:
+            logger.warning(f"CSV parsing error, trying alternate approach: {e}")
+            # Try with manual parsing for very malformed data
+            lines = normalized_content.split('\n')
+            if lines:
+                header = lines[0] if lines else 'ticker'
+                data_rows = []
+                for i, line in enumerate(lines[1:], 1):
+                    # Take only the first column, ignore extra commas
+                    parts = line.split(',')
+                    if parts and parts[0].strip():
+                        data_rows.append([parts[0].strip()])
+                    else:
+                        logger.debug(f"universe_drop reason=empty_column value={repr(line)} line={i}")
+                
+                if data_rows:
+                    df = pd.DataFrame(data_rows, columns=['ticker'])
+                else:
+                    return None
+            else:
+                return None
         
         if df.empty:
             return None
