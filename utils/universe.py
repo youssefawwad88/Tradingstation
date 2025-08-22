@@ -41,6 +41,18 @@ def load_universe() -> List[str]:
         key = universe_key()
         df = spaces_io.download_dataframe(key)
         
+        # If not found, probe case sensitivity
+        if df is None:
+            probe_key = None
+            if "/Universe/" in key:
+                probe_key = key.replace("/Universe/", "/universe/")
+            elif "/universe/" in key:
+                probe_key = key.replace("/universe/", "/Universe/")
+            
+            if probe_key and probe_key != key:
+                logger.info(f"universe_probe tried={probe_key}")
+                df = spaces_io.download_dataframe(probe_key)
+        
         if df is None or df.empty:
             logger.warning("universe_not_found - using fallback tickers")
             return config.FALLBACK_TICKERS
