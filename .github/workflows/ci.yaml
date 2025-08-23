@@ -1,9 +1,10 @@
 name: CI
+
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ dev, main ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ dev, main ]
 
 jobs:
   test:
@@ -11,23 +12,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']  # <-- no 3.1
+        python-version: ['3.9','3.10','3.11','3.12']
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix['python-version'] }}
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
-      - run: python -V
-      - run: pip install -r requirements.txt || true
-      - run: python -m compileall -q .
-  
-  deploy:
-    needs: test
-    if: ${{ github.ref == 'refs/heads/dev' && needs.test.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          curl -sS -X POST "https://api.digitalocean.com/v2/apps/${{ secrets.DO_APP_ID }}/deployments" \
-            -H "Authorization: Bearer ${{ secrets.DO_API_TOKEN }}" \
-            -H "Content-Type: application/json"
+
+      - name: Install deps (best-effort)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+
+      - name: Compile all python files
+        run: |
+          git ls-files '*.py' | xargs -r python -m py_compile
