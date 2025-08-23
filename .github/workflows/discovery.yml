@@ -1,0 +1,66 @@
+name: System Discovery & Inventory
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to analyze'
+        required: true
+        default: 'dev'
+        type: string
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          
+      - name: Install discovery dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 jinja2 pyyaml requests
+          
+      - name: Install doctl CLI
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_API_TOKEN }}
+          
+      - name: Run system discovery
+        env:
+          # DigitalOcean secrets (read-only)
+          DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
+          DO_APP_ID: ${{ secrets.DO_APP_ID }}
+          
+          # DigitalOcean Spaces secrets (read-only)
+          SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+          
+          # Public configuration variables
+          SPACES_BUCKET_NAME: ${{ vars.SPACES_BUCKET_NAME }}
+          SPACES_REGION: ${{ vars.SPACES_REGION }}
+          SPACES_ENDPOINT: ${{ vars.SPACES_ENDPOINT }}
+          SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
+          DATA_ROOT: ${{ vars.DATA_ROOT }}
+          UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
+          MARKETDATA_ENDPOINT: ${{ vars.MARKETDATA_ENDPOINT }}
+          
+        run: |
+          python tools/discovery.py
+          
+      - name: Upload discovery artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery_artifacts
+          path: discovery_artifacts/
+          retention-days: 30
+          compression-level: 6

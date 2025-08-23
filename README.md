@@ -39,6 +39,16 @@ streamlit run dashboard/master_dashboard.py
 
 ## Architecture
 
+### System Discovery & Inventory
+
+For comprehensive system analysis and troubleshooting, use the automated discovery workflow:
+
+1. **GitHub Actions**: Go to Actions → Discovery → Run workflow → select branch (default: `dev`)
+2. **Manual execution**: `python tools/discovery.py`
+3. **Output**: Downloads `discovery_artifacts.zip` containing `DISCOVERY_REPORT.md` with complete system inventory
+
+The discovery report includes repository structure, runtime configuration, CI/CD workflows, environment variables, DigitalOcean app status, Spaces structure, and recommended fixes.
+
 ### Data Layer
 - **Single Source of Truth**: DigitalOcean Spaces CSV files
 - **Unified Fetch Manager**: Self-healing data pipeline
