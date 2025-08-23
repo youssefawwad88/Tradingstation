@@ -36,7 +36,10 @@ class Config:
     SPACES_SECRET_ACCESS_KEY: Optional[str] = os.getenv("SPACES_SECRET_ACCESS_KEY")
     SPACES_BUCKET_NAME: Optional[str] = os.getenv("SPACES_BUCKET_NAME")
     SPACES_REGION: str = os.getenv("SPACES_REGION", "nyc3")
-    SPACES_ENDPOINT: str = f"https://{SPACES_REGION}.digitaloceanspaces.com"
+    SPACES_ENDPOINT: str = os.getenv("SPACES_ENDPOINT", f"https://{os.getenv('SPACES_REGION', 'nyc3')}.digitaloceanspaces.com")
+    
+    # === DigitalOcean App Configuration ===
+    DO_APP_ID: Optional[str] = os.getenv("DO_APP_ID")
 
     # === Application Environment ===
     APP_ENV: str = os.getenv("APP_ENV", "development")

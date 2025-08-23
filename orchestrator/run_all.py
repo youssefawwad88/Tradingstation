@@ -21,6 +21,7 @@ sys.path.append(str(project_root))
 
 from orchestrator.schedules import due_every_minute, due_every_quarter_hour, due_once_at
 from utils.config import config
+from utils.env_validation import validate_spaces_endpoint, validate_paths, validate_do_ids
 from utils.logging_setup import get_logger
 from utils.time_utils import get_market_time
 
@@ -185,6 +186,24 @@ def main():
     logger.info(f"📁 Project root: {project_root}")
     if config.DEPLOYMENT_TAG:
         logger.info(f"🏷️ Deployment: {config.DEPLOYMENT_TAG}")
+
+    # Validate environment variables early - fail fast if misconfigured
+    logger.info("🔍 Validating environment configuration...")
+    try:
+        validate_spaces_endpoint(
+            os.getenv("SPACES_ENDPOINT", ""), 
+            os.getenv("SPACES_REGION", "")
+        )
+        validate_paths(
+            os.getenv("DATA_ROOT", ""), 
+            os.getenv("UNIVERSE_KEY", "")
+        )
+        validate_do_ids(os.getenv("DO_APP_ID", ""))
+        logger.info("✅ Environment validation passed")
+    except RuntimeError as e:
+        logger.critical(f"❌ Environment validation failed: {e}")
+        logger.critical("🚨 Fix environment variables before running the orchestrator")
+        return 1
 
     mode_str = "DRY RUN" if args.dry_run else "LIVE"
     logger.info(f"🎯 Starting continuous minute scheduler in {mode_str} mode")

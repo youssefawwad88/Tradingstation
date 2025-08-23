@@ -1,0 +1,195 @@
+name: Validate Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to validate'
+        required: true
+        default: 'dev'
+        type: string
+
+jobs:
+  validate-environment:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3
+      
+      - name: Install DigitalOcean CLI
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_API_TOKEN }}
+      
+      - name: Check Environment Variables
+        run: |
+          echo "## Environment Variables Check" >> validation_report.md
+          echo "" >> validation_report.md
+          
+          # Check canonical values against expected
+          echo "### Variable Validation Results:" >> validation_report.md
+          echo "" >> validation_report.md
+          
+          # SPACES_ENDPOINT check
+          if [ "${{ vars.SPACES_ENDPOINT }}" = "https://nyc3.digitaloceanspaces.com" ]; then
+            echo "- ✅ SPACES_ENDPOINT: Correct canonical value" >> validation_report.md
+          else
+            echo "- ❌ SPACES_ENDPOINT: Expected 'https://nyc3.digitaloceanspaces.com', got '${{ vars.SPACES_ENDPOINT }}'" >> validation_report.md
+          fi
+          
+          # SPACES_REGION check
+          if [ "${{ vars.SPACES_REGION }}" = "nyc3" ]; then
+            echo "- ✅ SPACES_REGION: Correct canonical value" >> validation_report.md
+          else
+            echo "- ❌ SPACES_REGION: Expected 'nyc3', got '${{ vars.SPACES_REGION }}'" >> validation_report.md
+          fi
+          
+          # SPACES_BUCKET_NAME check
+          if [ "${{ vars.SPACES_BUCKET_NAME }}" = "trading-station-data-youssef" ]; then
+            echo "- ✅ SPACES_BUCKET_NAME: Correct canonical value" >> validation_report.md
+          else
+            echo "- ❌ SPACES_BUCKET_NAME: Expected 'trading-station-data-youssef', got '${{ vars.SPACES_BUCKET_NAME }}'" >> validation_report.md
+          fi
+          
+          # SPACES_BASE_PREFIX check
+          if [ "${{ vars.SPACES_BASE_PREFIX }}" = "trading-system" ]; then
+            echo "- ✅ SPACES_BASE_PREFIX: Correct canonical value" >> validation_report.md
+          else
+            echo "- ❌ SPACES_BASE_PREFIX: Expected 'trading-system', got '${{ vars.SPACES_BASE_PREFIX }}'" >> validation_report.md
+          fi
+          
+          # DATA_ROOT check
+          if [ "${{ vars.DATA_ROOT }}" = "data" ]; then
+            echo "- ✅ DATA_ROOT: Correct canonical value" >> validation_report.md
+          else
+            echo "- ❌ DATA_ROOT: Expected 'data', got '${{ vars.DATA_ROOT }}'" >> validation_report.md
+          fi
+          
+          # UNIVERSE_KEY check
+          if [ "${{ vars.UNIVERSE_KEY }}" = "data/Universe/master_tickerlist.csv" ]; then
+            echo "- ✅ UNIVERSE_KEY: Correct canonical value (case-sensitive)" >> validation_report.md
+          else
+            echo "- ❌ UNIVERSE_KEY: Expected 'data/Universe/master_tickerlist.csv', got '${{ vars.UNIVERSE_KEY }}'" >> validation_report.md
+          fi
+          
+          echo "" >> validation_report.md
+      
+      - name: Spaces Connectivity Probe
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+        run: |
+          echo "### Spaces Connectivity Test:" >> validation_report.md
+          echo "" >> validation_report.md
+          
+          python << 'EOF'
+          import boto3
+          import os
+          from botocore.exceptions import ClientError, NoCredentialsError
+          
+          try:
+              # Set up boto3 client for DigitalOcean Spaces
+              endpoint_url = "${{ vars.SPACES_ENDPOINT }}"
+              region_name = "${{ vars.SPACES_REGION }}"
+              bucket_name = "${{ vars.SPACES_BUCKET_NAME }}"
+              prefix = "${{ vars.SPACES_BASE_PREFIX }}" + "/" + "${{ vars.DATA_ROOT }}" + "/"
+              
+              session = boto3.session.Session()
+              client = session.client(
+                  's3',
+                  region_name=region_name,
+                  endpoint_url=endpoint_url,
+                  aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+                  aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY']
+              )
+              
+              # Try to list objects under the expected prefix
+              response = client.list_objects_v2(
+                  Bucket=bucket_name,
+                  Prefix=prefix,
+                  MaxKeys=10
+              )
+              
+              key_count = response.get('KeyCount', 0)
+              print(f"- ✅ Spaces OK, found {key_count} keys under {prefix}")
+              
+              # Add to report
+              with open('validation_report.md', 'a') as f:
+                  f.write(f"- ✅ **Spaces Connection**: Successful\n")
+                  f.write(f"- ✅ **Bucket Access**: {bucket_name} accessible\n")
+                  f.write(f"- ✅ **Prefix Check**: Found {key_count} keys under `{prefix}`\n")
+                  f.write(f"- ✅ **Endpoint**: {endpoint_url} responding\n")
+                  
+          except NoCredentialsError:
+              print("- ❌ Spaces credentials not found or invalid")
+              with open('validation_report.md', 'a') as f:
+                  f.write("- ❌ **Spaces Connection**: Credentials not found or invalid\n")
+                  
+          except ClientError as e:
+              error_code = e.response['Error']['Code']
+              print(f"- ❌ Spaces error: {error_code}")
+              with open('validation_report.md', 'a') as f:
+                  f.write(f"- ❌ **Spaces Connection**: AWS Error {error_code}\n")
+                  
+          except Exception as e:
+              print(f"- ❌ Spaces error: {e}")
+              with open('validation_report.md', 'a') as f:
+                  f.write(f"- ❌ **Spaces Connection**: {str(e)}\n")
+          EOF
+          
+          echo "" >> validation_report.md
+      
+      - name: DigitalOcean App Probe
+        run: |
+          echo "### DigitalOcean App Test:" >> validation_report.md
+          echo "" >> validation_report.md
+          
+          # Test doctl app get (do not print sensitive token)
+          if doctl apps get ${{ secrets.DO_APP_ID }} > /dev/null 2>&1; then
+            echo "- ✅ DO App OK - App ID ${{ secrets.DO_APP_ID }} accessible" >> validation_report.md
+            echo "- ✅ doctl authentication working" >> validation_report.md
+          else
+            echo "- ❌ DO App access failed for ID ${{ secrets.DO_APP_ID }}" >> validation_report.md
+            echo "- ❌ Check DO_API_TOKEN and DO_APP_ID secrets" >> validation_report.md
+          fi
+          
+          echo "" >> validation_report.md
+      
+      - name: Generate Final Report
+        run: |
+          echo "## Summary" >> validation_report.md
+          echo "" >> validation_report.md
+          echo "**Validation completed at:** $(date -u)" >> validation_report.md
+          echo "**Branch:** ${{ inputs.branch }}" >> validation_report.md
+          echo "**Python Version:** $(python --version)" >> validation_report.md
+          echo "" >> validation_report.md
+          echo "**Next Steps:**" >> validation_report.md
+          echo "- If all checks passed ✅, environment is ready for deployment" >> validation_report.md
+          echo "- If any checks failed ❌, fix the indicated issues before deploying" >> validation_report.md
+          echo "- Run System Discovery & Inventory (manual) for the full infrastructure report" >> validation_report.md
+          echo "" >> validation_report.md
+          
+          # Print report to console as well
+          echo "=== VALIDATION REPORT ==="
+          cat validation_report.md
+      
+      - name: Upload Validation Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report-${{ inputs.branch }}
+          path: validation_report.md
+          retention-days: 30
