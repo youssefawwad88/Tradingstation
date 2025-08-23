@@ -46,6 +46,9 @@ jobs:
         SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
         SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
         SPACES_REGION: ${{ secrets.SPACES_REGION }}
+        SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
+        DATA_ROOT: ${{ vars.DATA_ROOT }}
+        UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
         MARKETDATA_TOKEN: ${{ secrets.MARKETDATA_TOKEN }}
         MARKETDATA_ENDPOINT: ${{ secrets.MARKETDATA_ENDPOINT }}
       run: |

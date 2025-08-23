@@ -144,12 +144,13 @@ def inspect_symbols(symbols: List[str]) -> None:
                 print(f"  {data_type:>6}: ERROR - {e}")
 
 
-def inspect_prefix(prefix: str, folders_only: bool = False) -> None:
+def inspect_prefix(prefix: str, folders_only: bool = False, num_lines: int = 3) -> None:
     """Inspect all objects with a given prefix.
     
     Args:
         prefix: S3 prefix to inspect
         folders_only: If True, only show top-level folders
+        num_lines: Number of lines to show from each CSV file
     """
     print(f"Inspecting objects with prefix: {prefix}")
     if folders_only:
@@ -197,14 +198,23 @@ def inspect_prefix(prefix: str, folders_only: bool = False) -> None:
             # Get last timestamps if it's a CSV file
             timestamps = []
             if key.endswith('.csv'):
-                timestamps = get_last_timestamps(key)
+                timestamps = get_last_timestamps(key, num_lines)
             
             timestamp_str = ", ".join(timestamps) if timestamps else "N/A"
             
             print(f"Path: {key}")
             print(f"Size: {size} bytes")
             print(f"Last Modified: {last_modified}")
-            print(f"Last 3 timestamps: {timestamp_str}")
+            
+            # Get additional metadata (ETag, ContentLength)
+            metadata = spaces_io.object_metadata(key)
+            if metadata:
+                etag = metadata.get('etag', 'N/A')
+                content_length = metadata.get('size', size)  # Fall back to size from list
+                print(f"ETag: {etag}")
+                print(f"ContentLength: {content_length}")
+            
+            print(f"Last {num_lines} timestamps: {timestamp_str}")
             print()
 
 
@@ -217,6 +227,7 @@ def main():
     group.add_argument("--prefix", type=str, help="S3 prefix to inspect (e.g., data/intraday/1min/)")
     
     parser.add_argument("--folders-only", action="store_true", help="Show only top-level folders")
+    parser.add_argument("--num-lines", type=int, default=3, help="Number of lines to show from each CSV file (default: 3)")
     
     args = parser.parse_args()
     
@@ -227,7 +238,7 @@ def main():
         if args.symbols:
             inspect_symbols(args.symbols)
         else:
-            inspect_prefix(args.prefix, folders_only=args.folders_only)
+            inspect_prefix(args.prefix, folders_only=args.folders_only, num_lines=args.num_lines)
             
         return 0
         

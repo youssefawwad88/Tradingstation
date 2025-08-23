@@ -137,11 +137,12 @@ class DataFetchManager:
 
         return success_rate > 0.5  # Consider successful if >50% of tickers updated
 
-    def run_intraday_updates(self, interval: str) -> bool:
+    def run_intraday_updates(self, interval: str, *, force_full: bool = False) -> bool:
         """Update intraday data for specified interval.
         
         Args:
             interval: Time interval (1min or 30min)
+            force_full: Force full processing even if no new data
             
         Returns:
             True if successful, False otherwise
@@ -160,7 +161,7 @@ class DataFetchManager:
 
         for ticker in self.universe_tickers:
             try:
-                success, zero_rows = self.fetch_intraday_data_with_metrics(ticker, interval)
+                success, zero_rows = self.fetch_intraday_data_with_metrics(ticker, interval, force_full=force_full)
                 if success:
                     successful_tickers += 1
                     consecutive_zero_rows = 0  # Reset counter on success
@@ -1078,12 +1079,12 @@ Legacy (deprecated):
     elif args.job == "intraday":
         if args.interval == "all":
             logger.info(f"--- Running All Intraday Updates --- {deployment_info}")
-            success_1min = manager.run_intraday_updates("1min")
-            success_30min = manager.run_intraday_updates("30min")
+            success_1min = manager.run_intraday_updates("1min", force_full=args.force_full)
+            success_30min = manager.run_intraday_updates("30min", force_full=args.force_full)
             success = success_1min or success_30min
         else:
             logger.info(f"--- Running {args.interval} Intraday Update --- {deployment_info}")
-            success = manager.run_intraday_updates(args.interval)
+            success = manager.run_intraday_updates(args.interval, force_full=args.force_full)
 
     return success
 
