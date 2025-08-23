@@ -1,5 +1,4 @@
-"""
-Structured logging system for the trading platform.
+"""Structured logging system for the trading platform.
 
 This module provides JSON-structured logging with deployment tracking,
 proper formatting, and integration with monitoring systems.
@@ -8,7 +7,6 @@ proper formatting, and integration with monitoring systems.
 import json
 import logging
 import logging.handlers
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,7 +38,7 @@ class StructuredFormatter(logging.Formatter):
         # Add deployment information
         if config.DEPLOYMENT_TAG:
             log_entry["deployment"] = config.DEPLOYMENT_TAG
-        
+
         log_entry["environment"] = config.APP_ENV
 
         # Add exception information if present
@@ -69,8 +67,7 @@ class TradingLogger:
     """Enhanced logger for trading operations with structured logging."""
 
     def __init__(self, name: str) -> None:
-        """
-        Initialize trading logger.
+        """Initialize trading logger.
         
         Args:
             name: Logger name
@@ -83,7 +80,7 @@ class TradingLogger:
         """Set up logger with appropriate handlers and formatting."""
         # Clear existing handlers
         self.logger.handlers.clear()
-        
+
         # Set log level based on debug mode
         level = logging.DEBUG if config.DEBUG_MODE else logging.INFO
         self.logger.setLevel(level)
@@ -105,16 +102,16 @@ class TradingLogger:
         """Set up rotating file handler for local development."""
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
-        
+
         log_file = log_dir / f"{self.name}.log"
-        
+
         # Rotating file handler (10MB max, keep 5 files)
         file_handler = logging.handlers.RotatingFileHandler(
             log_file,
             maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
         )
-        
+
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(StructuredFormatter())
         self.logger.addHandler(file_handler)
@@ -219,7 +216,7 @@ class TradingLogger:
         """Log job completion."""
         status_icon = "✅" if success else "❌"
         status = "completed" if success else "failed"
-        
+
         self.info(
             f"{status_icon} {job_name} - {status.title()}",
             job=job_name,
@@ -260,11 +257,11 @@ def setup_logging() -> None:
     # Configure root logger to prevent interference
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.WARNING)
-    
+
     # Remove default handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-    
+
     # Set up all managed loggers
     LoggerManager.setup_all_loggers()
 
@@ -273,8 +270,7 @@ class LogTimer:
     """Context manager for timing and logging operations."""
 
     def __init__(self, logger: TradingLogger, operation: str, **kwargs) -> None:
-        """
-        Initialize log timer.
+        """Initialize log timer.
         
         Args:
             logger: Logger instance
@@ -299,14 +295,14 @@ class LogTimer:
         if self.start_time is not None:
             duration = time.time() - self.start_time
             success = exc_type is None
-            
+
             self.logger.info(
                 f"Completed {self.operation}",
                 duration_seconds=duration,
                 success=success,
                 **self.extra_fields,
             )
-            
+
             if not success:
                 self.logger.error(
                     f"Error in {self.operation}: {exc_val}",
@@ -320,7 +316,7 @@ def log_function_call(logger_name: Optional[str] = None):
     def decorator(func):
         def wrapper(*args, **kwargs):
             logger = get_logger(logger_name or func.__module__)
-            
+
             with LogTimer(
                 logger,
                 f"{func.__name__}",
@@ -328,7 +324,7 @@ def log_function_call(logger_name: Optional[str] = None):
                 module=func.__module__,
             ):
                 return func(*args, **kwargs)
-        
+
         return wrapper
     return decorator
 

@@ -42,7 +42,7 @@ def generate_universe_csv(tickers: list[str]) -> pd.DataFrame:
             "fetch_30min": 1,
             "fetch_daily": 1
         })
-    
+
     return pd.DataFrame(data)
 
 
@@ -57,14 +57,14 @@ def upload_universe(df: pd.DataFrame) -> bool:
     """
     try:
         key = universe_key()
-        
+
         # Upload CSV with metadata
         success = spaces_io.upload_dataframe(df, key, file_format="csv")
-        
+
         if not success:
             logger.error("Failed to upload universe CSV")
             return False
-        
+
         # Get object metadata to show confirmation
         if spaces_io.is_available:
             try:
@@ -72,19 +72,19 @@ def upload_universe(df: pd.DataFrame) -> bool:
                 if metadata:
                     size_bytes = metadata.get('size', 0)
                     etag = metadata.get('etag', '')
-                    
+
                     print(f"s3://{config.SPACES_BUCKET_NAME}/{key} size={size_bytes} etag={etag}")
                 else:
                     print(f"Universe uploaded to {key} (metadata unavailable)")
-                
+
             except Exception as e:
                 logger.warning(f"Could not get object metadata: {e}")
                 print(f"s3://{config.SPACES_BUCKET_NAME}/{key} uploaded successfully")
         else:
             print(f"Universe uploaded to {key}")
-        
+
         return True
-        
+
     except Exception as e:
         logger.error(f"Error uploading universe: {e}")
         return False
@@ -93,50 +93,50 @@ def upload_universe(df: pd.DataFrame) -> bool:
 def main():
     """Main entry point for the seed universe tool."""
     parser = argparse.ArgumentParser(description="Seed universe CSV to Spaces")
-    
+
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--tickers", nargs="+", help="List of ticker symbols to generate universe from")
     group.add_argument("--csv", type=str, help="Path to existing CSV file to upload")
-    
+
     args = parser.parse_args()
-    
+
     # Setup logging
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    
+
     try:
         if args.tickers:
             # Generate universe from ticker list
             print(f"Generating universe CSV from {len(args.tickers)} tickers: {args.tickers}")
             df = generate_universe_csv(args.tickers)
-            
+
         else:
             # Load existing CSV file
             csv_path = Path(args.csv)
             if not csv_path.exists():
                 print(f"Error: CSV file not found: {csv_path}")
                 return 1
-                
+
             print(f"Loading existing CSV: {csv_path}")
             df = pd.read_csv(csv_path)
-            
+
             # Validate required columns
             required_columns = ["symbol", "active", "fetch_1min", "fetch_30min", "fetch_daily"]
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
                 print(f"Error: CSV missing required columns: {missing_columns}")
                 return 1
-        
+
         # Upload to Spaces
         print(f"Uploading universe CSV with {len(df)} symbols...")
         success = upload_universe(df)
-        
+
         if success:
             print("Universe upload completed successfully")
             return 0
         else:
             print("Universe upload failed")
             return 1
-            
+
     except Exception as e:
         logger.error(f"Error in seed_universe: {e}")
         return 1

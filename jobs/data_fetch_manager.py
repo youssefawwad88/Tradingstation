@@ -168,8 +168,8 @@ class DataFetchManager:
                 if zero_rows:
                     tickers_with_zero_rows.append(ticker)
                     consecutive_zero_rows += 1
-                    
-                    # Early exit on systemic zero-row issues  
+
+                    # Early exit on systemic zero-row issues
                     if consecutive_zero_rows >= 5:
                         logger.warning(
                             f"Early exit: {consecutive_zero_rows} consecutive zero-row responses "
@@ -672,7 +672,7 @@ class DataFetchManager:
             mode: Fetch mode used
         """
         try:
-            from utils.paths import k, BASE
+            from utils.paths import BASE, k
             manifest_key = k(BASE, "data", "manifest", "fetch_status.json")
 
             # Load existing manifest
@@ -723,11 +723,12 @@ class DataFetchManager:
             Tuple of (df, provider_meta)
         """
         from datetime import timedelta
+
         from utils.providers.router import get_candles
-        
+
         try:
             fetch_start_time = time.time()
-            
+
             if interval == "1min":
                 # Fetch from required days back + today for 1min data
                 now_utc = utc_now()
@@ -747,16 +748,16 @@ class DataFetchManager:
                     countback=countback or 520,
                     extended=config.INTRADAY_EXTENDED,
                 )
-            
+
             # Provider metadata
             provider_meta = {
                 "mode": mode,
                 "fetch_duration_ms": int((time.time() - fetch_start_time) * 1000),
                 "provider": "marketdata"
             }
-            
+
             return df, provider_meta
-            
+
         except Exception as e:
             logger.error(f"provider_error ticker={ticker} interval={interval} error={e}")
             return None, {"error": str(e)}
@@ -784,7 +785,7 @@ class DataFetchManager:
             # Get existing data
             existing_df = spaces_io.download_dataframe(data_key)
             mode = self._determine_fetch_mode(existing_df, interval)
-            
+
             # Merge with existing data
             merged_df = self._merge_data(existing_df, df, interval)
             if merged_df is None:
@@ -814,7 +815,7 @@ class DataFetchManager:
             rows_before = len(existing_df) if existing_df is not None and not existing_df.empty else 0
             rows_after = len(trimmed_df)
             appended_rows = rows_after - rows_before
-            
+
             # Get latest timestamp
             latest_ts = "none"
             if not trimmed_df.empty and "timestamp" in trimmed_df.columns:
@@ -851,10 +852,10 @@ class DataFetchManager:
                     last_modified_iso = obj_metadata.get("last_modified", "unknown") if obj_metadata else "unknown"
 
                     write_meta = f"etag={etag} size={size_bytes} last_modified={last_modified_iso}"
-                    
+
                     # Update manifest
                     self._update_manifest(ticker, interval, trimmed_df, mode)
-                    
+
                     return appended_rows, rows_before, rows_after, latest_ts, data_key, write_meta
                 else:
                     return appended_rows, rows_before, rows_after, latest_ts, data_key, "upload_failed"
@@ -896,34 +897,34 @@ class DataFetchManager:
                 mode = "compact"  # Could be made configurable
                 countback = None  # Use time-based fetching
             else:
-                mode = "compact"  
+                mode = "compact"
                 countback = 520
 
             # Fetch raw data
             df, provider_meta = self._fetch_raw_intraday(ticker, interval, mode=mode, countback=countback)
-            
+
             # Log provider metrics with rows_fetched / first_ts / last_ts (tz=UTC)
             if df is not None and not df.empty:
                 rows_fetched = len(df)
                 first_ts = df["timestamp"].min().strftime("%Y-%m-%dT%H:%M:%SZ") if "timestamp" in df.columns else "none"
                 last_ts = df["timestamp"].max().strftime("%Y-%m-%dT%H:%M:%SZ") if "timestamp" in df.columns else "none"
                 logger.info(f"provider_ok interval={interval} symbol={ticker} rows_fetched={rows_fetched} first_ts={first_ts} last_ts={last_ts} tz=UTC")
-            
+
             # Proper success/empty/error detection
             success = df is not None and not df.empty
             zero_rows = df is not None and df.empty
-            
+
             if success:
                 # Process the DataFrame
                 appended, rows_before, rows_after, latest_ts, s3_key, write_meta_or_skip = \
                     self._process_intraday_df(df, ticker, interval, force_full=force_full)
-                
+
                 # Log write outcome
                 if write_meta_or_skip.startswith("etag="):
                     logger.info(f"write_ok interval={interval} symbol={ticker} s3_key={s3_key} {write_meta_or_skip}")
                 else:
                     logger.info(f"write_skip interval={interval} symbol={ticker} reason={write_meta_or_skip} s3_key={s3_key} latest_ts={latest_ts}")
-                
+
                 return True, False
             elif zero_rows:
                 logger.warning(f"Zero rows returned for {ticker} {interval} - provider returned empty dataset")
@@ -931,7 +932,7 @@ class DataFetchManager:
             else:
                 logger.error(f"provider_error ticker={ticker} interval={interval} - get_candles returned None")
                 return False, False
-                
+
         except Exception as e:
             logger.error(f"provider_error ticker={ticker} interval={interval} error={e}")
             return False, False

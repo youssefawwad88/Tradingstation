@@ -1,10 +1,8 @@
 """Job scheduling definitions for continuous minute scheduler.
 """
 
-from datetime import datetime, time
+from datetime import datetime
 from typing import Any, Dict, List
-
-import pytz
 
 from orchestrator.modes import MarketMode
 
@@ -26,23 +24,23 @@ def get_schedule_for_mode(mode: MarketMode) -> List[Dict[str, Any]]:
 def due_every_minute(now_et: datetime) -> List[Dict[str, Any]]:
     """Return jobs due every minute between 04:00-20:00 ET."""
     jobs = []
-    
+
     # Always include 1-min intraday fetch during extended hours (04:00-20:00 ET)
     if 4 <= now_et.hour < 20:
         jobs.append({
-            "name": "Update 1min Intraday Data", 
+            "name": "Update 1min Intraday Data",
             "module": "jobs.data_fetch_manager",
             "args": ["--job", "intraday", "--interval", "1min"],
             "critical": False  # Don't kill the loop for data fetch failures
         })
-    
+
     # Add screeners based on time and session
     # Gap & Go screener: every minute during premarket (7:00-9:30) and regular session (9:30-10:30)
     if (7 <= now_et.hour < 9) or (now_et.hour == 9 and now_et.minute < 30):
         # Premarket Gap & Go
         jobs.append({
             "name": "Gap & Go Screener (Premarket)",
-            "module": "screeners.gapgo", 
+            "module": "screeners.gapgo",
             "args": [],
             "critical": False
         })
@@ -55,16 +53,16 @@ def due_every_minute(now_et: datetime) -> List[Dict[str, Any]]:
                 "args": [],
                 "critical": False
             })
-    
+
     # ORB screener at specific time
     if now_et.hour == 9 and now_et.minute == 40:
         jobs.append({
             "name": "Opening Range Breakout Screener",
-            "module": "screeners.orb", 
+            "module": "screeners.orb",
             "args": [],
             "critical": False
         })
-    
+
     # Market hours screeners (every minute during regular session)
     if 9 <= now_et.hour < 16:
         if not (now_et.hour == 9 and now_et.minute < 30):  # Skip before 9:30
@@ -77,7 +75,7 @@ def due_every_minute(now_et: datetime) -> List[Dict[str, Any]]:
                     "critical": False
                 },
                 {
-                    "name": "Breakout Screener", 
+                    "name": "Breakout Screener",
                     "module": "screeners.breakout",
                     "args": [],
                     "critical": False
@@ -89,30 +87,30 @@ def due_every_minute(now_et: datetime) -> List[Dict[str, Any]]:
                     "critical": False
                 }
             ])
-    
+
     return jobs
 
 
 def due_every_quarter_hour(now_et: datetime) -> List[Dict[str, Any]]:
     """Return jobs due at :00, :15, :30, :45 during extended hours."""
     jobs = []
-    
+
     # 30-min intraday fetch on quarter hours during extended hours (04:00-20:00 ET)
     if now_et.minute in [0, 15, 30, 45] and 4 <= now_et.hour < 20:
         jobs.append({
             "name": "Update 30min Intraday Data",
-            "module": "jobs.data_fetch_manager", 
+            "module": "jobs.data_fetch_manager",
             "args": ["--job", "intraday", "--interval", "30min"],
             "critical": False  # Don't kill the loop for data fetch failures
         })
-    
+
     return jobs
 
 
 def due_once_at(now_et: datetime) -> List[Dict[str, Any]]:
     """Return jobs that run once at specific times."""
     jobs = []
-    
+
     # Daily full refresh at 06:30 ET (once per day)
     if now_et.hour == 6 and now_et.minute == 30:
         jobs.append({
@@ -122,17 +120,17 @@ def due_once_at(now_et: datetime) -> List[Dict[str, Any]]:
             "critical": True,  # Daily refresh is critical
             "run_once_per_day": True
         })
-    
-    # AVWAP anchors at 06:35 ET (once per day) 
+
+    # AVWAP anchors at 06:35 ET (once per day)
     if now_et.hour == 6 and now_et.minute == 35:
         jobs.append({
             "name": "Find AVWAP Anchors",
             "module": "jobs.find_avwap_anchors",
-            "args": ["--lookback-days", "5"], 
+            "args": ["--lookback-days", "5"],
             "critical": False,
             "run_once_per_day": True
         })
-    
+
     # Postmarket jobs
     if now_et.hour == 16 and now_et.minute == 30:  # 4:30 PM ET
         jobs.append({
@@ -142,16 +140,16 @@ def due_once_at(now_et: datetime) -> List[Dict[str, Any]]:
             "critical": False,
             "run_once_per_day": True
         })
-    
+
     if now_et.hour == 17 and now_et.minute == 0:  # 5:00 PM ET
         jobs.append({
-            "name": "Generate Master Dashboard", 
+            "name": "Generate Master Dashboard",
             "module": "dashboard.master_dashboard",
             "args": [],
             "critical": False,
             "run_once_per_day": True
         })
-    
+
     # Health check every 6 hours
     if now_et.minute == 0 and now_et.hour in [2, 8, 14, 20]:
         jobs.append({
@@ -160,7 +158,7 @@ def due_once_at(now_et: datetime) -> List[Dict[str, Any]]:
             "args": [],
             "critical": False
         })
-    
+
     return jobs
 
 

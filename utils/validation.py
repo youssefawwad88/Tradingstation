@@ -1,12 +1,10 @@
-"""
-Data validation utilities for the trading system.
+"""Data validation utilities for the trading system.
 
 This module provides schema validation, data integrity checks,
 and format validation for CSV files and trading data.
 """
 
-import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 
@@ -85,8 +83,7 @@ class DataValidator:
         schema_name: str,
         symbol: Optional[str] = None,
     ) -> Tuple[bool, List[str]]:
-        """
-        Validate DataFrame against schema.
+        """Validate DataFrame against schema.
         
         Args:
             df: DataFrame to validate
@@ -218,7 +215,7 @@ class DataValidator:
                         invalid_stops = subset["stop"] >= subset["entry"]
                     else:
                         invalid_stops = subset["stop"] <= subset["entry"]
-                    
+
                     if invalid_stops.any():
                         errors.append(f"Invalid {direction} stop levels{context}: {invalid_stops.sum()} rows")
 
@@ -263,8 +260,7 @@ class DataValidator:
         timestamp_col: str = "timestamp",
         interval_minutes: Optional[int] = None,
     ) -> Tuple[bool, List[str]]:
-        """
-        Check data continuity and identify gaps.
+        """Check data continuity and identify gaps.
         
         Args:
             df: DataFrame to check
@@ -292,11 +288,11 @@ class DataValidator:
         if interval_minutes and len(timestamps) > 1:
             expected_delta = pd.Timedelta(minutes=interval_minutes)
             time_diffs = timestamps.diff().dropna()
-            
+
             # Allow for some tolerance (up to 2x the expected interval)
             max_allowed_gap = expected_delta * 2
             large_gaps = time_diffs > max_allowed_gap
-            
+
             if large_gaps.any():
                 gap_count = large_gaps.sum()
                 gaps.append(f"Large time gaps: {gap_count} gaps > {max_allowed_gap}")
@@ -305,8 +301,7 @@ class DataValidator:
 
     @classmethod
     def validate_file_format(self, file_path: str) -> Tuple[bool, str]:
-        """
-        Validate file format and basic readability.
+        """Validate file format and basic readability.
         
         Args:
             file_path: Path to file to validate
@@ -317,12 +312,12 @@ class DataValidator:
         try:
             # Try to read the file
             df = pd.read_csv(file_path, nrows=5)  # Just read first few rows
-            
+
             if df.empty:
                 return False, "File is empty"
-            
+
             return True, "File format is valid"
-            
+
         except Exception as e:
             return False, f"File format error: {e}"
 
@@ -334,8 +329,7 @@ class DataValidator:
         remove_duplicates: bool = True,
         fill_missing: bool = False,
     ) -> pd.DataFrame:
-        """
-        Clean DataFrame according to schema rules.
+        """Clean DataFrame according to schema rules.
         
         Args:
             df: DataFrame to clean

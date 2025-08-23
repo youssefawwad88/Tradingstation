@@ -1,5 +1,4 @@
-"""
-General helper utilities for the trading system.
+"""General helper utilities for the trading system.
 
 This module provides miscellaneous utility functions that don't fit
 into other specific utility modules.
@@ -18,8 +17,7 @@ logger = get_logger(__name__)
 
 
 def get_file_hash(file_path: str) -> Optional[str]:
-    """
-    Calculate MD5 hash of a file.
+    """Calculate MD5 hash of a file.
     
     Args:
         file_path: Path to file
@@ -39,8 +37,7 @@ def get_file_hash(file_path: str) -> Optional[str]:
 
 
 def format_currency(amount: float, decimals: int = 2) -> str:
-    """
-    Format amount as currency string.
+    """Format amount as currency string.
     
     Args:
         amount: Amount to format
@@ -53,8 +50,7 @@ def format_currency(amount: float, decimals: int = 2) -> str:
 
 
 def format_percentage(value: float, decimals: int = 2) -> str:
-    """
-    Format value as percentage string.
+    """Format value as percentage string.
     
     Args:
         value: Value to format (0.1 = 10%)
@@ -67,8 +63,7 @@ def format_percentage(value: float, decimals: int = 2) -> str:
 
 
 def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
-    """
-    Safely divide two numbers, returning default if denominator is zero.
+    """Safely divide two numbers, returning default if denominator is zero.
     
     Args:
         numerator: Numerator
@@ -82,8 +77,7 @@ def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> f
 
 
 def calculate_r_multiple(entry: float, exit: float, stop: float, direction: str) -> float:
-    """
-    Calculate R-multiple for a trade.
+    """Calculate R-multiple for a trade.
     
     Args:
         entry: Entry price
@@ -100,7 +94,7 @@ def calculate_r_multiple(entry: float, exit: float, stop: float, direction: str)
     else:  # short
         risk = stop - entry
         profit = entry - exit
-    
+
     return safe_divide(profit, risk, 0.0)
 
 
@@ -110,8 +104,7 @@ def calculate_position_size(
     entry: float,
     stop: float,
 ) -> int:
-    """
-    Calculate position size in shares based on risk management.
+    """Calculate position size in shares based on risk management.
     
     Args:
         account_size: Total account size
@@ -124,17 +117,16 @@ def calculate_position_size(
     """
     risk_amount = account_size * risk_pct
     risk_per_share = abs(entry - stop)
-    
+
     if risk_per_share <= 0:
         return 0
-    
+
     shares = int(risk_amount / risk_per_share)
     return max(0, shares)
 
 
 def should_use_test_mode() -> bool:
-    """
-    Determine if system should run in test mode.
+    """Determine if system should run in test mode.
     
     Returns:
         True if test mode should be active
@@ -144,19 +136,18 @@ def should_use_test_mode() -> bool:
 
 
 def get_test_mode_reason() -> tuple[bool, str]:
-    """
-    Get reason for test mode status.
+    """Get reason for test mode status.
     
     Returns:
         Tuple of (is_test_mode, reason_string)
     """
     is_test = config.is_test_mode()
-    
+
     if is_test:
         if not config.MARKETDATA_TOKEN:
             return True, "No API key configured - running in TEST MODE"
         elif is_weekend():
-            return True, f"Weekend detected - running in TEST MODE"
+            return True, "Weekend detected - running in TEST MODE"
         else:
             return True, "TEST_MODE explicitly enabled"
     else:
@@ -164,14 +155,13 @@ def get_test_mode_reason() -> tuple[bool, str]:
 
 
 def get_system_info() -> Dict[str, Any]:
-    """
-    Get system information for debugging and monitoring.
+    """Get system information for debugging and monitoring.
     
     Returns:
         Dictionary with system information
     """
     current_time = get_market_time()
-    
+
     return {
         "hostname": socket.gethostname(),
         "python_version": os.sys.version,
@@ -186,8 +176,7 @@ def get_system_info() -> Dict[str, Any]:
 
 
 def truncate_string(text: str, max_length: int = 100, suffix: str = "...") -> str:
-    """
-    Truncate string to maximum length with suffix.
+    """Truncate string to maximum length with suffix.
     
     Args:
         text: Text to truncate
@@ -199,13 +188,12 @@ def truncate_string(text: str, max_length: int = 100, suffix: str = "...") -> st
     """
     if len(text) <= max_length:
         return text
-    
+
     return text[:max_length - len(suffix)] + suffix
 
 
 def chunk_list(lst: list, chunk_size: int) -> list[list]:
-    """
-    Split list into chunks of specified size.
+    """Split list into chunks of specified size.
     
     Args:
         lst: List to chunk
@@ -218,8 +206,7 @@ def chunk_list(lst: list, chunk_size: int) -> list[list]:
 
 
 def flatten_dict(d: dict, parent_key: str = "", sep: str = "_") -> dict:
-    """
-    Flatten nested dictionary.
+    """Flatten nested dictionary.
     
     Args:
         d: Dictionary to flatten
@@ -240,8 +227,7 @@ def flatten_dict(d: dict, parent_key: str = "", sep: str = "_") -> dict:
 
 
 def merge_dicts(*dicts: dict) -> dict:
-    """
-    Merge multiple dictionaries, with later dicts taking precedence.
+    """Merge multiple dictionaries, with later dicts taking precedence.
     
     Args:
         *dicts: Dictionaries to merge
@@ -256,8 +242,7 @@ def merge_dicts(*dicts: dict) -> dict:
 
 
 def ensure_directory(path: str) -> None:
-    """
-    Ensure directory exists, creating if necessary.
+    """Ensure directory exists, creating if necessary.
     
     Args:
         path: Directory path
@@ -266,8 +251,7 @@ def ensure_directory(path: str) -> None:
 
 
 def get_file_size_mb(file_path: str) -> float:
-    """
-    Get file size in MB.
+    """Get file size in MB.
     
     Args:
         file_path: Path to file
@@ -283,8 +267,7 @@ def get_file_size_mb(file_path: str) -> float:
 
 
 def format_duration(seconds: float) -> str:
-    """
-    Format duration in seconds to human-readable string.
+    """Format duration in seconds to human-readable string.
     
     Args:
         seconds: Duration in seconds
@@ -303,8 +286,7 @@ def format_duration(seconds: float) -> str:
 
 
 def create_summary_stats(values: list[float]) -> Dict[str, float]:
-    """
-    Create summary statistics for a list of values.
+    """Create summary statistics for a list of values.
     
     Args:
         values: List of numeric values
@@ -320,9 +302,9 @@ def create_summary_stats(values: list[float]) -> Dict[str, float]:
             "max": 0.0,
             "std": 0.0,
         }
-    
+
     import statistics
-    
+
     return {
         "count": len(values),
         "mean": statistics.mean(values),
