@@ -1,5 +1,4 @@
-"""
-Time and market calendar utilities.
+"""Time and market calendar utilities.
 
 This module provides timezone-aware time functions, market hours calculations,
 and trading session logic for the trading system.
@@ -39,15 +38,14 @@ def is_weekend() -> bool:
 
 
 def is_market_hours() -> bool:
-    """
-    Check if current time is during regular market hours.
+    """Check if current time is during regular market hours.
     
     Returns:
         True if market is open (9:30 AM - 4:00 PM ET on weekdays)
     """
     if is_weekend():
         return False
-    
+
     current_time = get_market_time()
     market_open = current_time.replace(
         hour=config.MARKET_OPEN_HOUR,
@@ -61,13 +59,12 @@ def is_market_hours() -> bool:
         second=0,
         microsecond=0,
     )
-    
+
     return market_open <= current_time <= market_close
 
 
 def get_market_open_time(date: Optional[datetime.date] = None) -> datetime.datetime:
-    """
-    Get market open time for a given date.
+    """Get market open time for a given date.
     
     Args:
         date: Date to get open time for (defaults to today)
@@ -77,7 +74,7 @@ def get_market_open_time(date: Optional[datetime.date] = None) -> datetime.datet
     """
     if date is None:
         date = get_market_time().date()
-    
+
     return MARKET_TZ.localize(
         datetime.datetime.combine(
             date,
@@ -87,8 +84,7 @@ def get_market_open_time(date: Optional[datetime.date] = None) -> datetime.datet
 
 
 def get_market_close_time(date: Optional[datetime.date] = None) -> datetime.datetime:
-    """
-    Get market close time for a given date.
+    """Get market close time for a given date.
     
     Args:
         date: Date to get close time for (defaults to today)
@@ -98,7 +94,7 @@ def get_market_close_time(date: Optional[datetime.date] = None) -> datetime.date
     """
     if date is None:
         date = get_market_time().date()
-    
+
     return MARKET_TZ.localize(
         datetime.datetime.combine(
             date,
@@ -108,8 +104,7 @@ def get_market_close_time(date: Optional[datetime.date] = None) -> datetime.date
 
 
 def get_premarket_window(date: Optional[datetime.date] = None) -> Tuple[datetime.datetime, datetime.datetime]:
-    """
-    Get premarket trading window (4:00 AM - 9:30 AM ET).
+    """Get premarket trading window (4:00 AM - 9:30 AM ET).
     
     Args:
         date: Date to get window for (defaults to today)
@@ -119,18 +114,17 @@ def get_premarket_window(date: Optional[datetime.date] = None) -> Tuple[datetime
     """
     if date is None:
         date = get_market_time().date()
-    
+
     premarket_start = MARKET_TZ.localize(
         datetime.datetime.combine(date, datetime.time(4, 0))
     )
     premarket_end = get_market_open_time(date)
-    
+
     return premarket_start, premarket_end
 
 
 def get_afterhours_window(date: Optional[datetime.date] = None) -> Tuple[datetime.datetime, datetime.datetime]:
-    """
-    Get after-hours trading window (4:00 PM - 8:00 PM ET).
+    """Get after-hours trading window (4:00 PM - 8:00 PM ET).
     
     Args:
         date: Date to get window for (defaults to today)
@@ -140,18 +134,17 @@ def get_afterhours_window(date: Optional[datetime.date] = None) -> Tuple[datetim
     """
     if date is None:
         date = get_market_time().date()
-    
+
     afterhours_start = get_market_close_time(date)
     afterhours_end = MARKET_TZ.localize(
         datetime.datetime.combine(date, datetime.time(20, 0))
     )
-    
+
     return afterhours_start, afterhours_end
 
 
 def get_session_window(date: Optional[datetime.date] = None) -> Tuple[datetime.datetime, datetime.datetime]:
-    """
-    Get regular trading session window (9:30 AM - 4:00 PM ET).
+    """Get regular trading session window (9:30 AM - 4:00 PM ET).
     
     Args:
         date: Date to get window for (defaults to today)
@@ -161,13 +154,12 @@ def get_session_window(date: Optional[datetime.date] = None) -> Tuple[datetime.d
     """
     if date is None:
         date = get_market_time().date()
-    
+
     return get_market_open_time(date), get_market_close_time(date)
 
 
 def convert_to_utc(dt: datetime.datetime, from_tz: Optional[pytz.BaseTzInfo] = None) -> datetime.datetime:
-    """
-    Convert datetime to UTC.
+    """Convert datetime to UTC.
     
     Args:
         dt: Datetime to convert
@@ -178,16 +170,15 @@ def convert_to_utc(dt: datetime.datetime, from_tz: Optional[pytz.BaseTzInfo] = N
     """
     if from_tz is None:
         from_tz = MARKET_TZ
-    
+
     if dt.tzinfo is None:
         dt = from_tz.localize(dt)
-    
+
     return dt.astimezone(UTC_TZ)
 
 
 def convert_from_utc(dt: datetime.datetime, to_tz: Optional[pytz.BaseTzInfo] = None) -> datetime.datetime:
-    """
-    Convert UTC datetime to target timezone.
+    """Convert UTC datetime to target timezone.
     
     Args:
         dt: UTC datetime to convert
@@ -198,16 +189,15 @@ def convert_from_utc(dt: datetime.datetime, to_tz: Optional[pytz.BaseTzInfo] = N
     """
     if to_tz is None:
         to_tz = MARKET_TZ
-    
+
     if dt.tzinfo is None:
         dt = UTC_TZ.localize(dt)
-    
+
     return dt.astimezone(to_tz)
 
 
 def get_trading_days_back(days: int, from_date: Optional[datetime.date] = None) -> list[datetime.date]:
-    """
-    Get list of trading days going back from a date.
+    """Get list of trading days going back from a date.
     
     Args:
         days: Number of trading days to go back
@@ -218,16 +208,16 @@ def get_trading_days_back(days: int, from_date: Optional[datetime.date] = None) 
     """
     if from_date is None:
         from_date = get_market_time().date()
-    
+
     trading_days = []
     current_date = from_date
-    
+
     while len(trading_days) < days:
         # Skip weekends (simple implementation - doesn't handle holidays)
         if current_date.weekday() < 5:  # Monday=0, Friday=4
             trading_days.append(current_date)
         current_date -= datetime.timedelta(days=1)
-    
+
     return list(reversed(trading_days))
 
 
@@ -235,8 +225,7 @@ def is_in_session_window(
     timestamp: datetime.datetime,
     date: Optional[datetime.date] = None,
 ) -> bool:
-    """
-    Check if timestamp is within regular trading session.
+    """Check if timestamp is within regular trading session.
     
     Args:
         timestamp: Timestamp to check (should be timezone-aware)
@@ -249,9 +238,9 @@ def is_in_session_window(
         # Convert to market time to get the date
         market_time = convert_from_utc(timestamp) if timestamp.tzinfo == UTC_TZ else timestamp
         date = market_time.date()
-    
+
     session_start, session_end = get_session_window(date)
-    
+
     # Convert timestamp to market timezone for comparison
     if timestamp.tzinfo != MARKET_TZ:
         if timestamp.tzinfo == UTC_TZ:
@@ -259,7 +248,7 @@ def is_in_session_window(
         else:
             # Assume naive timestamps are in market timezone
             timestamp = MARKET_TZ.localize(timestamp) if timestamp.tzinfo is None else timestamp
-    
+
     return session_start <= timestamp <= session_end
 
 
@@ -267,8 +256,7 @@ def is_in_premarket_window(
     timestamp: datetime.datetime,
     date: Optional[datetime.date] = None,
 ) -> bool:
-    """
-    Check if timestamp is within premarket window.
+    """Check if timestamp is within premarket window.
     
     Args:
         timestamp: Timestamp to check (should be timezone-aware)
@@ -281,9 +269,9 @@ def is_in_premarket_window(
         # Convert to market time to get the date
         market_time = convert_from_utc(timestamp) if timestamp.tzinfo == UTC_TZ else timestamp
         date = market_time.date()
-    
+
     premarket_start, premarket_end = get_premarket_window(date)
-    
+
     # Convert timestamp to market timezone for comparison
     if timestamp.tzinfo != MARKET_TZ:
         if timestamp.tzinfo == UTC_TZ:
@@ -291,13 +279,12 @@ def is_in_premarket_window(
         else:
             # Assume naive timestamps are in market timezone
             timestamp = MARKET_TZ.localize(timestamp) if timestamp.tzinfo is None else timestamp
-    
+
     return premarket_start <= timestamp < premarket_end
 
 
 def get_breakout_guard_time(date: Optional[datetime.date] = None) -> datetime.datetime:
-    """
-    Get the breakout guard time (09:36 AM ET) for Gap & Go strategy.
+    """Get the breakout guard time (09:36 AM ET) for Gap & Go strategy.
     
     Args:
         date: Date to get guard time for (defaults to today)
@@ -307,7 +294,7 @@ def get_breakout_guard_time(date: Optional[datetime.date] = None) -> datetime.da
     """
     if date is None:
         date = get_market_time().date()
-    
+
     return MARKET_TZ.localize(
         datetime.datetime.combine(
             date,
@@ -317,8 +304,7 @@ def get_breakout_guard_time(date: Optional[datetime.date] = None) -> datetime.da
 
 
 def get_early_volume_window(date: Optional[datetime.date] = None) -> Tuple[datetime.datetime, datetime.datetime]:
-    """
-    Get early volume calculation window (09:30-09:44 AM ET) for Gap & Go.
+    """Get early volume calculation window (09:30-09:44 AM ET) for Gap & Go.
     
     Args:
         date: Date to get window for (defaults to today)
@@ -328,12 +314,12 @@ def get_early_volume_window(date: Optional[datetime.date] = None) -> Tuple[datet
     """
     if date is None:
         date = get_market_time().date()
-    
+
     window_start = get_market_open_time(date)
     window_end = MARKET_TZ.localize(
         datetime.datetime.combine(date, datetime.time(9, 44))
     )
-    
+
     return window_start, window_end
 
 
@@ -343,8 +329,7 @@ def filter_market_hours(
     include_premarket: bool = True,
     include_afterhours: bool = True,
 ) -> pd.DataFrame:
-    """
-    Filter DataFrame to only include market hours data.
+    """Filter DataFrame to only include market hours data.
     
     Args:
         df: DataFrame with timestamp column
@@ -357,51 +342,50 @@ def filter_market_hours(
     """
     if df.empty or timestamp_col not in df.columns:
         return df
-    
+
     # Ensure timestamp column is datetime
     df = df.copy()
     df[timestamp_col] = pd.to_datetime(df[timestamp_col], utc=True)
-    
+
     # Create filter mask
     mask = pd.Series(False, index=df.index)
-    
+
     for _, row in df.iterrows():
         timestamp = row[timestamp_col]
         date = convert_from_utc(timestamp).date()
-        
+
         # Skip weekends
         if date.weekday() >= 5:
             continue
-        
+
         # Check if in regular session
         if is_in_session_window(timestamp, date):
             mask.loc[row.name] = True
             continue
-        
+
         # Check premarket if enabled
         if include_premarket and is_in_premarket_window(timestamp, date):
             mask.loc[row.name] = True
             continue
-        
+
         # Check after-hours if enabled
         if include_afterhours:
             afterhours_start, afterhours_end = get_afterhours_window(date)
             if afterhours_start <= convert_from_utc(timestamp) <= afterhours_end:
                 mask.loc[row.name] = True
-    
+
     return df[mask].reset_index(drop=True)
 
 
 def get_current_session_state() -> dict:
-    """
-    Get comprehensive information about current market session state.
+    """Get comprehensive information about current market session state.
     
     Returns:
         Dictionary with session state information
     """
     current_time = get_market_time()
     current_date = current_time.date()
-    
+
     return {
         "current_time_et": current_time,
         "current_time_utc": get_utc_time(),
@@ -434,8 +418,7 @@ def convert_utc_to_et(dt: Union[datetime.datetime, pd.Timestamp]) -> Union[datet
 
 
 def as_utc(ts: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series, pd.DatetimeIndex]:
-    """
-    Convert timestamps to UTC timezone.
+    """Convert timestamps to UTC timezone.
     
     If tz-naive: assume already UTC and localize to UTC
     If ET or other tz: convert to UTC
@@ -457,8 +440,7 @@ def as_utc(ts: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series, pd.Dateti
 
 
 def to_market_tz(ts_utc: Union[pd.Series, pd.DatetimeIndex]) -> Union[pd.Series, pd.DatetimeIndex]:
-    """
-    Convert UTC timestamps to market timezone.
+    """Convert UTC timestamps to market timezone.
     
     Args:
         ts_utc: UTC timestamps

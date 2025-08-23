@@ -25,7 +25,7 @@ class Config:
 
     # === API Keys ===
     MARKETDATA_TOKEN: Optional[str] = os.getenv("MARKETDATA_TOKEN")
-    
+
     # Environment variables for degraded mode
     INTRADAY_EXTENDED: bool = os.getenv("INTRADAY_EXTENDED", "false").lower() == "true"
     DEGRADE_INTRADAY_ON_STALE_MINUTES: int = int(os.getenv("DEGRADE_INTRADAY_ON_STALE_MINUTES", "5"))
@@ -65,7 +65,7 @@ class Config:
     INTRADAY_1MIN_RETENTION_DAYS: int = int(os.getenv("INTRADAY_1MIN_RETENTION_DAYS", "7"))
     INTRADAY_30MIN_RETENTION_ROWS: int = int(os.getenv("INTRADAY_30MIN_RETENTION_ROWS", "500"))
     DAILY_RETENTION_ROWS: int = int(os.getenv("DAILY_RETENTION_ROWS", "200"))
-    
+
     # === Data Fetch Constants ===
     ONE_MIN_REQUIRED_DAYS: int = 7  # 7 days + today for 1min data retention
 

@@ -1,5 +1,4 @@
-"""
-Provider routing layer for market data fetching.
+"""Provider routing layer for market data fetching.
 
 This module provides a unified interface for fetching market data from different providers
 while maintaining consistency in data format and timestamps.
@@ -25,8 +24,7 @@ def get_candles(
     extended: bool = False,          # intraday only
     adjustsplits: Optional[bool] = None # daily only
 ) -> pd.DataFrame:
-    """
-    Fetch market data candles from the configured provider.
+    """Fetch market data candles from the configured provider.
     
     Returns DataFrame with columns:
       timestamp (tz-aware UTC), open, high, low, close, volume
@@ -45,14 +43,14 @@ def get_candles(
     """
     # Pick provider by env PROVIDER=marketdata
     provider_name = os.getenv("PROVIDER", "marketdata").lower()
-    
+
     if provider_name == "marketdata":
         from utils.providers.marketdata import MarketDataProvider
         provider = MarketDataProvider()
     else:
         logger.error(f"Unsupported provider: {provider_name}")
         return pd.DataFrame()
-    
+
     return provider.get_candles(
         symbol=symbol,
         resolution=resolution,
@@ -65,15 +63,14 @@ def get_candles(
 
 
 def health_check() -> tuple[bool, str]:
-    """
-    Check provider health with a simple probe.
+    """Check provider health with a simple probe.
     
     Returns:
         Tuple of (is_healthy, status_message)
     """
-    # Pick provider by env PROVIDER=marketdata  
+    # Pick provider by env PROVIDER=marketdata
     provider_name = os.getenv("PROVIDER", "marketdata").lower()
-    
+
     if provider_name == "marketdata":
         from utils.providers.marketdata import MarketDataProvider
         provider = MarketDataProvider()
