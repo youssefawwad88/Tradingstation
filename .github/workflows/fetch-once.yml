@@ -1,74 +1,50 @@
-name: Fetch Data Once
-
+name: Fetch Once
 on:
   workflow_dispatch:
     inputs:
       interval:
-        description: 'Data interval to fetch'
+        description: '1min | 30min | daily'
         required: true
         default: '1min'
-        type: choice
-        options:
-        - '1min'
-        - '30min'
-        - 'daily'
       tickers:
-        description: 'Comma-separated list of tickers'
+        description: 'Comma-separated e.g. AAPL,NVDA,TSLA,MSFT,AMZN'
         required: true
-        default: 'AAPL,TSLA,NVDA'
-        type: string
+        default: 'AAPL,NVDA,TSLA,MSFT,AMZN'
       force_full:
-        description: 'Force full refresh of data'
-        required: false
-        default: false
-        type: boolean
-
+        description: 'true/false'
+        required: true
+        default: 'true'
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    
+    env:
+      APP_ENV: production
+      DEPLOYMENT_TAG: marketdata-trader-plan
+      PROVIDER: marketdata
+      MARKETDATA_ENDPOINT: ${{ vars.MARKETDATA_ENDPOINT }}
+      MARKETDATA_TOKEN: ${{ secrets.MARKETDATA_TOKEN }}
+      INTRADAY_EXTENDED: 'true'
+      MARKET_TZ: America/New_York
+      SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+      SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+      SPACES_REGION: ${{ vars.SPACES_REGION }}
+      SPACES_BUCKET_NAME: ${{ vars.SPACES_BUCKET_NAME }}
+      SPACES_ENDPOINT: ${{ vars.SPACES_ENDPOINT }}
+      SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
+      DATA_ROOT: ${{ vars.DATA_ROOT }}
+      UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
+      LOG_LEVEL: INFO
+      TZ: UTC
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-        
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-        
-    - name: Fetch data
-      env:
-        SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
-        SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
-        SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
-        SPACES_REGION: ${{ secrets.SPACES_REGION }}
-        SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
-        DATA_ROOT: ${{ vars.DATA_ROOT }}
-        UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
-        MARKETDATA_TOKEN: ${{ secrets.MARKETDATA_TOKEN }}
-        MARKETDATA_ENDPOINT: ${{ secrets.MARKETDATA_ENDPOINT }}
-      run: |
-        if [ "${{ inputs.interval }}" = "daily" ]; then
-          JOB_ARG="daily"
-          INTERVAL_ARG=""
-        else
-          JOB_ARG="intraday"
-          INTERVAL_ARG="--interval ${{ inputs.interval }}"
-        fi
-        
-        FORCE_FULL_ARG=""
-        if [ "${{ inputs.force_full }}" = "true" ]; then
-          FORCE_FULL_ARG="--force-full"
-        fi
-        
-        echo "Running: python -m jobs.data_fetch_manager --job $JOB_ARG $INTERVAL_ARG --tickers ${{ inputs.tickers }} $FORCE_FULL_ARG"
-        
-        python -m jobs.data_fetch_manager \
-          --job "$JOB_ARG" \
-          $INTERVAL_ARG \
-          --tickers "${{ inputs.tickers }}" \
-          $FORCE_FULL_ARG
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt || pip install boto3 pandas
+      - name: Convert tickers
+        run: echo "TICKERS=$(echo '${{ github.event.inputs.tickers }}' | tr ',' ' ')" >> $GITHUB_ENV
+      - name: Run once
+        run: |
+          python -m jobs.data_fetch_manager \
+            --job intraday \
+            --interval ${{ github.event.inputs.interval }} \
+            --tickers $TICKERS $([ "${{ github.event.inputs.force_full }}" = "true" ] && echo --force-full)

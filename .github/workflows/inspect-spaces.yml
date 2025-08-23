@@ -1,56 +1,35 @@
-name: Inspect Spaces Data
-
+name: Inspect Spaces
 on:
   workflow_dispatch:
     inputs:
       prefix:
-        description: 'S3 prefix to inspect'
+        description: 'Prefix e.g. trading-system/data/intraday/1min/'
         required: true
-        default: 'trading-system/data/intraday/1min'
-        type: string
+        default: ''
       folders_only:
-        description: 'Show only folders (not individual files)'
-        required: false
-        default: false
-        type: boolean
+        description: 'true to list folders only'
+        required: true
+        default: 'false'
       num_lines:
-        description: 'Number of lines to show from each file'
-        required: false
-        default: 3
-        type: number
-
+        description: 'Show last N lines for CSV'
+        required: true
+        default: '3'
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    
+    env:
+      SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+      SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+      SPACES_REGION: ${{ vars.SPACES_REGION }}
+      SPACES_ENDPOINT: ${{ vars.SPACES_ENDPOINT }}
+      SPACES_BUCKET_NAME: ${{ vars.SPACES_BUCKET_NAME }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-        
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-        
-    - name: Inspect Spaces objects
-      env:
-        SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
-        SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
-        SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
-        SPACES_REGION: ${{ secrets.SPACES_REGION }}
-        SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
-        DATA_ROOT: ${{ vars.DATA_ROOT }}
-        UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
-      run: |
-        FOLDERS_ONLY_FLAG=""
-        if [ "${{ inputs.folders_only }}" = "true" ]; then
-          FOLDERS_ONLY_FLAG="--folders-only"
-        fi
-        
-        python -m tools.inspect_spaces --prefix "${{ inputs.prefix }}" \
-          $FOLDERS_ONLY_FLAG \
-          --num-lines "${{ inputs.num_lines }}"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt || pip install boto3 pandas
+      - run: |
+          python -m tools.inspect_spaces \
+            --prefix "${{ github.event.inputs.prefix }}" \
+            --folders-only "${{ github.event.inputs.folders_only }}" \
+            --num-lines "${{ github.event.inputs.num_lines }}"
