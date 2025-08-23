@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tickers:
-        description: 'Space-separated list of ticker symbols (e.g., NVDA AAPL TSLA)'
+        description: 'Comma-separated list of ticker symbols (e.g., AAPL,NVDA,TSLA,MSFT,AMZN)'
         required: true
-        default: 'NVDA AAPL TSLA'
+        default: 'AAPL,NVDA,TSLA,MSFT,AMZN'
         type: string
 
 jobs:
@@ -39,4 +39,6 @@ jobs:
         UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
       run: |
         echo "Seeding universe with tickers: ${{ github.event.inputs.tickers }}"
-        python -m tools.seed_universe --tickers ${{ github.event.inputs.tickers }}
+        # Convert comma-separated to space-separated for the tool
+        TICKERS_SPACED=$(echo "${{ github.event.inputs.tickers }}" | tr ',' ' ')
+        python -m tools.seed_universe --tickers $TICKERS_SPACED
