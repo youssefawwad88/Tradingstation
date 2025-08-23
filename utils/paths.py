@@ -6,16 +6,23 @@ constructed consistently under the base prefix.
 """
 
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
-# Path configuration from environment
-BASE = os.getenv("SPACES_BASE_PREFIX", "").strip("/")  # e.g. "trading-system"
-DATA_ROOT = os.getenv("DATA_ROOT", "data").strip("/")  # e.g. "data" (RELATIVE)
-UNIVERSE_KEY = os.getenv(
-    "UNIVERSE_KEY", "data/Universe/master_tickerlist.csv"
-).strip("/")  # RELATIVE
+# Import config to get normalized values
+try:
+    from utils.config import config
+    
+    # Use normalized config values
+    BASE = config.SPACES_BASE_PREFIX.rstrip("/")  # Remove trailing slash for path building
+    DATA_ROOT = config.DATA_ROOT.strip("/")
+    UNIVERSE_KEY = config.UNIVERSE_KEY.strip("/")
+except ImportError:
+    # Fallback to environment variables if config import fails
+    import os
+    BASE = os.getenv("SPACES_BASE_PREFIX", "data").strip("/")
+    DATA_ROOT = os.getenv("DATA_ROOT", "data").strip("/")
+    UNIVERSE_KEY = os.getenv("UNIVERSE_KEY", "data/universe/master_tickerlist.csv").strip("/")
 
 
 def k(*parts: str) -> str:
@@ -117,8 +124,21 @@ def key_daily(sym: str) -> str:
 
 def log_startup_paths() -> None:
     """Log path resolution on startup as required by instrumentation."""
-    sample_prefix = k(BASE, DATA_ROOT, "intraday", "1min")
-    logger.info(
-        f"paths_resolved base={BASE} data_root={DATA_ROOT} "
-        f"universe_key={UNIVERSE_KEY} write_prefix={sample_prefix}/"
-    )
+    try:
+        from utils.config import config
+        
+        sample_prefix = k(BASE, DATA_ROOT, "intraday", "1min")
+        logger.info(
+            f"paths_resolved base={BASE} data_root={DATA_ROOT} "
+            f"universe_key={UNIVERSE_KEY} endpoint_normalized={config.SPACES_ENDPOINT} "
+            f"bucket={config.SPACES_BUCKET_NAME or 'not-set'} base_prefix={config.SPACES_BASE_PREFIX} "
+            f"origin_url={config.get_spaces_origin_url() or 'not-available'} "
+            f"orchestrator=orchestrator/run_all.py"
+        )
+    except ImportError:
+        # Fallback logging without config
+        sample_prefix = k(BASE, DATA_ROOT, "intraday", "1min")
+        logger.info(
+            f"paths_resolved base={BASE} data_root={DATA_ROOT} "
+            f"universe_key={UNIVERSE_KEY} write_prefix={sample_prefix}/"
+        )
