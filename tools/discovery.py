@@ -672,6 +672,8 @@ class SystemDiscovery:
         
         report_template = """# System Discovery & Inventory — {{ repo_name }}@{{ commit_sha }} on {{ timestamp }}
 
+**Quick Start**: Run [Validate Environment](../../actions/workflows/validate-env.yml) first to confirm vars and connectivity; then run System Discovery & Inventory (manual) for the full report.
+
 ## 1) Repo Architecture & Runtime
 
 ### Python Version Resolution
