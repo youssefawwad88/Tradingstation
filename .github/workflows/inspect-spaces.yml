@@ -8,10 +8,15 @@ on:
         required: true
         default: 'trading-system/data/intraday/1min'
         type: string
+      folders_only:
+        description: 'Show only folders (not individual files)'
+        required: false
+        default: false
+        type: boolean
       num_lines:
         description: 'Number of lines to show from each file'
-        required: true
-        default: 5
+        required: false
+        default: 3
         type: number
 
 jobs:
@@ -38,42 +43,6 @@ jobs:
         SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
         SPACES_REGION: ${{ secrets.SPACES_REGION }}
       run: |
-        python -m tools.inspect_spaces --prefix "${{ inputs.prefix }}"
-        
-    - name: List and head each object
-      env:
-        SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
-        SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
-        SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
-        SPACES_REGION: ${{ secrets.SPACES_REGION }}
-      run: |
-        python -c "
-        from utils.spaces_io import spaces_io
-        from utils.paths import s3_key
-        
-        prefix = '${{ inputs.prefix }}'
-        full_prefix = s3_key(prefix) if not prefix.startswith('trading-system') else prefix
-        
-        print(f'Listing objects with prefix: {full_prefix}')
-        
-        if spaces_io.is_available:
-            objects = spaces_io.list_objects(full_prefix)
-            for obj in objects:
-                key = obj['Key'] 
-                size = obj['Size']
-                last_modified = obj['LastModified']
-                
-                print(f'\\nObject: {key}')
-                print(f'Size: {size} bytes')
-                print(f'LastModified: {last_modified}')
-                
-                # Get object metadata
-                metadata = spaces_io.object_metadata(key)
-                if metadata:
-                    etag = metadata.get('etag', 'N/A')
-                    content_length = metadata.get('size', 'N/A')
-                    print(f'ETag: {etag}')
-                    print(f'ContentLength: {content_length}')
-        else:
-            print('Spaces not available - check credentials')
-        "
+        python -m tools.inspect_spaces --prefix "${{ inputs.prefix }}" \
+          ${{ inputs.folders_only && '--folders-only' || '' }} \
+          --num-lines "${{ inputs.num_lines }}"
