@@ -1,5 +1,4 @@
-"""
-DigitalOcean Spaces interface for cloud storage operations.
+"""DigitalOcean Spaces interface for cloud storage operations.
 
 This module provides atomic file operations, metadata management, and
 reliable upload/download functionality for the trading data lake.
@@ -8,7 +7,7 @@ reliable upload/download functionality for the trading data lake.
 import io
 import json
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import boto3
 import pandas as pd
@@ -19,9 +18,37 @@ from utils.config import config
 logger = logging.getLogger(__name__)
 
 
-def _parse_timestamps_on_read(df: pd.DataFrame) -> pd.DataFrame:
+def _normalize_key(key: str) -> str:
+    """Normalize and guard S3 keys to prevent double-prefix issues.
+    
+    Args:
+        key: Raw S3 key to normalize
+        
+    Returns:
+        Normalized key with proper base prefix
     """
-    Parse timestamps when reading CSV from Spaces to ensure UTC timezone.
+    from utils.paths import BASE, k
+
+    # Ensure BASE is set
+    if not BASE:
+        raise ValueError("SPACES_BASE_PREFIX must be set")
+
+    # Guard against double-prefix
+    double_prefix = f"{BASE}/{BASE}/"
+    if key.startswith(double_prefix):
+        logger.warning(f"write_fix double_prefix key={key}")
+        key = key.replace(double_prefix, f"{BASE}/", 1)
+
+    # Guard against missing base prefix
+    elif not key.startswith(f"{BASE}/"):
+        logger.warning(f"write_fix missing_base key={key}")
+        key = k(BASE, key)
+
+    return key
+
+
+def _parse_timestamps_on_read(df: pd.DataFrame) -> pd.DataFrame:
+    """Parse timestamps when reading CSV from Spaces to ensure UTC timezone.
     
     Args:
         df: DataFrame read from CSV
@@ -30,24 +57,22 @@ def _parse_timestamps_on_read(df: pd.DataFrame) -> pd.DataFrame:
         DataFrame with properly parsed UTC timestamps
     """
     # Import here to avoid circular imports
-    from utils.time_utils import as_utc
-    
+
     df = df.copy()
-    
+
     # Handle intraday timestamp columns
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-        
-    # Handle daily date columns  
+
+    # Handle daily date columns
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
-        
+
     return df
 
 
 def _prepare_timestamps_for_write(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Prepare timestamps when writing CSV to Spaces to ensure UTC format.
+    """Prepare timestamps when writing CSV to Spaces to ensure UTC format.
     
     Args:
         df: DataFrame to write
@@ -57,9 +82,9 @@ def _prepare_timestamps_for_write(df: pd.DataFrame) -> pd.DataFrame:
     """
     # Import here to avoid circular imports
     from utils.time_utils import as_utc
-    
+
     df = df.copy()
-    
+
     # Ensure timestamp column is UTC if it exists
     if "timestamp" in df.columns and not df["timestamp"].empty:
         try:
@@ -68,7 +93,7 @@ def _prepare_timestamps_for_write(df: pd.DataFrame) -> pd.DataFrame:
             df["timestamp"] = df["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         except Exception as e:
             logger.warning(f"Could not convert timestamp column to UTC: {e}")
-            
+
     # Ensure date column is UTC if it exists
     if "date" in df.columns and not df["date"].empty:
         try:
@@ -76,7 +101,7 @@ def _prepare_timestamps_for_write(df: pd.DataFrame) -> pd.DataFrame:
             df["date"] = df["date"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         except Exception as e:
             logger.warning(f"Could not convert date column to UTC: {e}")
-            
+
     return df
 
 
@@ -106,11 +131,11 @@ class SpacesIO:
                 aws_access_key_id=config.SPACES_ACCESS_KEY_ID,
                 aws_secret_access_key=config.SPACES_SECRET_ACCESS_KEY,
             )
-            
+
             # Test connection
             self._client.head_bucket(Bucket=config.SPACES_BUCKET_NAME)
             logger.info("Successfully connected to DigitalOcean Spaces")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize Spaces client: {e}")
             self._client = None
@@ -121,8 +146,7 @@ class SpacesIO:
         return self._client is not None
 
     def get_object(self, key: str) -> Optional[bytes]:
-        """
-        Download an object from Spaces.
+        """Download an object from Spaces.
         
         Args:
             key: Object key/path in Spaces
@@ -154,10 +178,9 @@ class SpacesIO:
         self,
         key: str,
         data: Union[bytes, str],
-        metadata: Optional[Dict[str, str]] = None,
+        metadata: Optional[dict[str, str]] = None,
     ) -> bool:
-        """
-        Upload an object to Spaces atomically using tmp->final pattern.
+        """Upload an object to Spaces atomically using tmp->final pattern.
         
         Args:
             key: Final object key/path
@@ -171,12 +194,15 @@ class SpacesIO:
             logger.warning(f"Spaces not available - cannot put object {key}")
             return False
 
+        # Normalize key to prevent double-prefix issues
+        key = _normalize_key(key)
+
         # Convert string data to bytes
         if isinstance(data, str):
             data = data.encode("utf-8")
 
         tmp_key = f"{key}.tmp"
-        
+
         # Prepare metadata
         final_metadata = {
             "managed-by": "data_fetch_manager",
@@ -217,7 +243,7 @@ class SpacesIO:
 
         except Exception as e:
             logger.error(f"Error uploading object {key}: {e}")
-            
+
             # Cleanup: try to delete temp file
             try:
                 self._client.delete_object(
@@ -226,12 +252,11 @@ class SpacesIO:
                 )
             except Exception:
                 pass  # Ignore cleanup errors
-                
+
             return False
 
-    def list_objects(self, prefix: str = "") -> List[Dict[str, Any]]:
-        """
-        List objects with a given prefix.
+    def list_objects(self, prefix: str = "") -> list[dict[str, Any]]:
+        """List objects with a given prefix.
         
         Args:
             prefix: Object key prefix to filter by
@@ -246,7 +271,7 @@ class SpacesIO:
         try:
             objects = []
             paginator = self._client.get_paginator("list_objects_v2")
-            
+
             for page in paginator.paginate(
                 Bucket=config.SPACES_BUCKET_NAME,
                 Prefix=prefix,
@@ -259,16 +284,15 @@ class SpacesIO:
                             "last_modified": obj["LastModified"],
                             "etag": obj["ETag"].strip('"'),
                         })
-                        
+
             return objects
-            
+
         except Exception as e:
             logger.error(f"Error listing objects with prefix {prefix}: {e}")
             return []
 
-    def object_metadata(self, key: str) -> Optional[Dict[str, Any]]:
-        """
-        Get object metadata without downloading the content.
+    def object_metadata(self, key: str) -> Optional[dict[str, Any]]:
+        """Get object metadata without downloading the content.
         
         Args:
             key: Object key/path
@@ -284,14 +308,14 @@ class SpacesIO:
                 Bucket=config.SPACES_BUCKET_NAME,
                 Key=key,
             )
-            
+
             return {
                 "size": response["ContentLength"],
                 "last_modified": response["LastModified"],
                 "etag": response["ETag"].strip('"'),
                 "metadata": response.get("Metadata", {}),
             }
-            
+
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None
@@ -310,8 +334,7 @@ class SpacesIO:
         key: str,
         file_format: str = "csv",
     ) -> Optional[pd.DataFrame]:
-        """
-        Download a DataFrame from Spaces with UTC timestamp parsing.
+        """Download a DataFrame from Spaces with UTC timestamp parsing.
         
         Args:
             key: Object key/path
@@ -326,7 +349,7 @@ class SpacesIO:
 
         try:
             buffer = io.BytesIO(data)
-            
+
             if file_format.lower() == "csv":
                 df = pd.read_csv(buffer)
                 # Parse timestamps to ensure they are UTC timezone-aware
@@ -337,7 +360,7 @@ class SpacesIO:
             else:
                 logger.error(f"Unsupported file format: {file_format}")
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error reading DataFrame from {key}: {e}")
             return None
@@ -347,10 +370,9 @@ class SpacesIO:
         df: pd.DataFrame,
         key: str,
         file_format: str = "csv",
-        metadata: Optional[Dict[str, str]] = None,
+        metadata: Optional[dict[str, str]] = None,
     ) -> bool:
-        """
-        Upload a DataFrame to Spaces with UTC timestamp enforcement.
+        """Upload a DataFrame to Spaces with UTC timestamp enforcement.
         
         Args:
             df: DataFrame to upload
@@ -365,9 +387,9 @@ class SpacesIO:
             # Prepare timestamps for writing if CSV format
             if file_format.lower() == "csv":
                 df = _prepare_timestamps_for_write(df)
-                
+
             buffer = io.BytesIO()
-            
+
             if file_format.lower() == "csv":
                 df.to_csv(buffer, index=False)
             elif file_format.lower() == "parquet":
@@ -378,7 +400,7 @@ class SpacesIO:
 
             buffer.seek(0)
             data = buffer.getvalue()
-            
+
             # Add DataFrame metadata
             df_metadata = {
                 "rows": str(len(df)),
@@ -388,21 +410,32 @@ class SpacesIO:
             }
             if metadata:
                 df_metadata.update(metadata)
-                
-            return self.put_object_atomic(key, data, df_metadata)
-            
+
+            success = self.put_object_atomic(key, data, df_metadata)
+
+            # Enhanced logging as required by instrumentation (D)
+            if success:
+                # Get metadata for enhanced logging
+                obj_metadata = self.object_metadata(key)
+                size = obj_metadata.get("size", 0) if obj_metadata else len(data)
+                etag = obj_metadata.get("etag", "unknown") if obj_metadata else "unknown"
+                last_modified = obj_metadata.get("last_modified", "unknown") if obj_metadata else "unknown"
+
+                logger.info(f"write_ok s3_key={key} rows_after={len(df)} size={size} etag={etag} last_modified={last_modified}")
+
+            return success
+
         except Exception as e:
             logger.error(f"Error uploading DataFrame to {key}: {e}")
             return False
 
     def upload_json(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         key: str,
-        metadata: Optional[Dict[str, str]] = None,
+        metadata: Optional[dict[str, str]] = None,
     ) -> bool:
-        """
-        Upload JSON data to Spaces.
+        """Upload JSON data to Spaces.
         
         Args:
             data: Dictionary to upload as JSON
@@ -417,16 +450,15 @@ class SpacesIO:
             json_metadata = {"format": "json"}
             if metadata:
                 json_metadata.update(metadata)
-                
+
             return self.put_object_atomic(key, json_str, json_metadata)
-            
+
         except Exception as e:
             logger.error(f"Error uploading JSON to {key}: {e}")
             return False
 
-    def download_json(self, key: str) -> Optional[Dict[str, Any]]:
-        """
-        Download JSON data from Spaces.
+    def download_json(self, key: str) -> Optional[dict[str, Any]]:
+        """Download JSON data from Spaces.
         
         Args:
             key: Object key/path
@@ -458,18 +490,18 @@ def get_object(key: str) -> Optional[bytes]:
 def put_object_atomic(
     key: str,
     data: Union[bytes, str],
-    metadata: Optional[Dict[str, str]] = None,
+    metadata: Optional[dict[str, str]] = None,
 ) -> bool:
     """Put an object to Spaces atomically."""
     return spaces_io.put_object_atomic(key, data, metadata)
 
 
-def list_objects(prefix: str = "") -> List[Dict[str, Any]]:
+def list_objects(prefix: str = "") -> list[dict[str, Any]]:
     """List objects with prefix."""
     return spaces_io.list_objects(prefix)
 
 
-def object_metadata(key: str) -> Optional[Dict[str, Any]]:
+def object_metadata(key: str) -> Optional[dict[str, Any]]:
     """Get object metadata."""
     return spaces_io.object_metadata(key)
 
@@ -483,7 +515,7 @@ def upload_dataframe(
     df: pd.DataFrame,
     key: str,
     file_format: str = "csv",
-    metadata: Optional[Dict[str, str]] = None,
+    metadata: Optional[dict[str, str]] = None,
 ) -> bool:
     """Upload DataFrame to Spaces."""
     return spaces_io.upload_dataframe(df, key, file_format, metadata)

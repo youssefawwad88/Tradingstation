@@ -22,7 +22,7 @@ import pandas as pd
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from utils.config import config
-from utils.paths import key_intraday_1min, key_intraday_30min, key_daily, s3_key
+from utils.paths import intraday_key, daily_key, universe_key, k, BASE
 from utils.spaces_io import spaces_io
 
 logger = logging.getLogger(__name__)
@@ -113,13 +113,13 @@ def inspect_symbols(symbols: List[str]) -> None:
         
         # Check all data types for this symbol
         keys_to_check = [
-            ("1min", key_intraday_1min(symbol)),
-            ("30min", key_intraday_30min(symbol)), 
-            ("daily", key_daily(symbol))
+            ("1min", intraday_key(symbol, "1min")),
+            ("30min", intraday_key(symbol, "30min")), 
+            ("daily", daily_key(symbol))
         ]
         
         for data_type, key in keys_to_check:
-            full_key = s3_key(key)
+            full_key = key  # Keys are already complete with base prefix
             
             try:
                 if not spaces_io.is_available:
@@ -144,17 +144,20 @@ def inspect_symbols(symbols: List[str]) -> None:
                 print(f"  {data_type:>6}: ERROR - {e}")
 
 
-def inspect_prefix(prefix: str) -> None:
+def inspect_prefix(prefix: str, folders_only: bool = False) -> None:
     """Inspect all objects with a given prefix.
     
     Args:
         prefix: S3 prefix to inspect
+        folders_only: If True, only show top-level folders
     """
     print(f"Inspecting objects with prefix: {prefix}")
+    if folders_only:
+        print("(showing folders only)")
     print("-" * 80)
     
     # Add base prefix if not already included
-    full_prefix = s3_key(prefix) if not prefix.startswith(config.SPACES_BASE_PREFIX) else prefix
+    full_prefix = k(BASE, prefix) if not prefix.startswith(BASE) else prefix
     
     objects = list_objects_by_prefix(full_prefix)
     
@@ -162,23 +165,47 @@ def inspect_prefix(prefix: str) -> None:
         print("No objects found with this prefix")
         return
     
-    for obj in objects:
-        key = obj['key']
-        size = obj['size']
-        last_modified = obj['last_modified']
+    if folders_only:
+        # Extract unique folder names at the top level
+        folders = set()
+        for obj in objects:
+            key = obj['key']
+            # Remove the prefix to get the relative path
+            if key.startswith(full_prefix):
+                relative_path = key[len(full_prefix):].lstrip('/')
+            else:
+                relative_path = key
+                
+            # Get the first path component (folder)
+            if '/' in relative_path:
+                folder = relative_path.split('/')[0]
+                folders.add(folder)
         
-        # Get last timestamps if it's a CSV file
-        timestamps = []
-        if key.endswith('.csv'):
-            timestamps = get_last_timestamps(key)
+        for folder in sorted(folders):
+            print(f"Folder: {full_prefix}/{folder}/")
         
-        timestamp_str = ", ".join(timestamps) if timestamps else "N/A"
+        if not folders:
+            print("No folders found")
         
-        print(f"Path: {key}")
-        print(f"Size: {size} bytes")
-        print(f"Last Modified: {last_modified}")
-        print(f"Last 3 timestamps: {timestamp_str}")
-        print()
+    else:
+        # Show detailed object info
+        for obj in objects:
+            key = obj['key']
+            size = obj['size']
+            last_modified = obj['last_modified']
+            
+            # Get last timestamps if it's a CSV file
+            timestamps = []
+            if key.endswith('.csv'):
+                timestamps = get_last_timestamps(key)
+            
+            timestamp_str = ", ".join(timestamps) if timestamps else "N/A"
+            
+            print(f"Path: {key}")
+            print(f"Size: {size} bytes")
+            print(f"Last Modified: {last_modified}")
+            print(f"Last 3 timestamps: {timestamp_str}")
+            print()
 
 
 def main():
@@ -189,6 +216,8 @@ def main():
     group.add_argument("--symbols", nargs="+", help="List of symbols to inspect")
     group.add_argument("--prefix", type=str, help="S3 prefix to inspect (e.g., data/intraday/1min/)")
     
+    parser.add_argument("--folders-only", action="store_true", help="Show only top-level folders")
+    
     args = parser.parse_args()
     
     # Setup logging
@@ -198,7 +227,7 @@ def main():
         if args.symbols:
             inspect_symbols(args.symbols)
         else:
-            inspect_prefix(args.prefix)
+            inspect_prefix(args.prefix, folders_only=args.folders_only)
             
         return 0
         
