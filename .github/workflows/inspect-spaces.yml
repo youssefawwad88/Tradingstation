@@ -42,7 +42,15 @@ jobs:
         SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
         SPACES_BUCKET_NAME: ${{ secrets.SPACES_BUCKET_NAME }}
         SPACES_REGION: ${{ secrets.SPACES_REGION }}
+        SPACES_BASE_PREFIX: ${{ vars.SPACES_BASE_PREFIX }}
+        DATA_ROOT: ${{ vars.DATA_ROOT }}
+        UNIVERSE_KEY: ${{ vars.UNIVERSE_KEY }}
       run: |
+        FOLDERS_ONLY_FLAG=""
+        if [ "${{ inputs.folders_only }}" = "true" ]; then
+          FOLDERS_ONLY_FLAG="--folders-only"
+        fi
+        
         python -m tools.inspect_spaces --prefix "${{ inputs.prefix }}" \
-          ${{ inputs.folders_only && '--folders-only' || '' }} \
+          $FOLDERS_ONLY_FLAG \
           --num-lines "${{ inputs.num_lines }}"
