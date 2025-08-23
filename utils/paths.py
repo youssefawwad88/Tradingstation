@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Import config to get normalized values
 try:
     from utils.config import config
-    
+
     # Use normalized config values
     BASE = config.SPACES_BASE_PREFIX.rstrip("/")  # Remove trailing slash for path building
     DATA_ROOT = config.DATA_ROOT.strip("/")
@@ -126,12 +126,14 @@ def log_startup_paths() -> None:
     """Log path resolution on startup as required by instrumentation."""
     try:
         from utils.config import config
-        
+
         sample_prefix = k(BASE, DATA_ROOT, "intraday", "1min")
         logger.info(
             f"paths_resolved base={BASE} data_root={DATA_ROOT} "
-            f"universe_key={UNIVERSE_KEY} endpoint_normalized={config.SPACES_ENDPOINT} "
-            f"bucket={config.SPACES_BUCKET_NAME or 'not-set'} base_prefix={config.SPACES_BASE_PREFIX} "
+            f"universe_key={UNIVERSE_KEY} "
+            f"endpoint_normalized={config.SPACES_ENDPOINT} "
+            f"bucket={config.SPACES_BUCKET_NAME or 'not-set'} "
+            f"base_prefix={config.SPACES_BASE_PREFIX} "
             f"origin_url={config.get_spaces_origin_url() or 'not-available'} "
             f"orchestrator=orchestrator/run_all.py"
         )

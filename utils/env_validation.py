@@ -6,8 +6,8 @@ canonical values and formats required by the system.
 
 import os
 import re
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 # Import here to avoid circular imports when needed
 try:
@@ -29,11 +29,11 @@ def validate_spaces_endpoint(endpoint: str) -> None:
     """
     if not endpoint:
         raise RuntimeError("SPACES_ENDPOINT is required and cannot be empty")
-    
+
     # Allow endpoints with or without scheme for input validation
     # The normalized version will always have https://
     endpoint_pattern = r'^https?://[a-z0-9.-]*digitaloceanspaces\.com/?$'
-    
+
     if not re.match(endpoint_pattern, endpoint):
         raise RuntimeError(
             f"Invalid SPACES_ENDPOINT format. Must match pattern "
@@ -65,7 +65,7 @@ def validate_spaces_base_prefix(base_prefix: str) -> None:
     """
     if not base_prefix:
         raise RuntimeError("SPACES_BASE_PREFIX is required and cannot be empty")
-    
+
     if not base_prefix.endswith('/'):
         raise RuntimeError(
             f"SPACES_BASE_PREFIX must end with a trailing slash '/'. Got: {base_prefix}"
@@ -73,10 +73,10 @@ def validate_spaces_base_prefix(base_prefix: str) -> None:
 
 
 def perform_soft_live_check(
-    endpoint: str, 
-    bucket_name: str, 
+    endpoint: str,
+    bucket_name: str,
     base_prefix: str,
-    access_key_id: Optional[str], 
+    access_key_id: Optional[str],
     secret_access_key: Optional[str]
 ) -> tuple[bool, str]:
     """Perform a soft live check of Spaces connectivity if credentials are available.
@@ -93,11 +93,11 @@ def perform_soft_live_check(
     """
     if not all([access_key_id, secret_access_key, HAS_BOTO3]):
         return True, "Skipped (credentials not available or boto3 not installed)"
-    
+
     try:
         # Extract region from endpoint
         region = endpoint.replace("https://", "").replace(".digitaloceanspaces.com", "")
-        
+
         client = boto3.client(
             "s3",
             endpoint_url=endpoint,
@@ -105,16 +105,16 @@ def perform_soft_live_check(
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
         )
-        
+
         # Test with MaxKeys=1 under base prefix
         response = client.list_objects_v2(
             Bucket=bucket_name,
             Prefix=base_prefix,
             MaxKeys=1
         )
-        
+
         return True, f"Connected successfully (found {len(response.get('Contents', []))} objects under {base_prefix})"
-        
+
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code', 'Unknown')
         return False, f"ClientError: {error_code} - {str(e)}"
@@ -140,7 +140,7 @@ def print_spaces_summary_table(
     """
     success, message = live_check_result
     status_icon = "✅" if success else "❌"
-    
+
     print("\n" + "="*60)
     print("SPACES CONFIGURATION SUMMARY")
     print("="*60)
@@ -168,7 +168,7 @@ def validate_paths(data_root: str, universe_key: str) -> None:
         raise RuntimeError(
             f'Invalid DATA_ROOT. Expected "{expected_data_root}", got: {data_root}'
         )
-    
+
     # Validate UNIVERSE_KEY (case-sensitive)
     expected_universe_key = "data/universe/master_tickerlist.csv"
     if universe_key != expected_universe_key:
@@ -188,10 +188,10 @@ def validate_do_ids(app_id: Optional[str]) -> None:
     """
     if not app_id:
         raise RuntimeError("Invalid DO_APP_ID. Must be provided and cannot be empty")
-    
+
     # UUID regex: 8-4-4-4-12 hex digits
     uuid_pattern = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-    
+
     if not re.match(uuid_pattern, app_id):
         raise RuntimeError(
             f"Invalid DO_APP_ID. Must be a UUID (36 chars). Got: {app_id}"
@@ -216,10 +216,10 @@ def validate_all_environment_variables() -> None:
     except ImportError:
         # python-dotenv not installed, continue with system environment variables
         pass
-    
+
     # Import config here to get normalized values
     from utils.config import config
-    
+
     # Get all required environment variables (both raw and normalized)
     raw_endpoint = os.getenv("SPACES_ENDPOINT", "")
     spaces_endpoint = config.SPACES_ENDPOINT  # This is the normalized version
@@ -228,17 +228,17 @@ def validate_all_environment_variables() -> None:
     data_root = config.DATA_ROOT
     universe_key = config.UNIVERSE_KEY
     do_app_id = os.getenv("DO_APP_ID", "")
-    
+
     # Run all validations
     validate_spaces_endpoint(spaces_endpoint)
     validate_spaces_bucket_name(spaces_bucket_name)
     validate_spaces_base_prefix(spaces_base_prefix)
     validate_paths(data_root, universe_key)
     validate_do_ids(do_app_id)
-    
+
     # Get origin URL for summary
     origin_url = config.get_spaces_origin_url()
-    
+
     # Perform soft live check
     live_check_result = perform_soft_live_check(
         spaces_endpoint,
@@ -247,7 +247,7 @@ def validate_all_environment_variables() -> None:
         config.SPACES_ACCESS_KEY_ID,
         config.SPACES_SECRET_ACCESS_KEY
     )
-    
+
     # Print summary table
     print_spaces_summary_table(
         spaces_endpoint,
