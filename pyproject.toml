@@ -9,7 +9,7 @@ description = "Professional-grade automated trading platform"
 authors = [{name = "Trading Station Team"}]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "pandas>=2.0.0,<3.0.0",
     "pandas_market_calendars>=4.0.0,<5.0.0",
@@ -39,7 +39,7 @@ dev = [
 
 [tool.black]
 line-length = 88
-target-version = ['py39']
+target-version = ['py311']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -63,10 +63,10 @@ ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "S101"
 fixable = ["A", "B", "C", "D", "E", "F", "I", "N", "Q", "S", "T", "W", "ANN", "ARG", "BLE", "COM", "DJ", "DTZ", "EM", "ERA", "EXE", "FBT", "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"]
 unfixable = []
 line-length = 88
-target-version = "py39"
+target-version = "py311"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
