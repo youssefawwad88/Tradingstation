@@ -11,6 +11,7 @@ import pandas as pd
 
 from utils.config import config
 from utils.logging_setup import get_logger
+from utils.paths import intraday_key
 from utils.spaces_io import spaces_io
 from utils.time_utils import utc_now
 
@@ -90,8 +91,8 @@ class ExhaustionReversalScreener:
     def screen_ticker(self, ticker: str) -> List[Dict]:
         """Screen a ticker for exhaustion reversal setups."""
         try:
-            intraday_key = config.get_spaces_path("data", "intraday", "30min", f"{ticker}.csv")
-            df = spaces_io.download_dataframe(intraday_key)
+            data_key = intraday_key(ticker, "30min")
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty or len(df) < 50:
                 return []

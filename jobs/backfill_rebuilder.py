@@ -11,6 +11,7 @@ from typing import List, Optional
 from jobs.data_fetch_manager import DataFetchManager
 from utils.config import config
 from utils.logging_setup import get_logger
+from utils.paths import daily_key, intraday_key
 from utils.spaces_io import spaces_io
 
 logger = get_logger(__name__)
@@ -103,7 +104,7 @@ class BackfillRebuilder:
                 # Force full mode if requested
                 if force_full:
                     # Clear existing data to force full fetch
-                    daily_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
+                    data_key = daily_key(ticker)
                     # Note: We don't actually delete, just let the manager detect and do full
 
                 # Fetch data
@@ -166,10 +167,7 @@ class BackfillRebuilder:
                 # Force full mode if requested
                 if force_full:
                     # Clear existing data to force full fetch
-                    if interval == "1min":
-                        intraday_key = config.get_spaces_path("data", "intraday", "1min", f"{ticker}.csv")
-                    else:
-                        intraday_key = config.get_spaces_path("data", "intraday", "30min", f"{ticker}.csv")
+                    data_key = intraday_key(ticker, interval)
                     # Note: We don't actually delete, just let the manager detect and do full
 
                 # Fetch data
@@ -202,8 +200,8 @@ class BackfillRebuilder:
     def _has_recent_daily_data(self, ticker: str, max_days_old: int = 3) -> bool:
         """Check if ticker has recent daily data."""
         try:
-            daily_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
-            df = spaces_io.download_dataframe(daily_key)
+            data_key = daily_key(ticker)
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty:
                 return False
@@ -222,12 +220,9 @@ class BackfillRebuilder:
     def _has_recent_intraday_data(self, ticker: str, interval: str, max_days_old: int = 1) -> bool:
         """Check if ticker has recent intraday data."""
         try:
-            if interval == "1min":
-                intraday_key = config.get_spaces_path("data", "intraday", "1min", f"{ticker}.csv")
-            else:
-                intraday_key = config.get_spaces_path("data", "intraday", "30min", f"{ticker}.csv")
+            data_key = intraday_key(ticker, interval)
 
-            df = spaces_io.download_dataframe(intraday_key)
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty:
                 return False
@@ -339,8 +334,8 @@ class BackfillRebuilder:
         issues = []
 
         try:
-            daily_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
-            df = spaces_io.download_dataframe(daily_key)
+            data_key = daily_key(ticker)
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty:
                 issues.append(f"{ticker}: No daily data found")
@@ -370,14 +365,10 @@ class BackfillRebuilder:
         issues = []
 
         try:
-            if interval == "1min":
-                intraday_key = config.get_spaces_path("data", "intraday", "1min", f"{ticker}.csv")
-                min_rows = 1000
-            else:
-                intraday_key = config.get_spaces_path("data", "intraday", "30min", f"{ticker}.csv")
-                min_rows = 100
+            data_key = intraday_key(ticker, interval)
+            min_rows = 1000 if interval == "1min" else 100
 
-            df = spaces_io.download_dataframe(intraday_key)
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty:
                 issues.append(f"{ticker}: No {interval} data found")

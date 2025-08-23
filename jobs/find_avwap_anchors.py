@@ -11,6 +11,7 @@ import pandas as pd
 
 from utils.config import config
 from utils.logging_setup import get_logger
+from utils.paths import daily_key
 from utils.spaces_io import spaces_io
 from utils.time_utils import utc_now
 
@@ -108,8 +109,8 @@ class AVWAPAnchorDetector:
         """
         try:
             # Load daily data
-            daily_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
-            daily_df = spaces_io.download_dataframe(daily_key)
+            data_key = daily_key(ticker)
+            daily_df = spaces_io.download_dataframe(data_key)
 
             if daily_df is None or daily_df.empty:
                 logger.warning(f"No daily data found for {ticker}")

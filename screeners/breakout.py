@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from utils.config import config
+from utils.paths import daily_key
 from utils.logging_setup import get_logger
 from utils.spaces_io import spaces_io
 from utils.time_utils import utc_now
@@ -90,8 +91,8 @@ class BreakoutScreener:
     def screen_ticker(self, ticker: str) -> List[Dict]:
         """Screen a ticker for breakout setups."""
         try:
-            daily_key = config.get_spaces_path("data", "daily", f"{ticker}.csv")
-            df = spaces_io.download_dataframe(daily_key)
+            data_key = daily_key(ticker)
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty or len(df) < 25:
                 return []

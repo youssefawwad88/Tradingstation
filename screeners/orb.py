@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from utils.config import config
+from utils.paths import intraday_key
 from utils.logging_setup import get_logger
 from utils.spaces_io import spaces_io
 from utils.time_utils import (
@@ -132,8 +133,8 @@ class ORBScreener:
         """
         try:
             # Load 1-minute data
-            intraday_key = config.get_spaces_path("data", "intraday", "1min", f"{ticker}.csv")
-            df = spaces_io.download_dataframe(intraday_key)
+            data_key = intraday_key(ticker, "1min")
+            df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty:
                 logger.debug(f"No 1-minute data for {ticker}")
@@ -231,7 +232,7 @@ class ORBScreener:
                 return False
 
             sample_ticker = self.universe_tickers[0]
-            data_key = config.get_spaces_path("data", "intraday", "1min", f"{sample_ticker}.csv")
+            data_key = intraday_key(sample_ticker, "1min")
             df = spaces_io.download_dataframe(data_key)
 
             if df is None or df.empty:
