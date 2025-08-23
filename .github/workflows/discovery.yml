@@ -1,4 +1,4 @@
-name: System Discovery & Inventory
+name: System Discovery & Inventory (manual)
 
 on:
   workflow_dispatch:
@@ -9,6 +9,12 @@ on:
         default: 'dev'
         type: string
 
+  # 👇 Force GitHub to index the workflow by running once when the file changes
+  push:
+    branches: [ dev ]
+    paths:
+      - '.github/workflows/discovery.yml'
+
 jobs:
   discovery:
     runs-on: ubuntu-latest
@@ -17,7 +23,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ inputs.branch || 'dev' }}
           
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
