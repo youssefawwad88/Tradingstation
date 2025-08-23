@@ -937,16 +937,6 @@ class DataFetchManager:
             logger.error(f"provider_error ticker={ticker} interval={interval} error={e}")
             return False, False
 
-    def _log_startup_paths(self) -> None:
-        """Log startup path configuration (A)."""
-        from utils.paths import universe_key
-
-        data_root = config.DATA_ROOT
-        universe_path = universe_key()
-        write_prefix = f"{data_root}/intraday/1min/"
-
-        logger.info(f"paths DATA_ROOT={data_root}, UNIVERSE_KEY={universe_path}, write_prefix={write_prefix}")
-
     def _log_provider_fetch_metrics(
         self,
         symbol: str,
@@ -1061,6 +1051,9 @@ Legacy (deprecated):
         parser.error(f"Invalid --interval '{args.interval}'. Use: 1min, 30min, or all")
 
     manager = DataFetchManager()
+
+    # Log startup paths at main entry point (required by problem statement)
+    manager._log_startup_paths()
 
     # Override tickers if specified
     if args.tickers:
