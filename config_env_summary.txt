@@ -1,0 +1,18 @@
+# Configuration Environment Summary
+Generated: 2025-08-23T18:19:31+00:00
+
+## Environment Variables (names only)
+DATA_ROOT: NOT_SET
+UNIVERSE_KEY: NOT_SET
+SPACES_ENDPOINT: NOT_SET
+SPACES_REGION: NOT_SET
+SPACES_BUCKET_NAME: NOT_SET
+SPACES_BASE_PREFIX: NOT_SET
+DO_APP_ID: NOT_SET
+
+## Path Existence
+data: MISSING
+data/universe: MISSING
+data/signals: MISSING
+orchestrator: EXISTS
+utils: EXISTS

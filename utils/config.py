@@ -51,9 +51,9 @@ class Config:
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
     # === Data Layer Structure (Spaces paths) ===
-    SPACES_BASE_PREFIX: str = os.getenv("SPACES_BASE_PREFIX", "trading-system")
+    SPACES_BASE_PREFIX: str = os.getenv("SPACES_BASE_PREFIX", "data")
     DATA_ROOT: str = os.getenv("DATA_ROOT", "data")
-    UNIVERSE_KEY: str = os.getenv("UNIVERSE_KEY", "data/Universe/master_tickerlist.csv")
+    UNIVERSE_KEY: str = os.getenv("UNIVERSE_KEY", "data/universe/master_tickerlist.csv")
 
     # === Fallback Configuration ===
     FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL"]

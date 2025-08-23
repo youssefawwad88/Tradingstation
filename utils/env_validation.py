@@ -52,7 +52,7 @@ def validate_paths(data_root: str, universe_key: str) -> None:
         )
     
     # Validate UNIVERSE_KEY (case-sensitive)
-    expected_universe_key = "data/Universe/master_tickerlist.csv"
+    expected_universe_key = "data/universe/master_tickerlist.csv"
     if universe_key != expected_universe_key:
         raise RuntimeError(
             f'Invalid UNIVERSE_KEY. Expected "{expected_universe_key}", got: {universe_key}'
@@ -90,6 +90,17 @@ def validate_all_environment_variables() -> None:
         RuntimeError: If any validation fails
     """
     import os
+    from pathlib import Path
+    
+    # Load environment variables from .env file if it exists
+    try:
+        from dotenv import load_dotenv
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+    except ImportError:
+        # python-dotenv not installed, continue with system environment variables
+        pass
     
     # Get all required environment variables
     spaces_endpoint = os.getenv("SPACES_ENDPOINT", "")
@@ -102,3 +113,13 @@ def validate_all_environment_variables() -> None:
     validate_spaces_endpoint(spaces_endpoint, spaces_region)
     validate_paths(data_root, universe_key)
     validate_do_ids(do_app_id)
+
+
+if __name__ == "__main__":
+    """Run validation when executed directly."""
+    try:
+        validate_all_environment_variables()
+        print("✅ All environment variables validated successfully")
+    except RuntimeError as e:
+        print(f"❌ Environment validation failed: {e}")
+        exit(1)
