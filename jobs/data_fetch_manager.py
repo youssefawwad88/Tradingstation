@@ -709,21 +709,23 @@ class DataFetchManager:
         except Exception as e:
             logger.error(f"Error updating manifest for {ticker}:{interval}: {e}")
 
-    def fetch_intraday_data_with_metrics(self, ticker: str, interval: str) -> tuple[bool, bool]:
-        """Fetch intraday data with zero-row tracking for guardrails.
+    def _fetch_raw_intraday(self, ticker: str, interval: str, *, mode: str, countback: int = None) -> tuple[Optional[pd.DataFrame], dict]:
+        """Fetch raw intraday data from provider.
         
         Args:
             ticker: Stock symbol
-            interval: Time interval
+            interval: Time interval (1min or 30min)  
+            mode: Fetch mode ('compact' or 'heal')
+            countback: Optional countback for limiting data
             
         Returns:
-            Tuple of (success, had_zero_rows)
+            Tuple of (df, provider_meta)
         """
-        # Improved zero-row guardrail as per PR feedback
+        from datetime import timedelta
+        from utils.providers.router import get_candles
+        
         try:
-            # Fetch data using the provider
-            from datetime import timedelta
-            from utils.providers.router import get_candles
+            fetch_start_time = time.time()
             
             if interval == "1min":
                 # Fetch from required days back + today for 1min data
@@ -741,17 +743,187 @@ class DataFetchManager:
                 df = get_candles(
                     symbol=ticker,
                     resolution="30",
-                    countback=520,
+                    countback=countback or 520,
                     extended=config.INTRADAY_EXTENDED,
                 )
             
-            # Proper zero-row vs failure detection
+            # Provider metadata
+            provider_meta = {
+                "mode": mode,
+                "fetch_duration_ms": int((time.time() - fetch_start_time) * 1000),
+                "provider": "marketdata"
+            }
+            
+            return df, provider_meta
+            
+        except Exception as e:
+            logger.error(f"provider_error ticker={ticker} interval={interval} error={e}")
+            return None, {"error": str(e)}
+
+    def _process_intraday_df(self, df: pd.DataFrame, ticker: str, interval: str, *, force_full: bool = False) -> tuple[int, int, int, str, str, str]:
+        """Process intraday DataFrame and determine write actions.
+        
+        Args:
+            df: Raw DataFrame from provider
+            ticker: Stock symbol
+            interval: Time interval
+            force_full: Force full processing even if no new data
+            
+        Returns:
+            Tuple of (appended_rows, rows_before, rows_after, latest_ts, s3_key, write_meta_or_skip_reason)
+        """
+        try:
+            if interval == "1min":
+                data_key = intraday_key(ticker, "1min")
+                schema_name = "INTRADAY_1MIN"
+            else:
+                data_key = intraday_key(ticker, "30min")
+                schema_name = "INTRADAY_30MIN"
+
+            # Get existing data
+            existing_df = spaces_io.download_dataframe(data_key)
+            mode = self._determine_fetch_mode(existing_df, interval)
+            
+            # Merge with existing data
+            merged_df = self._merge_data(existing_df, df, interval)
+            if merged_df is None:
+                return 0, 0, 0, "none", data_key, "merge_failed"
+
+            # Apply retention policy
+            if interval == "1min":
+                trimmed_df = self._apply_1min_retention(merged_df)
+            else:
+                trimmed_df = self._apply_30min_retention(merged_df)
+
+            # Filter to market hours if configured
+            if not config.INTRADAY_EXTENDED:
+                trimmed_df = filter_market_hours(
+                    trimmed_df,
+                    include_premarket=False,
+                    include_afterhours=False,
+                )
+
+            # Validate and clean
+            is_valid, errors = validate_dataframe(trimmed_df, schema_name, ticker)
+            if not is_valid:
+                logger.warning(f"{interval} data validation failed for {ticker}: {errors}")
+                trimmed_df = clean_dataframe(trimmed_df, schema_name)
+
+            # Calculate metrics
+            rows_before = len(existing_df) if existing_df is not None and not existing_df.empty else 0
+            rows_after = len(trimmed_df)
+            appended_rows = rows_after - rows_before
+            
+            # Get latest timestamp
+            latest_ts = "none"
+            if not trimmed_df.empty and "timestamp" in trimmed_df.columns:
+                latest_timestamp = trimmed_df["timestamp"].max()
+                latest_ts = latest_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if pd.notna(latest_timestamp) else "none"
+
+            # Determine if we should write
+            should_write = False
+            if existing_df is None or existing_df.empty:
+                should_write = True
+            elif appended_rows > 0:
+                should_write = True
+            elif mode == "heal" or force_full:
+                should_write = True
+
+            if should_write:
+                # Upload to Spaces with atomic writes
+                metadata = {
+                    "symbol": ticker,
+                    "interval": interval,
+                    "mode": mode,
+                    "rows": str(len(trimmed_df)),
+                    "managed-by": "data_fetch_manager",
+                    "provider": "marketdata",
+                    "deployment": config.DEPLOYMENT_TAG or "unknown",
+                }
+
+                success = spaces_io.upload_dataframe(trimmed_df, data_key, metadata=metadata)
+                if success:
+                    # Get object metadata for enhanced logging
+                    obj_metadata = spaces_io.object_metadata(data_key)
+                    etag = obj_metadata.get("etag", "unknown") if obj_metadata else "unknown"
+                    size_bytes = obj_metadata.get("size", 0) if obj_metadata else 0
+                    last_modified_iso = obj_metadata.get("last_modified", "unknown") if obj_metadata else "unknown"
+
+                    write_meta = f"etag={etag} size={size_bytes} last_modified={last_modified_iso}"
+                    
+                    # Update manifest
+                    self._update_manifest(ticker, interval, trimmed_df, mode)
+                    
+                    return appended_rows, rows_before, rows_after, latest_ts, data_key, write_meta
+                else:
+                    return appended_rows, rows_before, rows_after, latest_ts, data_key, "upload_failed"
+            else:
+                return appended_rows, rows_before, rows_after, latest_ts, data_key, "no_new_rows"
+
+        except Exception as e:
+            logger.error(f"Error processing intraday data for {ticker}: {e}")
+            return 0, 0, 0, "none", data_key if 'data_key' in locals() else "unknown", f"error_{e}"
+
+    def fetch_intraday_data_with_metrics(self, ticker: str, interval: str, *, force_full: bool = False) -> tuple[bool, bool]:
+        """Fetch intraday data with zero-row tracking for guardrails.
+        
+        Args:
+            ticker: Stock symbol
+            interval: Time interval
+            force_full: Force full processing even if no new data
+            
+        Returns:
+            Tuple of (success, had_zero_rows)
+        """
+        try:
+            # Check provider health for 1min intervals
+            if interval == "1min":
+                from utils.providers.router import health_check
+                healthy, health_msg = health_check()
+                if not healthy:
+                    degraded_allowed = os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
+                    if degraded_allowed:
+                        logger.info(f"Provider degraded, skipping 1min intraday update: {health_msg}")
+                        return True, False  # Skip with success
+                    else:
+                        logger.error(f"Provider health check failed: {health_msg}")
+                        return False, False
+
+            # Determine mode and countback based on interval
+            if interval == "1min":
+                # For 1min, use consistent strategy
+                mode = "compact"  # Could be made configurable
+                countback = None  # Use time-based fetching
+            else:
+                mode = "compact"  
+                countback = 520
+
+            # Fetch raw data
+            df, provider_meta = self._fetch_raw_intraday(ticker, interval, mode=mode, countback=countback)
+            
+            # Log provider metrics with rows_fetched / first_ts / last_ts (tz=UTC)
+            if df is not None and not df.empty:
+                rows_fetched = len(df)
+                first_ts = df["timestamp"].min().strftime("%Y-%m-%dT%H:%M:%SZ") if "timestamp" in df.columns else "none"
+                last_ts = df["timestamp"].max().strftime("%Y-%m-%dT%H:%M:%SZ") if "timestamp" in df.columns else "none"
+                logger.info(f"provider_ok interval={interval} symbol={ticker} rows_fetched={rows_fetched} first_ts={first_ts} last_ts={last_ts} tz=UTC")
+            
+            # Proper success/empty/error detection
             success = df is not None and not df.empty
             zero_rows = df is not None and df.empty
             
             if success:
-                # Process the data normally using existing method
-                return self.fetch_intraday_data(ticker, interval), False
+                # Process the DataFrame
+                appended, rows_before, rows_after, latest_ts, s3_key, write_meta_or_skip = \
+                    self._process_intraday_df(df, ticker, interval, force_full=force_full)
+                
+                # Log write outcome
+                if write_meta_or_skip.startswith("etag="):
+                    logger.info(f"write_ok interval={interval} symbol={ticker} s3_key={s3_key} {write_meta_or_skip}")
+                else:
+                    logger.info(f"write_skip interval={interval} symbol={ticker} reason={write_meta_or_skip} s3_key={s3_key} latest_ts={latest_ts}")
+                
+                return True, False
             elif zero_rows:
                 logger.warning(f"Zero rows returned for {ticker} {interval} - provider returned empty dataset")
                 return False, True
