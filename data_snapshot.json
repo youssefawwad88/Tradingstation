@@ -1,0 +1,41 @@
+{
+  "data/daily": {
+    "exists": true,
+    "csv_count": 1,
+    "files": [
+      "sample_daily.csv"
+    ]
+  },
+  "data/intraday": {
+    "exists": true,
+    "csv_count": 1,
+    "files": [
+      "sample_1min.csv"
+    ]
+  },
+  "data/intraday_30min": {
+    "exists": true,
+    "csv_count": 1,
+    "files": [
+      "sample_30min.csv"
+    ]
+  },
+  "data/signals": {
+    "exists": true,
+    "csv_count": 6,
+    "files": [
+      "avwap_reclaim.csv",
+      "gapgo.csv",
+      "ema_pullback.csv",
+      "orb.csv",
+      "exhaustion_reversal.csv"
+    ]
+  },
+  "data/universe": {
+    "exists": true,
+    "csv_count": 1,
+    "files": [
+      "master_tickerlist.csv"
+    ]
+  }
+}

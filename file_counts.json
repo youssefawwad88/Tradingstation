@@ -1,0 +1,68 @@
+{
+  ".": {
+    "total_files": 21,
+    "python_files": 1,
+    "config_files": 7,
+    "md_files": 7
+  },
+  "orchestrator": {
+    "total_files": 4,
+    "python_files": 4,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "jobs": {
+    "total_files": 4,
+    "python_files": 4,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "tools": {
+    "total_files": 8,
+    "python_files": 8,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "docs": {
+    "total_files": 6,
+    "python_files": 0,
+    "config_files": 0,
+    "md_files": 6
+  },
+  "dashboard": {
+    "total_files": 4,
+    "python_files": 4,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "utils": {
+    "total_files": 12,
+    "python_files": 12,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "utils/__pycache__": {
+    "total_files": 2,
+    "python_files": 0,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "utils/providers": {
+    "total_files": 3,
+    "python_files": 3,
+    "config_files": 0,
+    "md_files": 0
+  },
+  "discovery_artifacts": {
+    "total_files": 2,
+    "python_files": 0,
+    "config_files": 1,
+    "md_files": 1
+  },
+  "screeners": {
+    "total_files": 7,
+    "python_files": 7,
+    "config_files": 0,
+    "md_files": 0
+  }
+}

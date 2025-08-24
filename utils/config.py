@@ -5,8 +5,10 @@ No secrets are stored in code - everything comes from environment variables.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 # Load environment variables from .env file if it exists
 try:
@@ -20,6 +22,77 @@ except ImportError:
     pass
 
 
+def _normalize_spaces_endpoint(
+    raw_endpoint: str, bucket_name: Optional[str] = None
+) -> str:
+    """Normalize SPACES_ENDPOINT to region-only format with scheme.
+
+    Args:
+        raw_endpoint: Raw endpoint from environment (may be bucket-hosted 
+            or region-only, with or without scheme)
+        bucket_name: Bucket name to extract from bucket-hosted endpoints
+
+    Returns:
+        Normalized endpoint: https://nyc3.digitaloceanspaces.com
+    """
+    if not raw_endpoint:
+        return "https://nyc3.digitaloceanspaces.com"
+
+    # Handle cases where endpoint might not have scheme
+    if not raw_endpoint.startswith(('http://', 'https://')):
+        raw_endpoint = f"https://{raw_endpoint}"
+
+    parsed = urlparse(raw_endpoint)
+    hostname = parsed.hostname or ""
+
+    # Check if it's a bucket-hosted format: bucket-name.region.digitaloceanspaces.com
+    if bucket_name and hostname.startswith(f"{bucket_name}."):
+        # Extract region host by removing bucket prefix
+        region_host = hostname[len(bucket_name) + 1:]  # +1 for the dot
+        return f"https://{region_host}"
+
+    # Check if it's already region-only format
+    if re.match(r'^[a-z0-9.-]*digitaloceanspaces\.com$', hostname):
+        return f"https://{hostname}"
+
+    # Default to nyc3 if we can't parse
+    return "https://nyc3.digitaloceanspaces.com"
+
+
+def _ensure_trailing_slash(prefix: str) -> str:
+    """Ensure prefix ends with a trailing slash.
+    
+    Args:
+        prefix: Base prefix string
+        
+    Returns:
+        Prefix with trailing slash
+    """
+    if not prefix:
+        return "data/"
+    return prefix if prefix.endswith('/') else prefix + '/'
+
+
+def _extract_region_from_endpoint(endpoint: str) -> str:
+    """Extract region name from endpoint URL.
+    
+    Args:
+        endpoint: Normalized endpoint URL
+        
+    Returns:
+        Region name (e.g., "nyc3")
+    """
+    parsed = urlparse(endpoint)
+    hostname = parsed.hostname or ""
+
+    # Extract region from hostname like nyc3.digitaloceanspaces.com
+    if '.digitaloceanspaces.com' in hostname:
+        region = hostname.replace('.digitaloceanspaces.com', '')
+        return region
+
+    return "nyc3"  # Default fallback
+
+
 class Config:
     """Central configuration class for all trading system settings."""
 
@@ -27,17 +100,27 @@ class Config:
     MARKETDATA_TOKEN: Optional[str] = os.getenv("MARKETDATA_TOKEN")
 
     # Environment variables for degraded mode
-    INTRADAY_EXTENDED: bool = os.getenv("INTRADAY_EXTENDED", "false").lower() == "true"
-    DEGRADE_INTRADAY_ON_STALE_MINUTES: int = int(os.getenv("DEGRADE_INTRADAY_ON_STALE_MINUTES", "5"))
-    PROVIDER_DEGRADED_ALLOWED: bool = os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
+    INTRADAY_EXTENDED: bool = (
+        os.getenv("INTRADAY_EXTENDED", "false").lower() == "true"
+    )
+    DEGRADE_INTRADAY_ON_STALE_MINUTES: int = int(
+        os.getenv("DEGRADE_INTRADAY_ON_STALE_MINUTES", "5")
+    )
+    PROVIDER_DEGRADED_ALLOWED: bool = (
+        os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
+    )
 
     # === DigitalOcean Spaces Configuration ===
     SPACES_ACCESS_KEY_ID: Optional[str] = os.getenv("SPACES_ACCESS_KEY_ID")
     SPACES_SECRET_ACCESS_KEY: Optional[str] = os.getenv("SPACES_SECRET_ACCESS_KEY")
     SPACES_BUCKET_NAME: Optional[str] = os.getenv("SPACES_BUCKET_NAME")
-    SPACES_REGION: str = os.getenv("SPACES_REGION", "nyc3")
-    SPACES_ENDPOINT: str = os.getenv("SPACES_ENDPOINT", f"https://{os.getenv('SPACES_REGION', 'nyc3')}.digitaloceanspaces.com")
-    
+
+    # Normalize endpoint from environment variable
+    _raw_endpoint = os.getenv("SPACES_ENDPOINT", "")
+    _bucket_name = os.getenv("SPACES_BUCKET_NAME", "")
+    SPACES_ENDPOINT: str = _normalize_spaces_endpoint(_raw_endpoint, _bucket_name)
+    SPACES_REGION: str = _extract_region_from_endpoint(SPACES_ENDPOINT)
+
     # === DigitalOcean App Configuration ===
     DO_APP_ID: Optional[str] = os.getenv("DO_APP_ID")
 
@@ -46,18 +129,41 @@ class Config:
     DEPLOYMENT_TAG: Optional[str] = os.getenv("DEPLOYMENT_TAG")
 
     # === Feature Flags ===
-    FETCH_EXTENDED_HOURS: bool = os.getenv("FETCH_EXTENDED_HOURS", "true").lower() == "true"
-    TEST_MODE_INIT_ALLOWED: bool = os.getenv("TEST_MODE_INIT_ALLOWED", "true").lower() == "true"
+    FETCH_EXTENDED_HOURS: bool = (
+        os.getenv("FETCH_EXTENDED_HOURS", "true").lower() == "true"
+    )
+    TEST_MODE_INIT_ALLOWED: bool = (
+        os.getenv("TEST_MODE_INIT_ALLOWED", "true").lower() == "true"
+    )
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
     # === Data Layer Structure (Spaces paths) ===
-    SPACES_BASE_PREFIX: str = os.getenv("SPACES_BASE_PREFIX", "trading-system")
+    SPACES_BASE_PREFIX: str = _ensure_trailing_slash(
+        os.getenv("SPACES_BASE_PREFIX", "data")
+    )
     DATA_ROOT: str = os.getenv("DATA_ROOT", "data")
-    UNIVERSE_KEY: str = os.getenv("UNIVERSE_KEY", "data/Universe/master_tickerlist.csv")
+    UNIVERSE_KEY: str = os.getenv(
+        "UNIVERSE_KEY", "data/universe/master_tickerlist.csv"
+    )
 
     # === Fallback Configuration ===
     FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL"]
-    MASTER_TICKERLIST_PATH: tuple[str, ...] = ("data", "universe", "master_tickerlist.csv")
+    MASTER_TICKERLIST_PATH: tuple[str, ...] = (
+        "data", "universe", "master_tickerlist.csv"
+    )
+
+    @classmethod
+    def get_spaces_origin_url(cls) -> str:
+        """Derive the bucket-hosted origin URL for Spaces.
+        
+        Returns:
+            Bucket origin URL: https://bucket-name.region.digitaloceanspaces.com/
+        """
+        if not cls.SPACES_BUCKET_NAME:
+            return ""
+
+        region_host = cls.SPACES_ENDPOINT.replace("https://", "").replace("http://", "")
+        return f"https://{cls.SPACES_BUCKET_NAME}.{region_host}/"
 
     @classmethod
     def get_spaces_path(cls, *path_parts: str) -> str:
@@ -185,4 +291,5 @@ SPACES_SECRET_ACCESS_KEY = config.SPACES_SECRET_ACCESS_KEY
 SPACES_BUCKET_NAME = config.SPACES_BUCKET_NAME
 SPACES_REGION = config.SPACES_REGION
 SPACES_ENDPOINT = config.SPACES_ENDPOINT
+SPACES_ORIGIN_URL = config.get_spaces_origin_url()
 DEBUG_MODE = config.DEBUG_MODE

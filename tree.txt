@@ -1,0 +1,78 @@
+.
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── DIGITALOCEAN_DEPLOYMENT_CONFIG.md
+├── DISCOVERY_REPORT.md
+├── LICENSE
+├── README.md
+├── REPO_VARIABLES_UPDATE.md
+├── SMOKE_TEST.md
+├── dashboard
+│   ├── __init__.py
+│   ├── master_dashboard.py
+│   ├── scoring.py
+│   └── trade_plans.py
+├── discovery_artifacts
+│   ├── DISCOVERY_REPORT.md
+│   └── discovery_results.json
+├── docs
+│   ├── DEPLOYMENT_VERIFICATION_GUIDE.md
+│   ├── ENV.md
+│   ├── RUNBOOK.md
+│   ├── SCHEMAS.md
+│   ├── SILENT_FAILURE_RESOLUTION_SUMMARY.md
+│   └── STRATEGY_GUIDE.md
+├── jobs
+│   ├── __init__.py
+│   ├── backfill_rebuilder.py
+│   ├── data_fetch_manager.py
+│   └── find_avwap_anchors.py
+├── orchestrator
+│   ├── __init__.py
+│   ├── modes.py
+│   ├── run_all.py
+│   └── schedules.py
+├── pyproject.toml
+├── requirements.txt
+├── runtime.txt
+├── screeners
+│   ├── __init__.py
+│   ├── avwap_reclaim.py
+│   ├── breakout.py
+│   ├── ema_pullback.py
+│   ├── exhaustion_reversal.py
+│   ├── gapgo.py
+│   └── orb.py
+├── test_path_fixes.py
+├── tools
+│   ├── __init__.py
+│   ├── discovery.py
+│   ├── health_check.py
+│   ├── inspect_spaces.py
+│   ├── repair_paths.py
+│   ├── seed_universe.py
+│   ├── smoke_test_e2e.py
+│   └── verify_deployment.py
+├── tree.txt
+└── utils
+    ├── __init__.py
+    ├── __pycache__
+    │   ├── __init__.cpython-312.pyc
+    │   └── env_validation.cpython-312.pyc
+    ├── config.py
+    ├── env_validation.py
+    ├── helpers.py
+    ├── logfmt.py
+    ├── logging_setup.py
+    ├── paths.py
+    ├── providers
+    │   ├── __init__.py
+    │   ├── marketdata.py
+    │   └── router.py
+    ├── rate_limit.py
+    ├── spaces_io.py
+    ├── time_utils.py
+    ├── universe.py
+    └── validation.py
+
+11 directories, 65 files
