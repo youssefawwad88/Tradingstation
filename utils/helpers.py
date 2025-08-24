@@ -49,6 +49,19 @@ def format_currency(amount: float, decimals: int = 2) -> str:
     return f"${amount:,.{decimals}f}"
 
 
+def get_s3_client(endpoint_url: str, region_name: str):
+    import boto3
+    import os
+    session = boto3.session.Session()
+    return session.client(
+        "s3",
+        endpoint_url=endpoint_url,   # region endpoint, not bucket-hosted
+        region_name=region_name,
+        aws_access_key_id=os.getenv("SPACES_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("SPACES_SECRET_ACCESS_KEY"),
+    )
+
+
 def format_percentage(value: float, decimals: int = 2) -> str:
     """Format value as percentage string.
     
