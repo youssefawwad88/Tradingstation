@@ -49,16 +49,17 @@ def format_currency(amount: float, decimals: int = 2) -> str:
     return f"${amount:,.{decimals}f}"
 
 
-def get_s3_client(endpoint_url: str, region_name: str):
+def get_s3_client():
+    """Get S3 client configured for DigitalOcean Spaces using Config values."""
     import boto3
-    import os
+    from utils.config import Config
+    
     session = boto3.session.Session()
     return session.client(
         "s3",
-        endpoint_url=endpoint_url,   # region endpoint, not bucket-hosted
-        region_name=region_name,
-        aws_access_key_id=os.getenv("SPACES_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("SPACES_SECRET_ACCESS_KEY"),
+        endpoint_url=Config.SPACES_ENDPOINT,   # region endpoint
+        aws_access_key_id=Config.SPACES_ACCESS_KEY_ID,
+        aws_secret_access_key=Config.SPACES_SECRET_ACCESS_KEY,
     )
 
 
