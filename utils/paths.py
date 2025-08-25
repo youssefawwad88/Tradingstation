@@ -126,16 +126,18 @@ def log_startup_paths() -> None:
     """Log path resolution on startup as required by instrumentation."""
     try:
         from utils.config import config
+        import sys
 
         sample_prefix = k(BASE, DATA_ROOT, "intraday", "1min")
         logger.info(
             f"paths_resolved base={BASE} data_root={DATA_ROOT} "
             f"universe_key={UNIVERSE_KEY} "
-            f"endpoint_normalized={config.SPACES_ENDPOINT} "
+            f"orchestrator=orchestrator/run_all.py "
+            f"endpoint={config.SPACES_ENDPOINT} "
             f"bucket={config.SPACES_BUCKET_NAME or 'not-set'} "
-            f"base_prefix={config.SPACES_BASE_PREFIX} "
-            f"origin_url={config.get_spaces_origin_url() or 'not-available'} "
-            f"orchestrator=orchestrator/run_all.py"
+            f"prefix={config.SPACES_BASE_PREFIX} "
+            f"origin_url={config.SPACES_ORIGIN_URL} "
+            f"python_version={sys.version.split()[0]}"
         )
     except ImportError:
         # Fallback logging without config

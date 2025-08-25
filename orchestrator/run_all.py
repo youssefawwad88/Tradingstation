@@ -21,7 +21,7 @@ sys.path.append(str(project_root))
 
 from orchestrator.schedules import due_every_minute, due_every_quarter_hour, due_once_at
 from utils.config import config
-from utils.env_validation import validate_spaces_endpoint, validate_paths, validate_do_ids
+from utils.env_validation import validate_spaces_endpoint, validate_paths, validate_do_ids, EnvValidator
 from utils.logging_setup import get_logger
 from utils.time_utils import get_market_time
 
@@ -190,10 +190,10 @@ def main():
     # Validate environment variables early - fail fast if misconfigured
     logger.info("🔍 Validating environment configuration...")
     try:
-        validate_spaces_endpoint(
-            os.getenv("SPACES_ENDPOINT", ""), 
-            os.getenv("SPACES_REGION", "")
-        )
+        # Accept both styles; validator handles optional param
+        from utils.env_validation import EnvValidator
+        validator = EnvValidator(config)
+        validator.validate_spaces_endpoint(config.SPACES_ENDPOINT)
         validate_paths(
             os.getenv("DATA_ROOT", ""), 
             os.getenv("UNIVERSE_KEY", "")

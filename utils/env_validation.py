@@ -3,12 +3,16 @@ from urllib.parse import urlparse
 from utils.config import Config
 
 def _extract_region_from_endpoint(endpoint: str) -> str:
-    parsed = urlparse(endpoint)
-    host = (parsed.hostname or "").lower()
-    if not host.endswith(".digitaloceanspaces.com"):
-        raise RuntimeError(f"Invalid endpoint hostname: {host}")
-    # 'nyc3.digitaloceanspaces.com' -> 'nyc3'
-    return host.removesuffix(".digitaloceanspaces.com").split(".")[0]
+    """Parse region from endpoint using robust URL parsing."""
+    # Normalize and parse robustly
+    parsed = urlparse(endpoint if "://" in endpoint else f"https://{endpoint}")
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname.endswith(".digitaloceanspaces.com"):
+        raise RuntimeError(f"Invalid endpoint hostname: {hostname}")
+    region = hostname.removesuffix(".digitaloceanspaces.com")
+    if not region:
+        raise RuntimeError("Could not parse region from SPACES_ENDPOINT")
+    return region
 
 def validate():
     endpoint = Config.SPACES_ENDPOINT
@@ -35,10 +39,12 @@ def validate():
     )
 
 
-# Legacy compatibility for existing validation functions
+# EnvValidator class for structured validation
 import os
+import re
 from pathlib import Path
 from typing import Optional
+from dataclasses import dataclass
 
 # Import here to avoid circular imports when needed  
 try:
@@ -47,6 +53,56 @@ try:
     HAS_BOTO3 = True
 except ImportError:
     HAS_BOTO3 = False
+
+
+class EnvValidator:
+    """Environment configuration validator."""
+    
+    def __init__(self, cfg):
+        self.cfg = cfg
+    
+    def validate_spaces_endpoint(self, endpoint: str | None = None):
+        """
+        Validate a DigitalOcean Spaces region endpoint.
+        Accepts optional explicit endpoint (for callers that pass it).
+        """
+        endpoint = endpoint or self.cfg.SPACES_ENDPOINT
+        if not endpoint:
+            raise RuntimeError("SPACES_ENDPOINT is empty")
+
+        # Normalize and parse robustly
+        parsed = urlparse(endpoint if "://" in endpoint else f"https://{endpoint}")
+        hostname = (parsed.hostname or "").strip().lower()
+        if not hostname.endswith(".digitaloceanspaces.com"):
+            raise RuntimeError(f"Invalid endpoint hostname: {hostname}")
+        region = hostname.removesuffix(".digitaloceanspaces.com")
+        if not region:
+            raise RuntimeError("Could not parse region from SPACES_ENDPOINT")
+        return region
+        
+    def validate_all(self):
+        """Run all validations and print summary."""
+        endpoint = self.cfg.SPACES_ENDPOINT
+        pattern = r"^https?://[a-z0-9.-]*digitaloceanspaces\.com/?$"
+        if not re.match(pattern, endpoint):
+            raise RuntimeError(f"SPACES_ENDPOINT invalid: {endpoint}")
+        if not self.cfg.SPACES_BUCKET_NAME:
+            raise RuntimeError("SPACES_BUCKET_NAME is empty")
+        if not self.cfg.SPACES_BASE_PREFIX.endswith("/"):
+            raise RuntimeError("SPACES_BASE_PREFIX must end with '/'")
+
+        # Get region for output
+        region = self.validate_spaces_endpoint()
+        print(
+            "env_summary:",
+            {
+                "endpoint_normalized": endpoint,
+                "bucket": self.cfg.SPACES_BUCKET_NAME,
+                "base_prefix": self.cfg.SPACES_BASE_PREFIX,
+                "origin_url": self.cfg.SPACES_ORIGIN_URL,
+                "region": region,
+            },
+        )
 
 
 def validate_spaces_endpoint(endpoint: str) -> None:
@@ -58,7 +114,17 @@ def validate_spaces_endpoint(endpoint: str) -> None:
     Raises:
         RuntimeError: If endpoint doesn't match expected format
     """
-    _validate_endpoint(endpoint)
+    # Use the robust parsing logic
+    if not endpoint:
+        raise RuntimeError("SPACES_ENDPOINT is empty")
+    
+    # Validate using regex pattern
+    pattern = r"^https?://[a-z0-9.-]*digitaloceanspaces\.com/?$"
+    if not re.match(pattern, endpoint):
+        raise RuntimeError(f"SPACES_ENDPOINT invalid: {endpoint}")
+    
+    # Parse region using robust method
+    _extract_region_from_endpoint(endpoint)
 
 
 def validate_spaces_bucket_name(bucket_name: Optional[str]) -> None:

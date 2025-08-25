@@ -15,14 +15,34 @@ except ImportError:
     # python-dotenv not installed, continue with system environment variables
     pass
 
-DEFAULT_SPACES_ENDPOINT = "https://nyc3.digitaloceanspaces.com"  # no magic strings
+DEFAULT_SPACES_ENDPOINT = "https://nyc3.digitaloceanspaces.com"
+DO_HOST_SUFFIX = ".digitaloceanspaces.com"
 
 
+def _normalize_spaces_endpoint(raw_endpoint: str | None) -> str:
+    if not raw_endpoint:
+        return DEFAULT_SPACES_ENDPOINT
+    ep = raw_endpoint.strip().lower()
+    if not ep:
+        return DEFAULT_SPACES_ENDPOINT
+    if not ep.startswith("http://") and not ep.startswith("https://"):
+        ep = "https://" + ep
+    from urllib.parse import urlparse
+    p = urlparse(ep)
+    host = (p.hostname or "").lower()
+    # If someone passed a bucket-hosted endpoint, strip the bucket to region host.
+    if host.endswith(DO_HOST_SUFFIX):
+        parts = host.split(".")
+        # e.g. ["trading-station-data-youssef","nyc3","digitaloceanspaces","com"]
+        if len(parts) >= 4:
+            # region host is the last 3 parts joined ("nyc3.digitaloceanspaces.com")
+            host = ".".join(parts[-3:])
 class Config:
     # ---- canonical paths ----
     DATA_ROOT: str = os.getenv("DATA_ROOT", "data")
     SPACES_BASE_PREFIX: str = os.getenv("SPACES_BASE_PREFIX", "data")
-    if not SPACES_BASE_PREFIX.endswith("/"):
+    # ensure trailing slash on base prefix
+    if SPACES_BASE_PREFIX and not SPACES_BASE_PREFIX.endswith("/"):
         SPACES_BASE_PREFIX += "/"
 
     UNIVERSE_KEY: str = os.getenv(
@@ -39,36 +59,14 @@ class Config:
     DEGRADE_INTRADAY_ON_STALE_MINUTES: int = int(os.getenv("DEGRADE_INTRADAY_ON_STALE_MINUTES", "5"))
     PROVIDER_DEGRADED_ALLOWED: bool = os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
 
-    # ---- Spaces normalization ----
-    @staticmethod
-    def _normalize_spaces_endpoint(raw_endpoint: str | None) -> str:
-        if not raw_endpoint:
-            return DEFAULT_SPACES_ENDPOINT
-        # accept bucket-hosted or region-only, with/without scheme
-        host = raw_endpoint.strip()
-        if "://" not in host:
-            host = f"https://{host}"
-        parsed = urlparse(host)
-        hostname = (parsed.hostname or "").lower()
-        if not hostname.endswith(".digitaloceanspaces.com"):
-            # assume legacy bare region like 'nyc3'
-            if "." not in hostname:
-                hostname = f"{hostname}.digitaloceanspaces.com"
-        # drop bucket prefix if present: <bucket>.<region>.digitaloceanspaces.com
-        parts = hostname.split(".")
-        # keep last 3 parts: nyc3.digitaloceanspaces.com
-        if len(parts) > 3:
-            hostname = ".".join(parts[-3:])
-        return f"https://{hostname}"
-
+    # ---- Spaces configuration ----
     SPACES_ENDPOINT_RAW: str = os.getenv("SPACES_ENDPOINT", "")
-    SPACES_ENDPOINT: str = _normalize_spaces_endpoint.__func__(SPACES_ENDPOINT_RAW)
+    SPACES_ENDPOINT: str = _normalize_spaces_endpoint(SPACES_ENDPOINT_RAW)
     SPACES_BUCKET_NAME: str = os.getenv("SPACES_BUCKET_NAME", "")
-    SPACES_ORIGIN_URL: str = (
-        f"https://{SPACES_BUCKET_NAME}.{urlparse(SPACES_ENDPOINT).hostname}/"
-        if SPACES_BUCKET_NAME and SPACES_ENDPOINT
-        else ""
-    )
+    
+    # derived public origin for dashboards
+    _host = urlparse(SPACES_ENDPOINT).hostname or DO_HOST_SUFFIX
+    SPACES_ORIGIN_URL: str = f"https://{SPACES_BUCKET_NAME}.{_host}/" if SPACES_BUCKET_NAME else ""
 
     # ---- API Keys ----
     MARKETDATA_TOKEN: str = os.getenv("MARKETDATA_TOKEN", "")
@@ -221,10 +219,11 @@ DEBUG_MODE = config.DEBUG_MODE
 # Logging line for canonical paths (used anywhere we print canonical paths)
 def print_paths_resolved():
     """Print canonical paths resolution summary."""
+    import sys
     print(
         "paths_resolved "
         f"base=trading-system data_root={config.DATA_ROOT} universe_key={config.UNIVERSE_KEY} "
         "orchestrator=orchestrator/run_all.py "
         f"endpoint={config.SPACES_ENDPOINT} bucket={config.SPACES_BUCKET_NAME} prefix={config.SPACES_BASE_PREFIX} "
-        f"origin_url={config.SPACES_ORIGIN_URL} python_version=3.11.9"
+        f"origin_url={config.SPACES_ORIGIN_URL} python_version={sys.version.split()[0]}"
     )
