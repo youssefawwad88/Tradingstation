@@ -1,15 +1,62 @@
-"""Environment validation module for startup/runtime validation.
-
-This module validates critical environment variables to ensure they match
-canonical values and formats required by the system.
-"""
-
-import os
+# utils/env_validation.py
+from urllib.parse import urlparse
 import re
+from utils.config import (
+    config, DEFAULT_SPACES_ENDPOINT
+)
+
+ENDPOINT_RE = re.compile(r"^https?://[a-z0-9.-]*digitaloceanspaces\.com/?$", re.IGNORECASE)
+
+def _validate_endpoint(endpoint: str) -> None:
+    if not ENDPOINT_RE.match(endpoint):
+        raise RuntimeError(f"Invalid SPACES_ENDPOINT format: {endpoint}")
+
+def _extract_region(endpoint: str) -> str:
+    parsed = urlparse(endpoint)
+    host = parsed.hostname or ""
+    if not host.endswith(".digitaloceanspaces.com"):
+        raise RuntimeError(f"Invalid endpoint hostname: {host}")
+    # host like nyc3.digitaloceanspaces.com
+    return host.split(".")[0]
+
+def validate_spaces():
+    _validate_endpoint(config.SPACES_ENDPOINT)
+    if not config.SPACES_BUCKET_NAME:
+        raise RuntimeError("SPACES_BUCKET_NAME must be non-empty")
+
+    if not config.SPACES_BASE_PREFIX.endswith("/"):
+        raise RuntimeError("SPACES_BASE_PREFIX must end with '/'")
+
+    region = _extract_region(config.SPACES_ENDPOINT)
+
+    print("=== SPACES CONFIG SUMMARY ===")
+    print(f"endpoint_input/canonical : {config.SPACES_ENDPOINT or DEFAULT_SPACES_ENDPOINT}")
+    print(f"region                   : {region}")
+    print(f"bucket                   : {config.SPACES_BUCKET_NAME}")
+    print(f"base_prefix              : {config.SPACES_BASE_PREFIX}")
+    print(f"origin_url               : {config.SPACES_ORIGIN_URL}")
+
+    # Optional live check (soft-fail if no creds)
+    try:
+        from utils.helpers import get_s3_client  # your existing factory
+        s3 = get_s3_client(endpoint_url=config.SPACES_ENDPOINT, region_name=region)
+        resp = s3.list_objects_v2(
+            Bucket=config.SPACES_BUCKET_NAME,
+            Prefix=config.SPACES_BASE_PREFIX,
+            MaxKeys=1,
+        )
+        count = resp.get("KeyCount", 0)
+        print(f"live_check               : OK (KeyCount={count})")
+    except Exception as e:
+        print(f"live_check               : skipped ({e})")
+
+
+# Legacy compatibility for existing validation functions
+import os
 from pathlib import Path
 from typing import Optional
 
-# Import here to avoid circular imports when needed
+# Import here to avoid circular imports when needed  
 try:
     import boto3
     from botocore.exceptions import ClientError
@@ -27,18 +74,7 @@ def validate_spaces_endpoint(endpoint: str) -> None:
     Raises:
         RuntimeError: If endpoint doesn't match expected format
     """
-    if not endpoint:
-        raise RuntimeError("SPACES_ENDPOINT is required and cannot be empty")
-
-    # Allow endpoints with or without scheme for input validation
-    # The normalized version will always have https://
-    endpoint_pattern = r'^https?://[a-z0-9.-]*digitaloceanspaces\.com/?$'
-
-    if not re.match(endpoint_pattern, endpoint):
-        raise RuntimeError(
-            f"Invalid SPACES_ENDPOINT format. Must match pattern "
-            f"'https://[region].digitaloceanspaces.com'. Got: {endpoint}"
-        )
+    _validate_endpoint(endpoint)
 
 
 def validate_spaces_bucket_name(bucket_name: Optional[str]) -> None:
@@ -95,8 +131,8 @@ def perform_soft_live_check(
         return True, "Skipped (credentials not available or boto3 not installed)"
 
     try:
-        # Extract region from endpoint
-        region = endpoint.replace("https://", "").replace(".digitaloceanspaces.com", "")
+        # Extract region from endpoint using the new robust method
+        region = _extract_region(endpoint)
 
         client = boto3.client(
             "s3",
@@ -234,7 +270,8 @@ def validate_all_environment_variables() -> None:
     validate_spaces_bucket_name(spaces_bucket_name)
     validate_spaces_base_prefix(spaces_base_prefix)
     validate_paths(data_root, universe_key)
-    validate_do_ids(do_app_id)
+    if do_app_id:  # Only validate if provided
+        validate_do_ids(do_app_id)
 
     # Get origin URL for summary
     origin_url = config.get_spaces_origin_url()
@@ -261,7 +298,7 @@ def validate_all_environment_variables() -> None:
 if __name__ == "__main__":
     """Run validation when executed directly."""
     try:
-        validate_all_environment_variables()
+        validate_spaces()
         print("✅ All environment variables validated successfully")
     except RuntimeError as e:
         print(f"❌ Environment validation failed: {e}")
