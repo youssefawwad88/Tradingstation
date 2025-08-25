@@ -30,6 +30,12 @@ def _normalize_spaces_endpoint(raw_endpoint: str | None) -> str:
     from urllib.parse import urlparse
     p = urlparse(ep)
     host = (p.hostname or "").lower()
+    
+    # Handle bare region names (like 'nyc3')
+    if host and not host.endswith(DO_HOST_SUFFIX):
+        if "." not in host:
+            host = f"{host}.digitaloceanspaces.com"
+    
     # If someone passed a bucket-hosted endpoint, strip the bucket to region host.
     if host.endswith(DO_HOST_SUFFIX):
         parts = host.split(".")
@@ -37,6 +43,9 @@ def _normalize_spaces_endpoint(raw_endpoint: str | None) -> str:
         if len(parts) >= 4:
             # region host is the last 3 parts joined ("nyc3.digitaloceanspaces.com")
             host = ".".join(parts[-3:])
+    return f"https://{host}"
+
+
 class Config:
     # ---- canonical paths ----
     DATA_ROOT: str = os.getenv("DATA_ROOT", "data")

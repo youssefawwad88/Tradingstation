@@ -9,7 +9,16 @@ def _extract_region_from_endpoint(endpoint: str) -> str:
     hostname = (parsed.hostname or "").strip().lower()
     if not hostname.endswith(".digitaloceanspaces.com"):
         raise RuntimeError(f"Invalid endpoint hostname: {hostname}")
-    region = hostname.removesuffix(".digitaloceanspaces.com")
+    
+    # Extract region, handling bucket-hosted endpoints
+    if hostname.endswith(".digitaloceanspaces.com"):
+        parts = hostname.removesuffix(".digitaloceanspaces.com").split(".")
+        # For bucket-hosted URLs like "bucket.region", take the last part (region)
+        # For region-only URLs like "region", take the only part
+        region = parts[-1] if parts else ""
+    else:
+        region = hostname.removesuffix(".digitaloceanspaces.com")
+    
     if not region:
         raise RuntimeError("Could not parse region from SPACES_ENDPOINT")
     return region
