@@ -3,55 +3,6 @@ from __future__ import annotations
 import os
 from urllib.parse import urlparse
 
-# ---- Constants (no magic strings in code) ----
-DEFAULT_SPACES_REGION = os.getenv("SPACES_REGION_DEFAULT", "nyc3")
-DEFAULT_SPACES_ENDPOINT = f"https://{DEFAULT_SPACES_REGION}.digitaloceanspaces.com"
-
-def _ensure_scheme(host_or_url: str) -> str:
-    if not host_or_url:
-        return DEFAULT_SPACES_ENDPOINT
-    if host_or_url.startswith("http://") or host_or_url.startswith("https://"):
-        return host_or_url
-    return "https://" + host_or_url
-
-def normalize_spaces_endpoint(raw_endpoint: str) -> str:
-    """
-    Accepts any of:
-      - nyc3.digitaloceanspaces.com
-      - https://nyc3.digitaloceanspaces.com
-      - trading-station-data-youssef.nyc3.digitaloceanspaces.com
-      - https://trading-station-data-youssef.nyc3.digitaloceanspaces.com
-    Returns canonical region endpoint: https://<region>.digitaloceanspaces.com
-    """
-    ep = _ensure_scheme(raw_endpoint)
-    parsed = urlparse(ep)
-    host = (parsed.hostname or "").lower()
-
-    if not host.endswith(".digitaloceanspaces.com"):
-        # Fallback to default if someone fed us garbage
-        return DEFAULT_SPACES_ENDPOINT
-
-    parts = host.split(".")
-    # bucket-hosted = my-bucket.nyc3.digitaloceanspaces.com
-    # region-only   = nyc3.digitaloceanspaces.com
-    if len(parts) >= 4 and parts[-3].isdigit() is False:  # heuristic: bucket-hosted has 4+ segments
-        region = parts[-3]  # nyc3
-    else:
-        region = parts[0]   # nyc3
-
-    return f"https://{region}.digitaloceanspaces.com"
-
-def normalize_prefix(prefix: str | None) -> str:
-    p = (prefix or "").strip()
-    if not p:
-        return "data/"
-    return p if p.endswith("/") else p + "/"
-
-def derive_origin_url(bucket: str, endpoint_url: str) -> str:
-    host = urlparse(_ensure_scheme(endpoint_url)).hostname or ""
-    # host is like nyc3.digitaloceanspaces.com
-    return f"https://{bucket}.{host}/"
-
 # Load environment variables from .env file if it exists
 try:
     from dotenv import load_dotenv
@@ -64,145 +15,118 @@ except ImportError:
     # python-dotenv not installed, continue with system environment variables
     pass
 
+DEFAULT_SPACES_ENDPOINT = "https://nyc3.digitaloceanspaces.com"  # no magic strings
+
 
 class Config:
-    """Central configuration class for all trading system settings."""
+    # ---- canonical paths ----
+    DATA_ROOT: str = os.getenv("DATA_ROOT", "data")
+    SPACES_BASE_PREFIX: str = os.getenv("SPACES_BASE_PREFIX", "data")
+    if not SPACES_BASE_PREFIX.endswith("/"):
+        SPACES_BASE_PREFIX += "/"
 
-    # === API Keys ===
-    MARKETDATA_TOKEN: Optional[str] = os.getenv("MARKETDATA_TOKEN")
+    UNIVERSE_KEY: str = os.getenv(
+        "UNIVERSE_KEY",
+        "data/universe/master_tickerlist.csv",
+    )
 
-    # === DigitalOcean Spaces Configuration ===
-    SPACES_ACCESS_KEY_ID: Optional[str] = os.getenv("SPACES_ACCESS_KEY_ID")
-    SPACES_SECRET_ACCESS_KEY: Optional[str] = os.getenv("SPACES_SECRET_ACCESS_KEY")
-    
-    SPACES_ENDPOINT_RAW = os.getenv("SPACES_ENDPOINT", "")
-    SPACES_ENDPOINT = normalize_spaces_endpoint(SPACES_ENDPOINT_RAW)
+    # ---- de-duplicated constants ----
+    FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL"]
+    MASTER_TICKERLIST_PATH: tuple[str, ...] = ("data", "universe", "master_tickerlist.csv")
 
-    SPACES_BUCKET_NAME = os.getenv("SPACES_BUCKET_NAME", "").strip()
-    SPACES_BASE_PREFIX = normalize_prefix(os.getenv("SPACES_BASE_PREFIX", "data/"))
-
-    DATA_ROOT = os.getenv("DATA_ROOT", "data")
-    UNIVERSE_KEY = os.getenv("UNIVERSE_KEY", "data/universe/master_tickerlist.csv")
-
-    # Boolean/int envs (single-line style per review)
+    # ---- simple booleans in single lines (nit acceptance) ----
     INTRADAY_EXTENDED: bool = os.getenv("INTRADAY_EXTENDED", "false").lower() == "true"
     DEGRADE_INTRADAY_ON_STALE_MINUTES: int = int(os.getenv("DEGRADE_INTRADAY_ON_STALE_MINUTES", "5"))
     PROVIDER_DEGRADED_ALLOWED: bool = os.getenv("PROVIDER_DEGRADED_ALLOWED", "true").lower() == "true"
 
-    # Derived, read-only
-    SPACES_ORIGIN_URL = derive_origin_url(SPACES_BUCKET_NAME, SPACES_ENDPOINT)
-    SPACES_REGION: str = urlparse(SPACES_ENDPOINT).hostname.split('.')[0] if urlparse(SPACES_ENDPOINT).hostname else DEFAULT_SPACES_REGION
+    # ---- Spaces normalization ----
+    @staticmethod
+    def _normalize_spaces_endpoint(raw_endpoint: str | None) -> str:
+        if not raw_endpoint:
+            return DEFAULT_SPACES_ENDPOINT
+        # accept bucket-hosted or region-only, with/without scheme
+        host = raw_endpoint.strip()
+        if "://" not in host:
+            host = f"https://{host}"
+        parsed = urlparse(host)
+        hostname = (parsed.hostname or "").lower()
+        if not hostname.endswith(".digitaloceanspaces.com"):
+            # assume legacy bare region like 'nyc3'
+            if "." not in hostname:
+                hostname = f"{hostname}.digitaloceanspaces.com"
+        # drop bucket prefix if present: <bucket>.<region>.digitaloceanspaces.com
+        parts = hostname.split(".")
+        # keep last 3 parts: nyc3.digitaloceanspaces.com
+        if len(parts) > 3:
+            hostname = ".".join(parts[-3:])
+        return f"https://{hostname}"
 
-    # === DigitalOcean App Configuration ===
-    DO_APP_ID: Optional[str] = os.getenv("DO_APP_ID")
+    SPACES_ENDPOINT_RAW: str = os.getenv("SPACES_ENDPOINT", "")
+    SPACES_ENDPOINT: str = _normalize_spaces_endpoint.__func__(SPACES_ENDPOINT_RAW)
+    SPACES_BUCKET_NAME: str = os.getenv("SPACES_BUCKET_NAME", "")
+    SPACES_ORIGIN_URL: str = (
+        f"https://{SPACES_BUCKET_NAME}.{urlparse(SPACES_ENDPOINT).hostname}/"
+        if SPACES_BUCKET_NAME and SPACES_ENDPOINT
+        else ""
+    )
 
-    # === Application Environment ===
+    # ---- API Keys ----
+    MARKETDATA_TOKEN: str = os.getenv("MARKETDATA_TOKEN", "")
+    SPACES_ACCESS_KEY_ID: str = os.getenv("SPACES_ACCESS_KEY_ID", "")
+    SPACES_SECRET_ACCESS_KEY: str = os.getenv("SPACES_SECRET_ACCESS_KEY", "")
+    
+    # ---- DigitalOcean App Configuration ----
+    DO_APP_ID: str = os.getenv("DO_APP_ID", "")
+
+    # ---- Application Environment ----
     APP_ENV: str = os.getenv("APP_ENV", "development")
-    DEPLOYMENT_TAG: Optional[str] = os.getenv("DEPLOYMENT_TAG")
+    DEPLOYMENT_TAG: str = os.getenv("DEPLOYMENT_TAG", "")
 
-    # === Feature Flags ===
+    # ---- Feature Flags ----
     FETCH_EXTENDED_HOURS: bool = os.getenv("FETCH_EXTENDED_HOURS", "true").lower() == "true"
     TEST_MODE_INIT_ALLOWED: bool = os.getenv("TEST_MODE_INIT_ALLOWED", "true").lower() == "true"
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
-    # === Fallback Configuration ===
-    FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL"]
-    MASTER_TICKERLIST_PATH: tuple[str, ...] = (
-        "data", "universe", "master_tickerlist.csv"
-    )
-
-    # === Data Retention Windows ===
+    # ---- Data Retention Windows ----
     INTRADAY_1MIN_RETENTION_DAYS: int = int(os.getenv("INTRADAY_1MIN_RETENTION_DAYS", "7"))
     INTRADAY_30MIN_RETENTION_ROWS: int = int(os.getenv("INTRADAY_30MIN_RETENTION_ROWS", "500"))
     DAILY_RETENTION_ROWS: int = int(os.getenv("DAILY_RETENTION_ROWS", "200"))
 
-    # === Data Fetch Constants ===
+    # ---- Data Fetch Constants ----
     ONE_MIN_REQUIRED_DAYS: int = 7  # 7 days + today for 1min data retention
 
-    # === Processing Controls ===
+    # ---- Processing Controls ----
     MAX_TICKERS_PER_RUN: int = int(os.getenv("MAX_TICKERS_PER_RUN", "25"))
     API_RATE_LIMIT_CALLS_PER_MINUTE: int = int(os.getenv("API_RATE_LIMIT_CALLS_PER_MINUTE", "150"))
 
-    # === Market Schedule ===
+    # ---- Market Schedule ----
     TIMEZONE: str = os.getenv("TIMEZONE", "America/New_York")
     MARKET_OPEN_HOUR: int = 9
     MARKET_OPEN_MINUTE: int = 30
     MARKET_CLOSE_HOUR: int = 16
     MARKET_CLOSE_MINUTE: int = 0
 
-    # === Gap & Go Strategy Configuration ===
+    # ---- Gap & Go Strategy Configuration ----
     MIN_GAP_LONG_PCT: float = float(os.getenv("MIN_GAP_LONG_PCT", "2.0"))
     MIN_GAP_SHORT_PCT: float = float(os.getenv("MIN_GAP_SHORT_PCT", "-2.0"))
     VOLUME_SPIKE_THRESHOLD: float = float(os.getenv("VOLUME_SPIKE_THRESHOLD", "1.15"))
     BREAKOUT_TIME_GUARD_MINUTES: int = int(os.getenv("BREAKOUT_TIME_GUARD_MINUTES", "6"))  # 09:36
 
-    # === Risk Management ===
+    # ---- Risk Management ----
     ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "100000"))
     MAX_RISK_PER_TRADE_PCT: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "2.0"))
     MAX_DAILY_RISK_PCT: float = float(os.getenv("MAX_DAILY_RISK_PCT", "6.0"))
     DEFAULT_POSITION_SIZE_SHARES: int = int(os.getenv("DEFAULT_POSITION_SIZE_SHARES", "100"))
 
-    # === File Size Thresholds ===
+    # ---- File Size Thresholds ----
     MIN_FILE_SIZE_BYTES: int = int(os.getenv("MIN_FILE_SIZE_BYTES", "10240"))  # 10KB
 
+    # ---- path join helper (single definition) ----
     @classmethod
-    def get_spaces_path(cls, *path_parts: str) -> str:
-        """Get a complete Spaces object path."""
-        return f"{cls.SPACES_BASE_PREFIX}/" + "/".join(path_parts)
-
-    # === Fallback Configuration ===
-    FALLBACK_TICKERS: list[str] = ["NVDA", "AAPL", "TSLA", "MSFT", "GOOGL"]
-    MASTER_TICKERLIST_PATH: tuple[str, ...] = (
-        "data", "universe", "master_tickerlist.csv"
-    )
-
-    @classmethod
-    def get_spaces_origin_url(cls) -> str:
-        """Derive the bucket-hosted origin URL for Spaces.
-        
-        Returns:
-            Bucket origin URL: https://bucket-name.region.digitaloceanspaces.com/
-        """
-        return derive_origin_url(cls.SPACES_BUCKET_NAME or "", cls.SPACES_ENDPOINT)
-
-    @classmethod
-    def get_spaces_path(cls, *path_parts: str) -> str:
-        """Get a complete Spaces object path."""
-        return f"{cls.SPACES_BASE_PREFIX}/" + "/".join(path_parts)
-
-    # === Data Retention Windows ===
-    INTRADAY_1MIN_RETENTION_DAYS: int = int(os.getenv("INTRADAY_1MIN_RETENTION_DAYS", "7"))
-    INTRADAY_30MIN_RETENTION_ROWS: int = int(os.getenv("INTRADAY_30MIN_RETENTION_ROWS", "500"))
-    DAILY_RETENTION_ROWS: int = int(os.getenv("DAILY_RETENTION_ROWS", "200"))
-
-    # === Data Fetch Constants ===
-    ONE_MIN_REQUIRED_DAYS: int = 7  # 7 days + today for 1min data retention
-
-    # === Processing Controls ===
-    MAX_TICKERS_PER_RUN: int = int(os.getenv("MAX_TICKERS_PER_RUN", "25"))
-    API_RATE_LIMIT_CALLS_PER_MINUTE: int = int(os.getenv("API_RATE_LIMIT_CALLS_PER_MINUTE", "150"))
-
-    # === Market Schedule ===
-    TIMEZONE: str = os.getenv("TIMEZONE", "America/New_York")
-    MARKET_OPEN_HOUR: int = 9
-    MARKET_OPEN_MINUTE: int = 30
-    MARKET_CLOSE_HOUR: int = 16
-    MARKET_CLOSE_MINUTE: int = 0
-
-    # === Gap & Go Strategy Configuration ===
-    MIN_GAP_LONG_PCT: float = float(os.getenv("MIN_GAP_LONG_PCT", "2.0"))
-    MIN_GAP_SHORT_PCT: float = float(os.getenv("MIN_GAP_SHORT_PCT", "-2.0"))
-    VOLUME_SPIKE_THRESHOLD: float = float(os.getenv("VOLUME_SPIKE_THRESHOLD", "1.15"))
-    BREAKOUT_TIME_GUARD_MINUTES: int = int(os.getenv("BREAKOUT_TIME_GUARD_MINUTES", "6"))  # 09:36
-
-    # === Risk Management ===
-    ACCOUNT_SIZE: float = float(os.getenv("ACCOUNT_SIZE", "100000"))
-    MAX_RISK_PER_TRADE_PCT: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "2.0"))
-    MAX_DAILY_RISK_PCT: float = float(os.getenv("MAX_DAILY_RISK_PCT", "6.0"))
-    DEFAULT_POSITION_SIZE_SHARES: int = int(os.getenv("DEFAULT_POSITION_SIZE_SHARES", "100"))
-
-    # === File Size Thresholds ===
-    MIN_FILE_SIZE_BYTES: int = int(os.getenv("MIN_FILE_SIZE_BYTES", "10240"))  # 10KB
+    def get_spaces_path(cls, *parts: str) -> str:
+        # avoid '//' if part already has a leading slash
+        suffix = "/".join(p.strip("/") for p in parts if p)
+        return f"{cls.SPACES_BASE_PREFIX}{suffix}" if suffix else cls.SPACES_BASE_PREFIX
 
     @classmethod
     def validate_configuration(cls) -> tuple[bool, list[str]]:
@@ -289,9 +213,9 @@ MARKETDATA_TOKEN = config.MARKETDATA_TOKEN
 SPACES_ACCESS_KEY_ID = config.SPACES_ACCESS_KEY_ID
 SPACES_SECRET_ACCESS_KEY = config.SPACES_SECRET_ACCESS_KEY
 SPACES_BUCKET_NAME = config.SPACES_BUCKET_NAME
-SPACES_REGION = config.SPACES_REGION
+SPACES_REGION = urlparse(config.SPACES_ENDPOINT).hostname.split('.')[0] if urlparse(config.SPACES_ENDPOINT).hostname else "nyc3"
 SPACES_ENDPOINT = config.SPACES_ENDPOINT
-SPACES_ORIGIN_URL = config.get_spaces_origin_url()
+SPACES_ORIGIN_URL = config.SPACES_ORIGIN_URL
 DEBUG_MODE = config.DEBUG_MODE
 
 # Logging line for canonical paths (used anywhere we print canonical paths)

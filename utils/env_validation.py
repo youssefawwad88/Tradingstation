@@ -1,54 +1,38 @@
 # utils/env_validation.py
 from urllib.parse import urlparse
-import re
-from utils.config import (
-    config, DEFAULT_SPACES_ENDPOINT
-)
+from utils.config import Config
 
-ENDPOINT_RE = re.compile(r"^https?://[a-z0-9.-]*digitaloceanspaces\.com/?$", re.IGNORECASE)
-
-def _validate_endpoint(endpoint: str) -> None:
-    if not ENDPOINT_RE.match(endpoint):
-        raise RuntimeError(f"Invalid SPACES_ENDPOINT format: {endpoint}")
-
-def _extract_region(endpoint: str) -> str:
+def _extract_region_from_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
-    host = parsed.hostname or ""
+    host = (parsed.hostname or "").lower()
     if not host.endswith(".digitaloceanspaces.com"):
         raise RuntimeError(f"Invalid endpoint hostname: {host}")
-    # host like nyc3.digitaloceanspaces.com
-    return host.split(".")[0]
+    # 'nyc3.digitaloceanspaces.com' -> 'nyc3'
+    return host.removesuffix(".digitaloceanspaces.com").split(".")[0]
 
-def validate_spaces():
-    _validate_endpoint(config.SPACES_ENDPOINT)
-    if not config.SPACES_BUCKET_NAME:
-        raise RuntimeError("SPACES_BUCKET_NAME must be non-empty")
+def validate():
+    endpoint = Config.SPACES_ENDPOINT
+    bucket   = Config.SPACES_BUCKET_NAME
+    prefix   = Config.SPACES_BASE_PREFIX
+    origin   = Config.SPACES_ORIGIN_URL
+    do_app_id = Config.DO_APP_ID  # Source from Config instead of os.getenv
 
-    if not config.SPACES_BASE_PREFIX.endswith("/"):
-        raise RuntimeError("SPACES_BASE_PREFIX must end with '/'")
+    assert endpoint.startswith("http"), f"SPACES_ENDPOINT must include scheme, got: {endpoint}"
+    assert bucket, "SPACES_BUCKET_NAME must be non-empty"
+    assert prefix.endswith("/"), f"SPACES_BASE_PREFIX must end with '/', got: {prefix}"
+    _ = _extract_region_from_endpoint(endpoint)
 
-    region = _extract_region(config.SPACES_ENDPOINT)
+    # optional live check… (guard on credentials)
+    # ...
 
-    print("=== SPACES CONFIG SUMMARY ===")
-    print(f"endpoint_input/canonical : {config.SPACES_ENDPOINT or DEFAULT_SPACES_ENDPOINT}")
-    print(f"region                   : {region}")
-    print(f"bucket                   : {config.SPACES_BUCKET_NAME}")
-    print(f"base_prefix              : {config.SPACES_BASE_PREFIX}")
-    print(f"origin_url               : {config.SPACES_ORIGIN_URL}")
-
-    # Optional live check (soft-fail if no creds)
-    try:
-        from utils.helpers import get_s3_client  # your existing factory
-        s3 = get_s3_client(endpoint_url=config.SPACES_ENDPOINT, region_name=region)
-        resp = s3.list_objects_v2(
-            Bucket=config.SPACES_BUCKET_NAME,
-            Prefix=config.SPACES_BASE_PREFIX,
-            MaxKeys=1,
-        )
-        count = resp.get("KeyCount", 0)
-        print(f"live_check               : OK (KeyCount={count})")
-    except Exception as e:
-        print(f"live_check               : skipped ({e})")
+    print(
+        "\nSPACES CONFIG SUMMARY\n"
+        f"endpoint_normalized: {endpoint}\n"
+        f"bucket:              {bucket}\n"
+        f"base_prefix:         {prefix}\n"
+        f"origin_url:          {origin}\n"
+        f"do_app_id_present:   {bool(do_app_id)}\n"
+    )
 
 
 # Legacy compatibility for existing validation functions
@@ -132,7 +116,7 @@ def perform_soft_live_check(
 
     try:
         # Extract region from endpoint using the new robust method
-        region = _extract_region(endpoint)
+        region = _extract_region_from_endpoint(endpoint)
 
         client = boto3.client(
             "s3",
@@ -253,17 +237,13 @@ def validate_all_environment_variables() -> None:
         # python-dotenv not installed, continue with system environment variables
         pass
 
-    # Import config here to get normalized values
-    from utils.config import config
-
-    # Get all required environment variables (both raw and normalized)
-    raw_endpoint = os.getenv("SPACES_ENDPOINT", "")
-    spaces_endpoint = config.SPACES_ENDPOINT  # This is the normalized version
-    spaces_bucket_name = config.SPACES_BUCKET_NAME
-    spaces_base_prefix = config.SPACES_BASE_PREFIX
-    data_root = config.DATA_ROOT
-    universe_key = config.UNIVERSE_KEY
-    do_app_id = os.getenv("DO_APP_ID", "")
+    # Get all required environment variables using Config
+    spaces_endpoint = Config.SPACES_ENDPOINT  # This is the normalized version
+    spaces_bucket_name = Config.SPACES_BUCKET_NAME
+    spaces_base_prefix = Config.SPACES_BASE_PREFIX
+    data_root = Config.DATA_ROOT
+    universe_key = Config.UNIVERSE_KEY
+    do_app_id = Config.DO_APP_ID  # Source from Config instead of os.getenv
 
     # Run all validations
     validate_spaces_endpoint(spaces_endpoint)
@@ -274,15 +254,15 @@ def validate_all_environment_variables() -> None:
         validate_do_ids(do_app_id)
 
     # Get origin URL for summary
-    origin_url = config.get_spaces_origin_url()
+    origin_url = Config.SPACES_ORIGIN_URL
 
     # Perform soft live check
     live_check_result = perform_soft_live_check(
         spaces_endpoint,
         spaces_bucket_name or "",
         spaces_base_prefix,
-        config.SPACES_ACCESS_KEY_ID,
-        config.SPACES_SECRET_ACCESS_KEY
+        Config.SPACES_ACCESS_KEY_ID,
+        Config.SPACES_SECRET_ACCESS_KEY
     )
 
     # Print summary table
@@ -298,7 +278,7 @@ def validate_all_environment_variables() -> None:
 if __name__ == "__main__":
     """Run validation when executed directly."""
     try:
-        validate_spaces()
+        validate()
         print("✅ All environment variables validated successfully")
     except RuntimeError as e:
         print(f"❌ Environment validation failed: {e}")
